@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- 白色齿轮设置图标（线条风格，居中，用于深色 UI 按钮） -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="70" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 8 个齿：绕中心 (512,512) 每 45° 一个 -->
+    <g>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(0 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(45 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(90 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(135 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(180 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(225 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(270 512 512)"/>
+      <rect x="467" y="72" width="90" height="160" rx="30" transform="rotate(315 512 512)"/>
+    </g>
+    <!-- 外环 -->
+    <circle cx="512" cy="512" r="300"/>
+    <!-- 中心孔 -->
+    <circle cx="512" cy="512" r="110"/>
+  </g>
+</svg>
