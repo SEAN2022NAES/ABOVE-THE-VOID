@@ -8,8 +8,8 @@ using UnityEngine;
 ///   Frozen —— 时间冻结：E 键仅暂停游戏时间（timeScale=0），移动 / 飞行状态不受 E 影响：
 ///             先前或之后按下 Q / F1 的飞行状态保持（不自动开启也不自动关闭，由玩家输入驱动），
 ///             无输入则静止；不弹出设置界面，再按 E 恢复；
-///   Paused —— 暂停：ESC 或右上角「设置」按钮触发，在任意模式下均生效，
-///             灵敏度滑块实时调整鼠标灵敏度。
+///   Paused —— 暂停：ESC 触发，在任意模式下均生效，
+///             暂停面板含灵敏度滑块、退出暂停与返回主页按钮。
 ///
 /// 采用「鼠标锁定 + 灵敏度可调」方案（而非围绕原点轨道相机）：
 ///   1) 满足「Main Camera 初始位置在原点 (0,0,0)」的硬性需求；
@@ -87,6 +87,7 @@ public class PlayerCameraController : MonoBehaviour
     private bool externalBlock;
 
     private SettingsPanelController settingsPanel;
+    private System.Action<float> onSensitivityChangedHandler;
 
     private void Awake()
     {
@@ -98,12 +99,14 @@ public class PlayerCameraController : MonoBehaviour
 
     private void Start()
     {
-        // 关联设置面板：灵敏度实时同步、暂停请求（右上角按钮）
+        // 关联设置面板：灵敏度实时同步、暂停请求、返回主页
         settingsPanel = FindObjectOfType<SettingsPanelController>();
         if (settingsPanel != null)
         {
-            settingsPanel.OnSensitivityChanged += value => MouseSensitivity = value;
+            onSensitivityChangedHandler = value => MouseSensitivity = value;
+            settingsPanel.OnSensitivityChanged += onSensitivityChangedHandler;
             settingsPanel.OnPauseRequested += TogglePause;
+            settingsPanel.OnReturnHomeRequested += ReturnToHome;
             settingsPanel.SetSensitivityWithoutNotify(mouseSensitivity);
         }
 
@@ -115,6 +118,17 @@ public class PlayerCameraController : MonoBehaviour
 
         Time.timeScale = 1f;
         SetCursorLocked(true);
+    }
+
+    private void OnDestroy()
+    {
+        if (settingsPanel != null)
+        {
+            if (onSensitivityChangedHandler != null)
+                settingsPanel.OnSensitivityChanged -= onSensitivityChangedHandler;
+            settingsPanel.OnPauseRequested -= TogglePause;
+            settingsPanel.OnReturnHomeRequested -= ReturnToHome;
+        }
     }
 
     private void Update()
@@ -346,6 +360,9 @@ public class PlayerCameraController : MonoBehaviour
 
     // ---------------- 工具 ----------------
 
+    /// <summary>玩家视角相机（激光发射的起点与方向使用）。</summary>
+    public Camera PlayerViewCamera => playerCamera;
+
     /// <summary>供 Bootstrap / 手动场景绑定相机。</summary>
     public void BindCamera(Camera cam)
     {
@@ -377,6 +394,38 @@ public class PlayerCameraController : MonoBehaviour
     {
         if (Mode != GameMode.Paused)
             Pause();
+    }
+
+    /// <summary>返回主页：交由主页控制器统一收尾（终止教学、清场、解除暂停回原点、主页接管输入）。</summary>
+    private void ReturnToHome()
+    {
+        MainMenuController menu = FindObjectOfType<MainMenuController>();
+        if (menu != null)
+            menu.ShowMenu();
+        else
+            Resume(); // 兜底：无主页时至少恢复游戏
+    }
+
+    /// <summary>重置到关卡开局状态（/level 跳转用）：恢复视角原点朝向、解除全部模态 / 冻结 / 暂停。</summary>
+    public void ResetToLevelStart()
+    {
+        externalBlock = false;
+        timeFrozen = false;
+        strictAxisMovement = false;
+        Mode = GameMode.Normal;
+        modeBeforePause = GameMode.Normal;
+        Time.timeScale = 1f;
+        yaw = 45f;
+        pitch = -35.264f;
+        if (playerCamera != null)
+        {
+            playerCamera.transform.position = origin;
+            playerCamera.transform.rotation = Quaternion.Euler(pitch, yaw, 0f);
+        }
+        if (settingsPanel != null)
+            settingsPanel.HidePanel();
+        SetCursorLocked(true);
+        Debug.Log("[PlayerCameraController] 已重置到关卡开局状态");
     }
 
     private void SetCursorLocked(bool locked)

@@ -3,9 +3,9 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
 /// <summary>
-/// 自动构建「设置 / 暂停」UI（纯代码，无需手工搭建 Canvas）：
-///   - 右上角「设置」按钮：点击后通过 OnPauseRequested 通知主控进入暂停；
-///   - 暂停面板：全屏遮罩 + 居中卡片，内含鼠标灵敏度滑块、键位说明、退出暂停按钮。
+/// 自动构建「暂停」UI（纯代码，无需手工搭建 Canvas）：
+///   - 暂停面板：全屏遮罩 + 居中卡片，内含鼠标灵敏度滑块、键位说明、退出暂停与返回主页按钮；
+///   - 暂停由 ESC（PlayerCameraController）触发，本组件负责展示面板与按钮事件。
 /// 与 PlayerCameraController 通过事件解耦，可独立挂载。
 /// </summary>
 public class SettingsPanelController : MonoBehaviour
@@ -13,8 +13,11 @@ public class SettingsPanelController : MonoBehaviour
     /// <summary>灵敏度变化事件（Slider 拖动时触发）。</summary>
     public event System.Action<float> OnSensitivityChanged;
 
-    /// <summary>暂停请求事件（右上角按钮 / 退出暂停按钮触发，主控负责切换状态）。</summary>
+    /// <summary>暂停请求事件（退出暂停按钮触发，主控负责切换状态）。</summary>
     public event System.Action OnPauseRequested;
+
+    /// <summary>返回主页请求事件（「返回主页」按钮触发，主控负责统一收尾）。</summary>
+    public event System.Action OnReturnHomeRequested;
 
     [Header("灵敏度范围")]
     public float minSensitivity = 0.5f;
@@ -63,23 +66,6 @@ public class SettingsPanelController : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
 
         gameObject.AddComponent<GraphicRaycaster>();
-
-        // ---- 右上角「设置」图标按钮 ----
-        RectTransform btnRt = CreateRect("SettingsButton", canvas.transform);
-        btnRt.anchorMin = new Vector2(1f, 1f);
-        btnRt.anchorMax = new Vector2(1f, 1f);
-        btnRt.pivot = new Vector2(1f, 1f);
-        btnRt.anchoredPosition = new Vector2(-24f, -24f);
-        btnRt.sizeDelta = new Vector2(64f, 64f);
-
-        Image btnImg = btnRt.gameObject.AddComponent<Image>();
-        Sprite settingsSprite = LoadSprite("Sprites/settings");
-        if (settingsSprite != null)
-            btnImg.sprite = settingsSprite;
-        btnImg.color = Color.white; // 图标图片自带白色，tint 保持原色
-        Button settingsButton = btnRt.gameObject.AddComponent<Button>();
-        settingsButton.targetGraphic = btnImg;
-        settingsButton.onClick.AddListener(() => OnPauseRequested?.Invoke());
 
         // ---- 暂停面板（全屏遮罩 + 居中卡片） ----
         pausePanel = CreateRect("PausePanel", canvas.transform).gameObject;
@@ -149,10 +135,14 @@ public class SettingsPanelController : MonoBehaviour
         help.alignment = TextAnchor.UpperLeft;
         help.horizontalOverflow = HorizontalWrapMode.Wrap;
 
-        // 退出暂停按钮
+        // 底部按钮：退出暂停 / 返回主页
         Button resumeBtn = CreateButton(card, "ResumeButton", "退出暂停", 22,
-            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 28f), new Vector2(220f, 54f));
+            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-95f, 28f), new Vector2(180f, 54f));
         resumeBtn.onClick.AddListener(() => OnPauseRequested?.Invoke());
+
+        Button homeBtn = CreateButton(card, "ReturnHomeButton", "返回主页", 22,
+            new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(95f, 28f), new Vector2(180f, 54f));
+        homeBtn.onClick.AddListener(() => OnReturnHomeRequested?.Invoke());
     }
 
     // ---------------- 对外接口 ----------------
@@ -188,19 +178,6 @@ public class SettingsPanelController : MonoBehaviour
 
     private Canvas canvas;
 
-    /// <summary>优先按 Sprite 加载，失败则用 Texture2D 动态创建 Sprite（兼容图片默认导入类型）。</summary>
-    private Sprite LoadSprite(string path)
-    {
-        Sprite s = Resources.Load<Sprite>(path);
-        if (s != null)
-            return s;
-
-        Texture2D tex = Resources.Load<Texture2D>(path);
-        if (tex == null)
-            return null;
-        return Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f));
-    }
-
     private RectTransform CreateRect(string name, Transform parent)
     {
         GameObject go = new GameObject(name, typeof(RectTransform));
@@ -219,10 +196,7 @@ public class SettingsPanelController : MonoBehaviour
         t.horizontalOverflow = HorizontalWrapMode.Overflow;
         t.verticalOverflow = VerticalWrapMode.Overflow;
 
-        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        if (font == null)
-            font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        t.font = font;
+        t.font = UIFontHelper.LoadForText(content, fontSize); // v0.1.1：按内容自动选字体（中文微软雅黑 / 英文 Consolas）
         return t;
     }
 

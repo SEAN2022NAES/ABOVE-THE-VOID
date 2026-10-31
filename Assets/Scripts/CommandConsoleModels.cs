@@ -11,9 +11,7 @@ public enum CommandType
 {
     Unknown,     // 无法识别的指令
     Help,        // help / 帮助
-    Laser,       // laser / 发射激光（占位预留）
-    Teleport,    // tp / teleport / 传送（占位预留）
-    TimeScale    // timescale / 时间流速（占位预留）
+    Level        // /level <关卡> <部分>：跳转开发者关卡指令
 }
 
 /// <summary>解析后的指令数据（结构体：指令类型 + 原始文本 + 参数列表）。</summary>
@@ -62,18 +60,10 @@ public static class CommandParser
             case "帮助":
                 type = CommandType.Help;
                 break;
-            case "laser":
-            case "发射激光":
-                type = CommandType.Laser;
-                break;
-            case "tp":
-            case "teleport":
-            case "传送":
-                type = CommandType.Teleport;
-                break;
-            case "timescale":
-            case "时间流速":
-                type = CommandType.TimeScale;
+            case "/level":
+            case "level":
+            case "关卡":
+                type = CommandType.Level;
                 break;
             default:
                 type = CommandType.Unknown;

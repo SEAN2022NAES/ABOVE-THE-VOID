@@ -21,6 +21,8 @@ public class GameBootstrap : MonoBehaviour
     public bool createTimeHint = true;
     public bool createCommandConsole = true;
     public bool createFlyingBlocks = true;
+    public bool createMainMenu = true;
+    public bool createTutorial = true;
 
     private void Awake()
     {
@@ -90,7 +92,7 @@ public class GameBootstrap : MonoBehaviour
             time.AddComponent<TimeHintController>();
         }
 
-        // 8. Enter 指令框（代码式指令解析，预留 Laser 分支）
+        // 8. ` 开发者指令框（/level 关卡跳转指令 + help）
         if (createCommandConsole && FindObjectOfType<CommandConsoleController>() == null)
         {
             GameObject console = new GameObject("UI_CommandConsole");
@@ -103,6 +105,20 @@ public class GameBootstrap : MonoBehaviour
             GameObject blocks = new GameObject("FlyingBlockSystem");
             blocks.AddComponent<FlyingBlockSpawner>();
             blocks.AddComponent<BlockHitIndicator>();
+        }
+
+        // 10. 主页（主菜单）：展示主题、项目目的与作者，关卡1进入游戏
+        if (createMainMenu && FindObjectOfType<MainMenuController>() == null)
+        {
+            GameObject menu = new GameObject("UI_MainMenu");
+            menu.AddComponent<MainMenuController>();
+        }
+
+        // 11. 关卡1-1 引导教学（进入关卡后接管：先不生成方块，逐步引导操作与机制）
+        if (createTutorial && FindObjectOfType<TutorialController>() == null)
+        {
+            GameObject tutorial = new GameObject("UI_Tutorial");
+            tutorial.AddComponent<TutorialController>();
         }
     }
 }

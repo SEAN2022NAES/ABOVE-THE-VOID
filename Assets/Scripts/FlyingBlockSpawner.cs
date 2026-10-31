@@ -39,6 +39,12 @@ public class FlyingBlockSpawner : MonoBehaviour
     /// <summary>所有活跃长方体（生成器与检测器共用登记表）。</summary>
     public readonly List<FlyingBlock> ActiveBlocks = new List<FlyingBlock>();
 
+    /// <summary>是否允许生成：主页显示期间为 false，点击关卡后由 BeginSpawning 开启。</summary>
+    public bool spawningEnabled = true;
+
+    /// <summary>玩家激光消灭的方块总数（受击吃光死亡计 1；教学 / 统计用）。</summary>
+    public int PlayerKills { get; private set; }
+
     private float timer;
     private int nextBlockId = 1;
 
@@ -55,6 +61,8 @@ public class FlyingBlockSpawner : MonoBehaviour
 
     private void Update()
     {
+        if (!spawningEnabled)
+            return; // 主页显示期间不生成任何长方体
         timer += Time.deltaTime;
         if (timer >= spawnInterval)
         {
@@ -75,6 +83,49 @@ public class FlyingBlockSpawner : MonoBehaviour
     {
         if (block != null)
             ActiveBlocks.Remove(block);
+    }
+
+    /// <summary>主页接管：暂停生成（保留当前 timer）。</summary>
+    public void SuspendSpawning()
+    {
+        spawningEnabled = false;
+    }
+
+    /// <summary>清空场上所有活跃长方体（关卡跳转 / 重置用）。</summary>
+    public void ClearAllBlocks()
+    {
+        for (int i = ActiveBlocks.Count - 1; i >= 0; i--)
+        {
+            FlyingBlock block = ActiveBlocks[i];
+            if (block != null && block.gameObject != null)
+                Destroy(block.gameObject);
+        }
+        ActiveBlocks.Clear();
+    }
+
+    /// <summary>点击关卡后开始生成：重置开局缓冲（进游戏前 startDelay 秒不生成）。</summary>
+    public void BeginSpawning()
+    {
+        BeginSpawning(startDelay);
+    }
+
+    /// <summary>开始生成并指定缓冲时长（教学 / 特殊关卡可缩短等待）。</summary>
+    public void BeginSpawning(float delay)
+    {
+        spawningEnabled = true;
+        timer = -Mathf.Max(0f, delay);
+    }
+
+    /// <summary>玩家激光消灭计数：由 FlyingBlock 受击吃光死亡时调用。</summary>
+    public void RegisterPlayerKill()
+    {
+        PlayerKills++;
+    }
+
+    /// <summary>清零消灭计数（教学 / 关卡重开时调用）。</summary>
+    public void ResetPlayerKills()
+    {
+        PlayerKills = 0;
     }
 
     /// <summary>目标 AABB 是否与除 ignore 外的任意活跃长方体重叠（生成与运动防重叠共用）。</summary>
@@ -122,6 +173,23 @@ public class FlyingBlockSpawner : MonoBehaviour
             return block;
         }
         return null; // 空间不足时放弃本次生成
+    }
+
+    /// <summary>
+    /// 受击后创建剩余子块：保留源块类型、移动方向与原编号（击打过后编号不变），
+    /// 新尺寸/新中心由切割计算给出，并继承源块初始尺寸与受击次数（形态阶段连续），
+    /// 注册进全局登记表（受数量上限约束，超限返回 null）。
+    /// </summary>
+    public FlyingBlock CreateRemnant(FlyingBlock source, FlyingBlock.BlockType type, Vector3 newSize, Vector3 newCenter, Vector3 dir, float moveSpeed, Vector3 originSize, int hitCount)
+    {
+        if (ActiveBlocks.Count >= maxBlocks)
+            return null;
+        int blockId = source != null ? source.BlockId : nextBlockId; // 子块沿用源块编号，HUD 编号不随击打变化
+        GameObject go = new GameObject("FlyingBlock_" + blockId, typeof(FlyingBlock));
+        FlyingBlock block = go.GetComponent<FlyingBlock>();
+        block.InitRemnant(type, newSize, newCenter, moveSpeed, blockId, dir, originSize, hitCount);
+        ActiveBlocks.Add(block);
+        return block;
     }
 
     /// <summary>随机浮点边长：每边 ≥ minSide，三边和 ≤ 3（按三边和 [2, 3] 随机分配）。</summary>

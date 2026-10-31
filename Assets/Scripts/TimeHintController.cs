@@ -46,6 +46,13 @@ public class TimeHintController : MonoBehaviour
             : t.ToString(@"mm\:ss");
     }
 
+    /// <summary>控制时间提示显示 / 隐藏（Level 1 Part 1 隐藏；保留实现供后续关卡使用）。</summary>
+    public void SetVisible(bool visible)
+    {
+        if (canvas != null)
+            canvas.enabled = visible;
+    }
+
     // ---------------- UI 构建 ----------------
 
     private void BuildUI()

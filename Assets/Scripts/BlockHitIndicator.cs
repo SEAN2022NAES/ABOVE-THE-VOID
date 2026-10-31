@@ -47,6 +47,7 @@ public class BlockHitIndicator : MonoBehaviour
         {
             Vector3 c = current.GeometryCenter;
             infoText.text = "#" + current.BlockId + " " + FlyingBlock.GetTypeText(current.Type) +
+                            "   HP: " + current.RemainingHits + "/" + current.maxHits +
                             "   Center: (" + c.x.ToString("F2") + ", " + c.y.ToString("F2") + ", " + c.z.ToString("F2") + ")";
         }
         else
@@ -60,6 +61,7 @@ public class BlockHitIndicator : MonoBehaviour
         {
             Vector3 c = inside.GeometryCenter;
             insideText.text = "YOU ARE INSIDE A BLOCK  #" + inside.BlockId + " " + FlyingBlock.GetTypeText(inside.Type) +
+                              "  HP: " + inside.RemainingHits + "/" + inside.maxHits +
                               "  Size: " + inside.size.x.ToString("F1") + "x" + inside.size.y.ToString("F1") + "x" + inside.size.z.ToString("F1") +
                               "  Center: (" + c.x.ToString("F2") + ", " + c.y.ToString("F2") + ", " + c.z.ToString("F2") + ")";
         }
@@ -147,6 +149,9 @@ public class BlockHitIndicator : MonoBehaviour
         infoText.alignment = TextAnchor.MiddleCenter;
         infoText.supportRichText = false;
         infoText.raycastTarget = false;
+        // 单行完整显示：禁止换行与垂直截断，避免末尾 Center 的 Z 坐标被吞掉
+        infoText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        infoText.verticalOverflow = VerticalWrapMode.Overflow;
 
         // 黑色描边增强对比：深色/浅色背景上均清晰可读（等效反色效果）
         Outline outline = go.AddComponent<Outline>();
@@ -161,7 +166,7 @@ public class BlockHitIndicator : MonoBehaviour
         irt.anchorMax = new Vector2(0.5f, 0.5f);
         irt.pivot = new Vector2(0.5f, 0.5f);
         irt.anchoredPosition = new Vector2(0f, 240f);
-        irt.sizeDelta = new Vector2(1600f, 64f);
+        irt.sizeDelta = new Vector2(1900f, 64f);
 
         insideText = insideGo.AddComponent<Text>();
         insideText.font = UIFontHelper.LoadMono();

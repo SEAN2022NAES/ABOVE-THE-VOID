@@ -1,13 +1,14 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
 /// <summary>
-/// 指令框（Command Console）：
-///   - 按 Enter 打开 / 再按 Enter 关闭（输入框聚焦时 Enter 用于提交），ESC 关闭；
-///   - 可识别「代码式指令」：基于 CommandType 枚举 + CommandData 结构体 +
-///     CommandParser 解析器的分支结构，已预留 Laser（发射激光）、Teleport、
-///     TimeScale 的解析分支与占位执行函数；
+/// 开发者指令框（Dev Console）：
+///   - 按 `（BackQuote）键打开 / 再按 ` 关闭，ESC 关闭（输入框聚焦时 Enter 用于提交）；
+///   - 识别「开发者指令」：/level &lt;关卡&gt; &lt;部分&gt; 跳转关卡分区（当前已实现 level 1 - part 1），
+///     help 查看可用指令；原 laser / tp / timescale 等玩家指令已全部移除；
 ///   - 打开时：Time.timeScale = 0、释放鼠标，并通过
 ///     PlayerCameraController.SetExternalBlock(true) 占用视角输入；
 ///     关闭时恢复 timeScale = 1、锁定鼠标并解除占用。
@@ -15,9 +16,12 @@ using UnityEngine.EventSystems;
 /// </summary>
 public class CommandConsoleController : MonoBehaviour
 {
+    /// <summary>激光发射事件（教学 / 自动化脚本监听用，鼠标左键与代码开火都会触发）。</summary>
+    public static event System.Action OnLaserFired;
+
     [Header("按键")]
-    [Tooltip("打开 / 切换指令框")]
-    public KeyCode openKey = KeyCode.Return;
+    [Tooltip("打开 / 切换指令框（` 键）")]
+    public KeyCode openKey = KeyCode.BackQuote;
     [Tooltip("关闭指令框")]
     public KeyCode closeKey = KeyCode.Escape;
 
@@ -35,6 +39,16 @@ public class CommandConsoleController : MonoBehaviour
     [Tooltip("输出文字颜色")]
     public Color outputColor = new Color(0.85f, 0.95f, 1f, 1f);
 
+    [Header("激光")]
+    [Tooltip("激光半径（粗细），代码/指令参数可控制")]
+    public float laserRadius = 0.15f;
+    [Tooltip("激光最大射程（单位）")]
+    public float laserMaxLength = 60f;
+    [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）")]
+    public float laserVisualDuration = 0.9f;
+    [Tooltip("激光视觉颜色")]
+    public Color laserColor = new Color(0.3f, 1f, 1f, 0.9f);
+
     private Canvas canvas;
     private GameObject consoleRoot;
     private InputField inputField;
@@ -47,6 +61,10 @@ public class CommandConsoleController : MonoBehaviour
 
     /// <summary>指令框当前是否打开。</summary>
     public bool IsOpen => consoleRoot != null && consoleRoot.activeSelf;
+
+    /// <summary>玩家视角相机（自动化脚本取射线起点用）。</summary>
+    public Camera PlayerViewCamera
+        => playerController != null ? playerController.PlayerViewCamera : Camera.main;
 
     private void Awake()
     {
@@ -66,9 +84,11 @@ public class CommandConsoleController : MonoBehaviour
         {
             if (IsOpen)
             {
-                // 输入框聚焦时 Enter 用于提交指令，不关闭；未聚焦时再按 Enter 关闭
-                if (!IsInputFocused())
-                    Close();
+                // 打开状态下按 ` 键直接关闭；若 InputField 已捕获到反引号字符则先剔除
+                if (IsInputFocused() && !string.IsNullOrEmpty(inputField.text) &&
+                    inputField.text.EndsWith("`", System.StringComparison.Ordinal))
+                    inputField.text = inputField.text.Substring(0, inputField.text.Length - 1);
+                Close();
             }
             else
             {
@@ -79,6 +99,16 @@ public class CommandConsoleController : MonoBehaviour
 
         if (IsOpen && Input.GetKeyDown(closeKey))
             Close();
+
+        // 鼠标左键发射激光：指令框关闭、未被外部模态占用（如主页）、且非暂停状态时有效
+        if (!IsOpen && Input.GetMouseButtonDown(0))
+        {
+            bool blocked = playerController != null && playerController.ExternalBlock;
+            bool paused = playerController != null &&
+                playerController.Mode == PlayerCameraController.GameMode.Paused;
+            if (!blocked && !paused)
+                FireLaser(laserRadius, false);
+        }
     }
 
     // ---------------- 开关逻辑（与 PlayerCameraController 联动） ----------------
@@ -105,7 +135,7 @@ public class CommandConsoleController : MonoBehaviour
         Time.timeScale = 0f;
         SetCursorLocked(false);
 
-        AppendOutput("指令框已打开。输入 help 查看可用指令，Enter 提交，ESC 关闭。");
+        AppendOutput("开发者指令框已打开。输入 help 查看可用指令，Enter 提交，ESC 或 ` 关闭。");
         Debug.Log("[CommandConsole] 指令框打开");
     }
 
@@ -174,14 +204,8 @@ public class CommandConsoleController : MonoBehaviour
             case CommandType.Help:
                 ExecuteHelp();
                 break;
-            case CommandType.Laser:
-                ExecuteLaser(cmd);
-                break;
-            case CommandType.Teleport:
-                ExecuteTeleport(cmd);
-                break;
-            case CommandType.TimeScale:
-                ExecuteTimeScale(cmd);
+            case CommandType.Level:
+                ExecuteLevel(cmd);
                 break;
             default:
                 AppendOutput("未知指令：" + cmd.Raw + "（输入 help 查看可用指令）");
@@ -192,39 +216,212 @@ public class CommandConsoleController : MonoBehaviour
     private void ExecuteHelp()
     {
         AppendOutput(
-            "可用指令：\n" +
-            "  help            - 显示帮助\n" +
-            "  laser [参数]    - 发射激光（占位预留）\n" +
-            "  tp <x> <y> <z>  - 传送（占位预留）\n" +
-            "  timescale <值>  - 时间流速（占位预留）");
+            "开发者指令：\n" +
+            "  /level <关卡> <部分>  - 跳转到指定关卡分区（如 /level 1 1）\n" +
+            "  help                - 显示帮助");
     }
 
     /// <summary>
-    /// 发射激光（占位预留）：当前仅打印日志 / 反馈，接口已固定，后续在此填充
-    /// 激光射线生成、伤害判定、特效等真实逻辑。
+    /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt;：跳转到指定关卡的分区。
+    /// 当前已实现 level 1 - part 1（回到本部分开头）；其余分区提示未开放。
     /// </summary>
-    private void ExecuteLaser(CommandData cmd)
+    private void ExecuteLevel(CommandData cmd)
     {
-        string argDesc = cmd.Args.Length > 0 ? string.Join(" ", cmd.Args) : "无";
-        AppendOutput("[占位] laser 指令已识别：发射激光（尚未实现，预留扩展点）。参数：" + argDesc);
-        Debug.Log("[CommandConsole] 发射激光（占位）被调用，参数：" + argDesc);
+        if (cmd.Args.Length < 2 ||
+            !int.TryParse(cmd.Args[0], out int level) ||
+            !int.TryParse(cmd.Args[1], out int part))
+        {
+            AppendOutput("[level] 用法：/level <关卡> <部分>，如 /level 1 1");
+            return;
+        }
+
+        string message = LevelDirector.JumpTo(level, part);
+        AppendOutput(message);
+        if (message.Contains("已跳转"))
+            CloseAndForceResume(); // 跳转成功后关闭指令框，回到正常游戏状态
     }
 
-    /// <summary>传送（占位预留）。</summary>
-    private void ExecuteTeleport(CommandData cmd)
+    /// <summary>强制关闭指令框并恢复正常游戏状态（关卡跳转后调用，忽略打开前的暂停 / 冻结状态）。</summary>
+    public void CloseAndForceResume()
     {
-        AppendOutput("[占位] tp 指令已识别：传送（尚未实现，预留扩展点）。参数：" +
-                     (cmd.Args.Length > 0 ? string.Join(" ", cmd.Args) : "无"));
-        Debug.Log("[CommandConsole] tp（占位）被调用，参数：" + string.Join(" ", cmd.Args));
+        wasPausedBeforeOpen = false;
+        wasFrozenBeforeOpen = false;
+        Close();
     }
 
-    /// <summary>时间流速（占位预留）。</summary>
-    private void ExecuteTimeScale(CommandData cmd)
+    /// <summary>
+    /// 从玩家视角相机位置沿准心方向发射激光（鼠标左键与 laser 指令共用）。
+    /// 命中路径上的所有长方体：每个被击中的块从入射侧沿激光主导轴吃掉一层厚度
+    /// （每层 = 初始尺寸的 1/4），剩余部分保留为子块继续飞行；累计 4 次被吃光即死亡。
+    /// 激光本体为受控的圆柱视觉，短暂显示后消失。
+    /// </summary>
+    public void FireLaser(float radius, bool reportToConsole)
     {
-        AppendOutput("[占位] timescale 指令已识别：调整时间流速（尚未实现，预留扩展点）。参数：" +
-                     (cmd.Args.Length > 0 ? string.Join(" ", cmd.Args) : "无"));
-        Debug.Log("[CommandConsole] timescale（占位）被调用，参数：" + string.Join(" ", cmd.Args));
+        OnLaserFired?.Invoke(); // 教学引导：记录玩家发射激光
+
+        Camera cam = playerController != null ? playerController.PlayerViewCamera : Camera.main;
+        if (cam == null)
+        {
+            if (reportToConsole)
+                AppendOutput("[laser] 未找到玩家视角相机，无法发射。");
+            return;
+        }
+
+        Vector3 origin = cam.transform.position;
+        Vector3 dir = cam.transform.forward;
+
+        // 收集路径上所有命中（含子物体 collider，取所属 FlyingBlock 去重）
+        RaycastHit[] hits = Physics.RaycastAll(origin, dir, laserMaxLength);
+        HashSet<FlyingBlock> hitBlocks = new HashSet<FlyingBlock>();
+        float nearestT = laserMaxLength;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            FlyingBlock block = hits[i].collider != null
+                ? hits[i].collider.GetComponentInParent<FlyingBlock>()
+                : null;
+            if (block != null && !block.Destroyed)
+            {
+                hitBlocks.Add(block);
+                if (hits[i].distance < nearestT)
+                    nearestT = hits[i].distance;
+            }
+        }
+
+        // 逐个命中：每个块从入射侧吃掉一层厚度（受击四阶段），第 4 层吃光即死亡
+        int hitCount = 0;
+        int deathCount = 0;
+        foreach (FlyingBlock block in hitBlocks)
+        {
+            List<FlyingBlock> remnants = block.CutByLaser(origin, dir, radius);
+            if (remnants != null)
+            {
+                hitCount++;
+                if (remnants.Count == 0)
+                    deathCount++; // 被吃光死亡（无剩余子块）
+            }
+        }
+
+        // 激光视觉：从发射点到最近命中点（未命中则打满射程）；命中时在端点额外显示火花特效
+        Vector3 endPoint = origin + dir * nearestT;
+        SpawnLaserVisual(origin, endPoint, radius, hitBlocks.Count > 0);
+
+        if (reportToConsole)
+            AppendOutput("[laser] 半径=" + radius.ToString("F2") + "，命中 " + hitCount + " 个长方体，吃掉 " + hitCount + " 层厚度，其中 " + deathCount + " 个被打满4层死亡。");
+        Debug.Log("[CommandConsole] 发射激光：radius=" + radius + " hits=" + hitBlocks.Count + " deaths=" + deathCount);
     }
+
+    /// <summary>
+    /// 生成激光视觉（特效版）：双层圆柱（外层低透明度光晕 + 内芯高亮光束），
+    /// 命中时在端点额外生成发光火花小球；整体保留 laserVisualDuration 秒后淡出并销毁
+    /// （用不受时间冻结影响的真实时间）。
+    /// </summary>
+    private void SpawnLaserVisual(Vector3 origin, Vector3 end, float radius, bool impact)
+    {
+        Vector3 delta = end - origin;
+        float length = delta.magnitude;
+        if (length < 0.01f)
+            return;
+
+        Vector3 center = (origin + end) * 0.5f;
+        Vector3 dir = delta / length;
+        Quaternion rot = Quaternion.FromToRotation(Vector3.up, dir);
+
+        // 外层光晕圆柱：半径 3 倍、低透明度，营造光束辉光
+        GameObject haloGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        haloGo.name = "LaserVisual_Halo";
+        haloGo.transform.position = center;
+        haloGo.transform.rotation = rot;
+        haloGo.transform.localScale = new Vector3(radius * 6f, length * 0.5f, radius * 6f);
+        DisableLaserCollider(haloGo);
+        Material haloMat = CreateLaserMaterial(new Color(laserColor.r, laserColor.g, laserColor.b, 0.22f));
+        haloGo.GetComponent<MeshRenderer>().sharedMaterial = haloMat;
+
+        // 内芯圆柱：半径 1 倍、高亮，实际"激光"本体
+        GameObject coreGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        coreGo.name = "LaserVisual_Core";
+        coreGo.transform.position = center;
+        coreGo.transform.rotation = rot;
+        coreGo.transform.localScale = new Vector3(radius * 2f, length * 0.5f, radius * 2f);
+        DisableLaserCollider(coreGo);
+        Material coreMat = CreateLaserMaterial(laserColor);
+        coreGo.GetComponent<MeshRenderer>().sharedMaterial = coreMat;
+
+        // 命中点特效：发光小球（偏暖色火花），随淡出一起缩小消失
+        GameObject impactGo = null;
+        Material impactMat = null;
+        if (impact)
+        {
+            impactGo = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            impactGo.name = "LaserImpact";
+            impactGo.transform.position = end;
+            impactGo.transform.localScale = Vector3.one * radius * 3f;
+            DisableLaserCollider(impactGo);
+            impactMat = CreateLaserMaterial(new Color(1f, 0.85f, 0.35f, 0.95f));
+            impactGo.GetComponent<MeshRenderer>().sharedMaterial = impactMat;
+        }
+
+        StartCoroutine(DestroyLaserVisual(coreGo, haloGo, impactGo, coreMat, haloMat, impactMat));
+    }
+
+    /// <summary>禁用并移除激光视觉物体的 Collider，避免干扰后续射线检测。</summary>
+    private void DisableLaserCollider(GameObject go)
+    {
+        Collider c = go.GetComponent<Collider>();
+        if (c != null)
+        {
+            c.enabled = false;
+            Destroy(c);
+        }
+    }
+
+    /// <summary>创建激光特效材质（Sprites/Default 半透明叠加，缺失时退回 Unlit/Color）。</summary>
+    private Material CreateLaserMaterial(Color color)
+    {
+        Shader shader = Shader.Find("Sprites/Default");
+        if (shader == null)
+            shader = Shader.Find("Unlit/Color");
+        Material mat = new Material(shader);
+        mat.color = color;
+        return mat;
+    }
+
+    /// <summary>
+    /// 激光视觉存活协程：前 40% 时长保持全亮，后 60% 时长线性淡出（真实时间，不受 timeScale=0 冻结影响），
+    /// 命中火花同步缩小；结束后销毁全部视觉物体。
+    /// </summary>
+    private IEnumerator DestroyLaserVisual(GameObject core, GameObject halo, GameObject impact, Material coreMat, Material haloMat, Material impactMat)
+    {
+        float t = 0f;
+        float dur = Mathf.Max(0.05f, laserVisualDuration);
+        Vector3 impactScale = impact != null ? impact.transform.localScale : Vector3.one;
+        while (t < dur)
+        {
+            t += Time.unscaledDeltaTime;
+            float k = Mathf.Clamp01(t / dur);
+            // 前 40% 全亮，后 60% 从 1 线性降到 0
+            float fade = k < 0.4f ? 1f : Mathf.Clamp01(1f - (k - 0.4f) / 0.6f);
+
+            if (coreMat != null) coreMat.color = FadeLaserAlpha(laserColor, fade);
+            if (haloMat != null) haloMat.color = FadeLaserAlpha(haloMat.color, 0.22f * fade);
+            if (impactMat != null) impactMat.color = FadeLaserAlpha(impactMat.color, fade);
+            if (impact != null)
+                impact.transform.localScale = impactScale * Mathf.Lerp(1f, 0.15f, k);
+
+            yield return null;
+        }
+
+        if (core != null) Destroy(core);
+        if (halo != null) Destroy(halo);
+        if (impact != null) Destroy(impact);
+    }
+
+    /// <summary>按给定 alpha 覆盖颜色透明度（保留 RGB）。</summary>
+    private static Color FadeLaserAlpha(Color c, float alpha)
+    {
+        c.a = alpha;
+        return c;
+    }
+
 
     private void AppendOutput(string line)
     {
@@ -238,6 +435,9 @@ public class CommandConsoleController : MonoBehaviour
         // 简单长度保护：过长时丢弃最早的一半
         if (outputText.text.Length > 2000)
             outputText.text = "[日志已截断]\n" + outputText.text.Substring(outputText.text.Length / 2);
+
+        // v0.1.1：输出内容中英混合，按内容同步刷新字体（中文 → 微软雅黑，英文/数字 → Consolas）
+        outputText.font = UIFontHelper.LoadForText(outputText.text, outputText.fontSize);
     }
 
     // ---------------- UI 构建 ----------------
@@ -271,7 +471,7 @@ public class CommandConsoleController : MonoBehaviour
         panelImg.color = panelColor;
 
         // ---- 标题 ----
-        Text title = CreateText("Title", panelRt, "指令框 (Command Console)  -  Enter 提交 / ESC 关闭", titleFontSize, Color.white, TextAnchor.MiddleLeft);
+        Text title = CreateText("Title", panelRt, "开发者指令框 (Dev Console)  -  ` 开关 / Enter 提交 / ESC 关闭", titleFontSize, Color.white, TextAnchor.MiddleLeft);
         RectTransform titleRt = title.rectTransform;
         titleRt.anchorMin = new Vector2(0f, 1f);
         titleRt.anchorMax = new Vector2(1f, 1f);
@@ -310,13 +510,13 @@ public class CommandConsoleController : MonoBehaviour
         Text inputText = CreateText("Text", inputRt, "", inputFontSize, Color.white, TextAnchor.MiddleLeft);
         Stretch(inputText.rectTransform);
         inputText.supportRichText = false;
-        inputText.font = UIFontHelper.LoadMono();
+        inputText.font = UIFontHelper.LoadForText(inputText.text, inputText.fontSize); // v0.1.1：输入英文指令 → Consolas
         input.textComponent = inputText;
 
-        Text placeholder = CreateText("Placeholder", inputRt, "输入指令，如 laser / tp 0 0 0 / help", inputFontSize, new Color(0.6f, 0.6f, 0.6f, 1f), TextAnchor.MiddleLeft);
+        Text placeholder = CreateText("Placeholder", inputRt, "输入开发者指令，如 /level 1 1 / help", inputFontSize, new Color(0.6f, 0.6f, 0.6f, 1f), TextAnchor.MiddleLeft);
         Stretch(placeholder.rectTransform);
         placeholder.supportRichText = false;
-        placeholder.font = UIFontHelper.LoadMono();
+        placeholder.font = UIFontHelper.LoadForText(placeholder.text, placeholder.fontSize); // v0.1.1：占位含中文 → 微软雅黑
         input.placeholder = placeholder;
 
         input.lineType = InputField.LineType.SingleLine;
@@ -347,7 +547,7 @@ public class CommandConsoleController : MonoBehaviour
         text.fontSize = fontSizeValue;
         text.color = color;
         text.alignment = anchor;
-        text.font = UIFontHelper.LoadDefault();
+        text.font = UIFontHelper.LoadForText(content, fontSizeValue); // v0.1.1：按内容自动选字体（中文微软雅黑 / 英文 Consolas）
         text.raycastTarget = false;
         return text;
     }

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -10,7 +11,8 @@ using UnityEngine;
 ///   - 高亮：准心指向时整体变亮、线框加粗，并在几何中心显示高亮原点标记；
 ///   - 行进面：长方体使用 6-submesh 单位立方体网格，行进方向对应的面渲染为白色；
 ///   - 中心标记：从白色面一侧查看时中心点渲染为黑色，其余角度为白色；
-///   - 激光预留：外部可通过 ApplyLaserHit / DestroyBlock 接口受控销毁，生命周期不写死。
+///   - 受击四阶段：每个块沿攻击方向分 4 层厚度（每层 = 初始尺寸的 1/4），每次激光命中从入射侧
+///     吃掉一层，剩余部分保留为子块继续飞行；累计 4 次被吃光即死亡。受击阶段颜色逐档变暗。
 /// </summary>
 public class FlyingBlock : MonoBehaviour
 {
@@ -30,8 +32,18 @@ public class FlyingBlock : MonoBehaviour
     [Tooltip("防重叠检测允许的最小间距")]
     public float overlapMargin = 0.05f;
 
+    [Header("受击阶段")]
+    [Tooltip("受击总层数：每层 = 初始尺寸沿攻击方向的 1/4，累计打满即死亡")]
+    public int maxHits = 4;
+
     /// <summary>类型。</summary>
     public BlockType Type { get; private set; }
+
+    /// <summary>累计受击次数（形态阶段：0=完整，1~3=被吃掉对应层数，≥maxHits 死亡）。</summary>
+    public int HitCount { get; private set; }
+
+    /// <summary>剩余血量（剩余层数）：maxHits - HitCount，供 HUD 显示。</summary>
+    public int RemainingHits => Mathf.Max(0, maxHits - HitCount);
 
     /// <summary>几何中心（世界坐标，长方体不旋转时即 transform.position）。</summary>
     public Vector3 GeometryCenter => colliderRef != null ? colliderRef.bounds.center : transform.position;
@@ -57,6 +69,7 @@ public class FlyingBlock : MonoBehaviour
     private Material edgeMaterial;
     private BoxCollider colliderRef;
     private Vector3 moveDir = Vector3.zero;
+    private Vector3 initialSize; // 生成时的初始尺寸，用于固定每层厚度（与受击后的当前尺寸无关）
     private bool highlighted;
 
     /// <summary>初始化（由生成器调用）。</summary>
@@ -68,9 +81,26 @@ public class FlyingBlock : MonoBehaviour
             Mathf.Max(blockSize.x, 0.4f),
             Mathf.Max(blockSize.y, 0.4f),
             Mathf.Max(blockSize.z, 0.4f)); // 每边保底下限，三边和 ≤ 3 由生成器保证
+        initialSize = size; // 记录初始尺寸，受击每层厚度固定为初始尺寸的 1/maxHits
         speed = moveSpeed;
         transform.position = position;
         // 只沿单个轴方向移动：dir 由生成器按生成轴给出（其余轴为 0）
+        moveDir = dir.sqrMagnitude > 0.0001f ? dir.normalized : (Vector3.zero - position).normalized;
+
+        BuildVisual();
+        ReapplyColor();
+    }
+
+    /// <summary>受击剩余子块专用初始化：尺寸使用切割计算的精确值，不做每边 ≥0.4 的保底；继承源块初始尺寸与受击次数（形态阶段连续）。</summary>
+    public void InitRemnant(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir, Vector3 originSize, int hitCount)
+    {
+        Type = type;
+        BlockId = blockId;
+        size = blockSize; // 不 clamp：激光切割出的精确剩余尺寸
+        initialSize = originSize; // 继承源块初始尺寸：后续受击每层厚度仍按初始尺寸的 1/maxHits 计算
+        HitCount = hitCount;
+        speed = moveSpeed;
+        transform.position = position;
         moveDir = dir.sqrMagnitude > 0.0001f ? dir.normalized : (Vector3.zero - position).normalized;
 
         BuildVisual();
@@ -84,13 +114,112 @@ public class FlyingBlock : MonoBehaviour
             moveDir = dir.normalized;
     }
 
-    // ---------------- 对外接口（激光预留） ----------------
+    // ---------------- 对外接口（激光） ----------------
 
-    /// <summary>激光命中占位：后续可扩展血量/分层击穿，当前直接受控销毁。</summary>
-    public void ApplyLaserHit(float damage = 1f)
+    /// <summary>
+    /// 激光命中（受击四阶段）：射线沿 laserDir 从 laserOrigin 发射并命中本块时，
+    /// 从入射侧沿激光主导轴吃掉一层厚度（每层 = 初始尺寸沿该轴的 1/maxHits，固定不变）。
+    /// 剩余部分保留为一个子块继续飞行，形态阶段（HitCount）连续累计；
+    /// 累计 maxHits 次受击后整块被吃光，直接死亡销毁。
+    /// 返回剩余子块列表（空 = 本块被吃光死亡）；未命中返回 null。
+    /// </summary>
+    public List<FlyingBlock> CutByLaser(Vector3 laserOrigin, Vector3 laserDir, float laserRadius)
     {
-        // TODO: 接入激光系统后按 damage 累计血量，穿透到下一层后再销毁。
-        DestroyBlock("laser_hit");
+        if (Destroyed)
+            return null;
+
+        Vector3 rayDir = laserDir.sqrMagnitude > 0.0001f ? laserDir.normalized : Vector3.forward;
+        Vector3 half = HalfExtents;
+        Vector3 center = transform.position;
+        if (!RayIntersectsAabb(laserOrigin, rayDir, center - half, center + half, out float tNear, out float tFar))
+            return null;
+
+        // 切割主导轴：激光方向的最大分量轴（与白面主导轴规则一致）
+        float ax = Mathf.Abs(rayDir.x), ay = Mathf.Abs(rayDir.y), az = Mathf.Abs(rayDir.z);
+        int cutAxis = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
+
+        // 受击计数：第 maxHits 次受击整块被吃光，直接死亡
+        HitCount++;
+        if (HitCount >= maxHits)
+        {
+            FlyingBlockSpawner killerSpawner = FlyingBlockSpawner.Instance;
+            if (killerSpawner != null)
+                killerSpawner.RegisterPlayerKill(); // 玩家激光消灭计数（教学任务用）
+            DestroyBlock("hit_exhausted");
+            return new List<FlyingBlock>();
+        }
+
+        FlyingBlockSpawner spawner = FlyingBlockSpawner.Instance;
+        if (spawner == null)
+            return null;
+
+        // 每层厚度 = 初始尺寸沿攻击轴的 1/maxHits（固定，不受已吃层数影响）
+        float layerThickness = Mathf.Abs(initialSize[cutAxis]) / maxHits;
+        float minA = center[cutAxis] - half[cutAxis];
+        float maxA = center[cutAxis] + half[cutAxis];
+
+        // 从入射侧吃一层：激光正方向进入 → 入射侧为 minA；负方向进入 → 入射侧为 maxA
+        float remainLow, remainHigh;
+        if (rayDir[cutAxis] > 0f)
+        {
+            remainLow = Mathf.Min(minA + layerThickness, maxA); // 吃掉 [minA, minA+layer]
+            remainHigh = maxA;
+        }
+        else
+        {
+            remainLow = minA;
+            remainHigh = Mathf.Max(maxA - layerThickness, minA); // 吃掉 [maxA-layer, maxA]
+        }
+
+        const float minRemain = 0.05f; // 剩余厚度下限，低于此认为被吃光
+        List<FlyingBlock> remnants = new List<FlyingBlock>();
+
+        if (remainHigh - remainLow > minRemain)
+        {
+            Vector3 newSize = size;
+            Vector3 newCenter = center;
+            newSize[cutAxis] = remainHigh - remainLow;
+            newCenter[cutAxis] = (remainLow + remainHigh) * 0.5f; // 剩余子块中心 = 剩余区间中点
+            FlyingBlock r = spawner.CreateRemnant(this, Type, newSize, newCenter, moveDir, speed, initialSize, HitCount);
+            if (r != null) remnants.Add(r);
+        }
+
+        // 原块已被吃掉一层，销毁（剩余部分以子块形式继续存在）
+        DestroyBlock("hit_layer_consumed");
+
+        return remnants;
+    }
+
+    /// <summary>射线与轴对齐包围盒求交（slab 法），返回是否命中及进入/离开参数 t。</summary>
+    private static bool RayIntersectsAabb(Vector3 origin, Vector3 dir, Vector3 min, Vector3 max, out float tNear, out float tFar)
+    {
+        tNear = float.NegativeInfinity;
+        tFar = float.PositiveInfinity;
+        for (int i = 0; i < 3; i++)
+        {
+            float o = origin[i];
+            float d = dir[i];
+            if (Mathf.Abs(d) < 1e-6f)
+            {
+                // 射线与该轴平行：起点必须在包围盒范围内
+                if (o < min[i] || o > max[i])
+                    return false;
+                continue;
+            }
+            float t1 = (min[i] - o) / d;
+            float t2 = (max[i] - o) / d;
+            if (t1 > t2)
+            {
+                float tmp = t1;
+                t1 = t2;
+                t2 = tmp;
+            }
+            if (t1 > tNear) tNear = t1;
+            if (t2 < tFar) tFar = t2;
+            if (tNear > tFar)
+                return false;
+        }
+        return tFar >= 0f; // 至少命中射线正方向
     }
 
     /// <summary>受控销毁：注销登记 → 触发事件 → 销毁物体。生命周期不写死，外部可调用。</summary>
@@ -417,6 +546,12 @@ public class FlyingBlock : MonoBehaviour
             return;
 
         Color baseColor = GetTypeColor(Type);
+        // 受击阶段形态：每被击中一次整体变暗一档（0 次=原色，1~3 次逐档变暗，第 4 次已死亡）
+        float dim = 1f - 0.18f * HitCount;
+        baseColor.r *= dim;
+        baseColor.g *= dim;
+        baseColor.b *= dim;
+
         float edgeWidth = highlighted ? 0.1f : 0.04f; // 普通更细；选中（高亮）回到当前粗细 0.1
         Color edgeColor = new Color(1f, 1f, 1f, 1f); // 纯白实线（P2 风格，不发灰不发亮）
 
