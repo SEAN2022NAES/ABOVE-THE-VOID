@@ -139,7 +139,7 @@ public class SettingsPanelController : MonoBehaviour
         Text help = CreateText("HelpText", card,
             "移动：W / A / S / D        上升 / 下降：Space / C\n" +
             "视角旋转：鼠标              Q：坐标轴模式 / F1：自由模式\n" +
-            "再按对应按键返回原点       加速：LeftShift   暂停：ESC",
+            "再按对应按键返回原点       加速：LeftShift   暂停：ESC / 时间冻结：E",
             18, new Color(0.85f, 0.85f, 0.85f, 1f));
         help.rectTransform.anchorMin = new Vector2(0f, 0.5f);
         help.rectTransform.anchorMax = new Vector2(1f, 0.5f);

@@ -1,0 +1,142 @@
+﻿using System;
+using UnityEngine;
+using UnityEngine.UI;
+
+/// <summary>
+/// F3 开发者模式：
+///   - 按 F3 切换显示 / 隐藏；
+///   - 左上角信息面板显示玩家世界坐标 x / y / z（单位 = 坐标轴刻度单位长度，
+///     直接取 Camera.main.transform.position 的实际分量，F2 精度）；
+///   - 显示精确开始时间：本局运行起始时刻（DateTime，精确到毫秒）与
+///     运行时长（基于 Time.time，受 timeScale 影响，暂停时冻结）。
+/// 纯代码构建 UI，挂到任意物体即可。
+/// </summary>
+public class DevOverlayController : MonoBehaviour
+{
+    [Header("按键")]
+    [Tooltip("开发者模式切换键")]
+    public KeyCode toggleKey = KeyCode.F3;
+
+    [Header("UI")]
+    [Tooltip("面板文字大小")]
+    public int fontSize = 18;
+    [Tooltip("面板文字颜色")]
+    public Color textColor = new Color(0.85f, 0.95f, 1f, 1f);
+
+    private Canvas canvas;
+    private GameObject overlayRoot;
+    private Text overlayText;
+
+    private DateTime startTime;   // 精确开始时间（墙钟，毫秒级）
+    private float startGameTime;  // 开始时刻的 Time.time（运行时长基准，暂停时冻结）
+
+    public bool IsVisible => overlayRoot != null && overlayRoot.activeSelf;
+
+    private void Awake()
+    {
+        startTime = DateTime.Now;
+        startGameTime = Time.time;
+
+        BuildUI();
+        overlayRoot.SetActive(false); // 默认隐藏，按 F3 打开
+    }
+
+    private void Update()
+    {
+        if (Input.GetKeyDown(toggleKey))
+            Toggle();
+    }
+
+    private void LateUpdate()
+    {
+        if (overlayRoot != null && overlayRoot.activeSelf)
+            UpdateText();
+    }
+
+    /// <summary>切换开发者面板显示状态。</summary>
+    public void Toggle()
+    {
+        if (overlayRoot != null)
+            overlayRoot.SetActive(!overlayRoot.activeSelf);
+    }
+
+    // ---------------- UI 构建 ----------------
+
+    private void BuildUI()
+    {
+        canvas = gameObject.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+        CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.matchWidthOrHeight = 0.5f;
+
+        gameObject.AddComponent<GraphicRaycaster>();
+
+        RectTransform root = CreateRect("DevOverlay", canvas.transform, new Vector2(0f, 1f), new Vector2(24f, -24f), new Vector2(520f, 220f), new Vector2(0f, 1f));
+        overlayRoot = root.gameObject;
+
+        overlayText = CreateText("DevOverlayText", root, "", fontSize, textColor, TextAnchor.UpperLeft);
+        RectTransform txtRt = overlayText.rectTransform;
+        txtRt.anchorMin = new Vector2(0f, 1f);
+        txtRt.anchorMax = new Vector2(1f, 1f);
+        txtRt.pivot = new Vector2(0f, 1f);
+        txtRt.anchoredPosition = Vector2.zero;
+        txtRt.sizeDelta = new Vector2(0f, 0f);
+
+        overlayText.font = UIFontHelper.LoadMono();
+        overlayText.supportRichText = false;
+        overlayText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        overlayText.verticalOverflow = VerticalWrapMode.Overflow;
+    }
+
+    private void UpdateText()
+    {
+        Camera cam = Camera.main;
+        Vector3 pos = cam != null ? cam.transform.position : Vector3.zero;
+        TimeSpan elapsed = TimeSpan.FromSeconds(Mathf.Max(0f, Time.time - startGameTime));
+
+        overlayText.text =
+            "ABOVE THE VOID - Dev Mode [F3]\n" +
+            "Position: x=" + pos.x.ToString("F2") + "  y=" + pos.y.ToString("F2") + "  z=" + pos.z.ToString("F2") + "\n" +
+            "Start: " + startTime.ToString("yyyy-MM-dd HH:mm:ss.fff") + "\n" +
+            "Runtime: " + FormatElapsed(elapsed);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        return elapsed.Hours.ToString("00") + ":" +
+               elapsed.Minutes.ToString("00") + ":" +
+               elapsed.Seconds.ToString("00") + "." +
+               elapsed.Milliseconds.ToString("000");
+    }
+
+    private RectTransform CreateRect(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform));
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        rt.anchorMin = anchor;
+        rt.anchorMax = anchor;
+        rt.pivot = pivot;
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = size;
+        return rt;
+    }
+
+    private Text CreateText(string name, Transform parent, string content, int fontSizeValue, Color color, TextAnchor anchor)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+
+        Text text = go.AddComponent<Text>();
+        text.text = content;
+        text.fontSize = fontSizeValue;
+        text.color = color;
+        text.alignment = anchor;
+        text.font = UIFontHelper.LoadMono();
+        text.raycastTarget = false;
+        return text;
+    }
+}

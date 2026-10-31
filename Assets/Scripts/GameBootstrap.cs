@@ -16,6 +16,10 @@ public class GameBootstrap : MonoBehaviour
     public bool createAxes = true;
     public bool createController = true;
     public bool createUI = true;
+    public bool createCrosshair = true;
+    public bool createDevOverlay = true;
+    public bool createTimeHint = true;
+    public bool createCommandConsole = true;
 
     private void Awake()
     {
@@ -62,6 +66,34 @@ public class GameBootstrap : MonoBehaviour
         {
             GameObject ui = new GameObject("UI_SettingsPanel");
             ui.AddComponent<SettingsPanelController>();
+        }
+
+        // 5. 反色十字准心
+        if (createCrosshair && FindObjectOfType<CrosshairController>() == null)
+        {
+            GameObject crosshair = new GameObject("UI_Crosshair");
+            crosshair.AddComponent<CrosshairController>();
+        }
+
+        // 6. F3 开发者模式（坐标 + 精确开始时间）
+        if (createDevOverlay && FindObjectOfType<DevOverlayController>() == null)
+        {
+            GameObject dev = new GameObject("UI_DevOverlay");
+            dev.AddComponent<DevOverlayController>();
+        }
+
+        // 7. 顶部常驻时间提示（Consolas）
+        if (createTimeHint && FindObjectOfType<TimeHintController>() == null)
+        {
+            GameObject time = new GameObject("UI_TimeHint");
+            time.AddComponent<TimeHintController>();
+        }
+
+        // 8. Enter 指令框（代码式指令解析，预留 Laser 分支）
+        if (createCommandConsole && FindObjectOfType<CommandConsoleController>() == null)
+        {
+            GameObject console = new GameObject("UI_CommandConsole");
+            console.AddComponent<CommandConsoleController>();
         }
     }
 }

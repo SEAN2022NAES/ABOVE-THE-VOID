@@ -5,6 +5,8 @@ using UnityEngine;
 ///   Normal —— 视角锁定原点旋转（鼠标控制）；
 ///   Spirit —— 灵魂出窍：Q 进入严格坐标轴移动，F1 进入摄像机相对自由飞行；
 ///             再按对应按键返回原点并退出；
+///   Frozen —— 时间冻结：E 键暂停游戏时间（timeScale=0），玩家仍可自由移动与转视角，
+///             不弹出设置界面，再按 E 恢复；
 ///   Paused —— 暂停：ESC 或右上角「设置」按钮触发，在任意模式下均生效，
 ///             灵敏度滑块实时调整鼠标灵敏度。
 ///
@@ -19,6 +21,7 @@ public class PlayerCameraController : MonoBehaviour
     {
         Normal,  // 视角锁定原点旋转
         Spirit,  // 灵魂出窍自由飞行
+        Frozen,  // 时间冻结（E 键）：冻结游戏时间，玩家仍可自由移动
         Paused   // 暂停（任意模式下生效）
     }
 
@@ -48,6 +51,7 @@ public class PlayerCameraController : MonoBehaviour
 
     [Header("按键")]
     [SerializeField] private KeyCode pauseKey = KeyCode.Escape;
+    [SerializeField] private KeyCode timeStopKey = KeyCode.E;
     [SerializeField] private KeyCode axisSpiritKey = KeyCode.Q;
     [SerializeField] private KeyCode freeSpiritKey = KeyCode.F1;
     [SerializeField] private KeyCode upKey = KeyCode.Space;
@@ -71,6 +75,9 @@ public class PlayerCameraController : MonoBehaviour
     // 暂停前模式，恢复时回到原模式
     private GameMode modeBeforePause = GameMode.Normal;
     private bool strictAxisMovement;
+
+    // 外部模态占用（如指令框打开）：占用期间视角 / 移动 / 暂停键均让渡给外部组件
+    private bool externalBlock;
 
     private SettingsPanelController settingsPanel;
 
@@ -105,6 +112,10 @@ public class PlayerCameraController : MonoBehaviour
 
     private void Update()
     {
+        // 外部模态占用（指令框等）：视角 / 移动 / 暂停键全部让渡给外部组件
+        if (externalBlock)
+            return;
+
         // 暂停键在任何模式下都生效
         if (Input.GetKeyDown(pauseKey))
         {
@@ -115,6 +126,20 @@ public class PlayerCameraController : MonoBehaviour
         // 暂停态只处理暂停相关输入
         if (Mode == GameMode.Paused)
             return;
+
+        // E 键时间冻结：冻结游戏时间但玩家仍可自由移动（任意非暂停模式下生效）
+        if (Input.GetKeyDown(timeStopKey))
+        {
+            ToggleTimeStop();
+            return;
+        }
+
+        // 时间冻结态：继续视角与移动（unscaledDeltaTime），Q/F1 不响应
+        if (Mode == GameMode.Frozen)
+        {
+            UpdateSpirit();
+            return;
+        }
 
         if (Input.GetKeyDown(axisSpiritKey))
         {
@@ -162,12 +187,30 @@ public class PlayerCameraController : MonoBehaviour
 
     private void Resume()
     {
-        Mode = modeBeforePause;            // 恢复暂停前的模式（Normal 或 Spirit）
-        Time.timeScale = 1f;
+        Mode = modeBeforePause;            // 恢复暂停前的模式（Normal / Spirit / Frozen）
+        Time.timeScale = (Mode == GameMode.Frozen) ? 0f : 1f; // 若原为时间冻结则保持冻结
         SetCursorLocked(true);
         if (settingsPanel != null)
             settingsPanel.HidePanel();
         Debug.Log("[PlayerCameraController] 恢复游戏（当前模式：" + Mode + "）");
+    }
+
+    /// <summary>E 键时间冻结切换：冻结 / 解除冻结游戏时间，玩家保持可自由移动。</summary>
+    private void ToggleTimeStop()
+    {
+        if (Mode == GameMode.Frozen)
+        {
+            Mode = modeBeforePause;        // 恢复冻结前的模式
+            Time.timeScale = 1f;
+            Debug.Log("[PlayerCameraController] 解除时间冻结，恢复：" + Mode);
+        }
+        else
+        {
+            modeBeforePause = Mode;        // 暂存当前模式
+            Mode = GameMode.Frozen;
+            Time.timeScale = 0f;           // 冻结游戏逻辑，但不释放鼠标、不弹设置面板
+            Debug.Log("[PlayerCameraController] 时间冻结：E 键暂停时间，玩家仍可自由移动");
+        }
     }
 
     private void ToggleSpirit(bool axisMovement)
@@ -223,7 +266,8 @@ public class PlayerCameraController : MonoBehaviour
         if (move.sqrMagnitude > 0.0001f)
         {
             float speed = moveSpeed * (Input.GetKey(KeyCode.LeftShift) ? sprintMultiplier : 1f);
-            playerCamera.transform.position += move.normalized * speed * Time.deltaTime;
+            // 用 unscaledDeltaTime：时间冻结（timeScale=0）时仍可自由移动
+            playerCamera.transform.position += move.normalized * speed * Time.unscaledDeltaTime;
         }
 
         ClampSpiritPosition();
@@ -274,6 +318,26 @@ public class PlayerCameraController : MonoBehaviour
     public void BindCamera(Camera cam)
     {
         playerCamera = cam;
+    }
+
+    /// <summary>是否被外部模态（如指令框）占用输入。</summary>
+    public bool ExternalBlock => externalBlock;
+
+    /// <summary>
+    /// 设置外部输入占用状态。占用期间本脚本不响应任何输入
+    /// （视角旋转 / 移动 / 暂停键），由外部组件（如指令框）全权接管；
+    /// 解除占用后自动恢复原模式行为。
+    /// </summary>
+    public void SetExternalBlock(bool blocked)
+    {
+        externalBlock = blocked;
+    }
+
+    /// <summary>外部组件（如指令框）要求取消暂停：若当前处于暂停则恢复。</summary>
+    public void ResumeExternal()
+    {
+        if (Mode == GameMode.Paused)
+            Resume();
     }
 
     private void SetCursorLocked(bool locked)
