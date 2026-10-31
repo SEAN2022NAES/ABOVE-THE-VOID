@@ -2,14 +2,14 @@ using UnityEngine;
 
 /// <summary>
 /// 在原点绘制 3D 直角坐标系可视化：
-/// X 轴（红）、Y 轴（绿，深度方向）、Z 轴（蓝，竖直方向），带刻度与箭头标识。
+/// X 轴（蓝，深度方向）、Y 轴（红，右方向）、Z 轴（绿，竖直方向），带刻度与箭头标识。
 /// 挂到任意空物体上，Awake 时自动创建全部可视化元素，无需手工搭建预制体。
 /// </summary>
 public class CoordinateAxesDrawer : MonoBehaviour
 {
     [Header("轴长与刻度")]
     [Tooltip("坐标范围的正负最大值")]
-    public float axisLength = 20f;
+    public float axisLength = 10f;
 
     [Tooltip("刻度间距（单位：米/格）")]
     public float tickStep = 1f;
@@ -27,7 +27,7 @@ public class CoordinateAxesDrawer : MonoBehaviour
     [Tooltip("箭头大小")]
     public float arrowSize = 0.4f;
 
-    [Header("颜色（X / Y / Z 默认 红 / 绿 / 蓝）")]
+    [Header("颜色（X / Y / Z 默认 蓝 / 红 / 绿）")]
     public Color xColor = Color.blue;
     public Color yColor = Color.red;
     public Color zColor = Color.green;
@@ -40,11 +40,11 @@ public class CoordinateAxesDrawer : MonoBehaviour
 
     private void DrawAxes()
     {
-        // 当前视图约定：Z 竖直且居中，Y 为深度方向并投影到左侧，X 投影到右侧。
-        Vector3 xTip = new Vector3(axisLength, 0f, 0f);
-        Vector3 yTip = new Vector3(0f, 0f, axisLength);
+        // 当前视图约定：Z 竖直且居中，X（蓝）为深度方向（世界 Z），Y（红）为右方向（世界 X）。
+        Vector3 xTip = new Vector3(0f, 0f, axisLength);   // X 轴（蓝）：画在世界 Z 方向（深度）
+        Vector3 yTip = new Vector3(axisLength, 0f, 0f);   // Y 轴（红）：画在世界 X 方向（右）
         // Z 轴正方向向上；标签单独做水平镜像以匹配当前图示。
-        Vector3 zTip = new Vector3(0f, axisLength, 0f);
+        Vector3 zTip = new Vector3(0f, axisLength, 0f);   // Z 轴（绿）：竖直向上
 
         // 正方向使用轴颜色，负方向使用对应的反色。
         DrawLine(Vector3.zero, xTip, xColor, axisWidth, "Axis_X");
@@ -54,19 +54,20 @@ public class CoordinateAxesDrawer : MonoBehaviour
         DrawLine(Vector3.zero, -yTip, InvertColor(yColor), axisWidth, "Axis_Negative_Y");
         DrawLine(Vector3.zero, -zTip, InvertColor(zColor), axisWidth, "Axis_Negative_Z");
 
-        // 正方向箭头
-        DrawArrowTip(xTip, Vector3.right, Vector3.up, xColor, "Arrow_X");
-        DrawArrowTip(yTip, Vector3.forward, Vector3.up, yColor, "Arrow_Y");
+        // 正方向箭头（方向随轴角色互换：X 沿深度、Y 沿右、Z 仍竖直）
+        DrawArrowTip(xTip, Vector3.forward, Vector3.up, xColor, "Arrow_X");
+        DrawArrowTip(yTip, Vector3.right, Vector3.up, yColor, "Arrow_Y");
         DrawArrowTip(zTip, Vector3.up, Vector3.right, zColor, "Arrow_Z");
 
         // 仅 ±1 刻度使用轴颜色，其余刻度统一为白色。
-        DrawTicks(Vector3.right, Vector3.up, xColor, "Tick_X");
-        DrawTicks(Vector3.forward, Vector3.up, yColor, "Tick_Y");
+        DrawTicks(Vector3.forward, Vector3.up, xColor, "Tick_X");
+        DrawTicks(Vector3.right, Vector3.up, yColor, "Tick_Y");
         DrawTicks(Vector3.up, Vector3.right, zColor, "Tick_Z");
 
         // 轴名称标签（Billboard 面向玩家，加载外部图片素材，便于替换）
-        DrawLabel(xTip, "X", "Label_X", xColor, false, true);
-        DrawLabel(yTip + Vector3.up * 0.45f, "Y", "Label_Y", yColor);
+        // X 在深度端用居中；Y 在右端保持底部对齐避免遮挡；Z 竖直端保持水平镜像
+        DrawLabel(xTip + Vector3.up * 0.45f, "X", "Label_X", xColor);
+        DrawLabel(yTip, "Y", "Label_Y", yColor, false, true);
         DrawLabel(zTip + Vector3.up * 0.45f, "Z", "Label_Z", zColor, true);
     }
 

@@ -5,8 +5,9 @@ using UnityEngine;
 ///   Normal —— 视角锁定原点旋转（鼠标控制）；
 ///   Spirit —— 灵魂出窍：Q 进入严格坐标轴移动，F1 进入摄像机相对自由飞行；
 ///             再按对应按键返回原点并退出；
-///   Frozen —— 时间冻结：E 键暂停游戏时间（timeScale=0），玩家仍可自由移动与转视角，
-///             不弹出设置界面，再按 E 恢复；
+///   Frozen —— 时间冻结：E 键仅暂停游戏时间（timeScale=0），移动 / 飞行状态不受 E 影响：
+///             先前或之后按下 Q / F1 的飞行状态保持（不自动开启也不自动关闭，由玩家输入驱动），
+///             无输入则静止；不弹出设置界面，再按 E 恢复；
 ///   Paused —— 暂停：ESC 或右上角「设置」按钮触发，在任意模式下均生效，
 ///             灵敏度滑块实时调整鼠标灵敏度。
 ///
@@ -31,9 +32,9 @@ public class PlayerCameraController : MonoBehaviour
     [Tooltip("原点位置（默认 (0,0,0)）")]
     [SerializeField] private Vector3 origin = Vector3.zero;
     [Tooltip("每个坐标分量的最小值")]
-    [SerializeField] private float minCoordinate = -20f;
+    [SerializeField] private float minCoordinate = -15f;
     [Tooltip("每个坐标分量的最大值")]
-    [SerializeField] private float maxCoordinate = 20f;
+    [SerializeField] private float maxCoordinate = 15f;
 
     [Header("鼠标视角")]
     [Tooltip("鼠标灵敏度（可在暂停面板中实时调整）")]
@@ -60,6 +61,9 @@ public class PlayerCameraController : MonoBehaviour
     /// <summary>当前游戏模式。</summary>
     public GameMode Mode { get; private set; } = GameMode.Normal;
 
+    /// <summary>当前是否处于 E 键时间冻结（供外部组件如指令框判断还原）。</summary>
+    public bool IsTimeFrozen => timeFrozen;
+
     /// <summary>当前鼠标灵敏度（供 UI 读写）。</summary>
     public float MouseSensitivity
     {
@@ -75,6 +79,9 @@ public class PlayerCameraController : MonoBehaviour
     // 暂停前模式，恢复时回到原模式
     private GameMode modeBeforePause = GameMode.Normal;
     private bool strictAxisMovement;
+    // 独立的时间冻结标记：仅切换 Time.timeScale，与移动 / 飞行模式正交
+    // （Mode==Frozen 仅表示「时间冻结且未飞行」；Spirit 冻结时 Mode 保持 Spirit）
+    private bool timeFrozen;
 
     // 外部模态占用（如指令框打开）：占用期间视角 / 移动 / 暂停键均让渡给外部组件
     private bool externalBlock;
@@ -127,20 +134,14 @@ public class PlayerCameraController : MonoBehaviour
         if (Mode == GameMode.Paused)
             return;
 
-        // E 键时间冻结：冻结游戏时间但玩家仍可自由移动（任意非暂停模式下生效）
+        // E 键：仅切换时间冻结（timeScale 0<->1），绝不改变移动 / 飞行模式
         if (Input.GetKeyDown(timeStopKey))
         {
             ToggleTimeStop();
             return;
         }
 
-        // 时间冻结态：继续视角与移动（unscaledDeltaTime），Q/F1 不响应
-        if (Mode == GameMode.Frozen)
-        {
-            UpdateSpirit();
-            return;
-        }
-
+        // Q / F1：进入或退出灵魂出窍（冻结保持 / 退出恢复），任意非暂停模式下均可
         if (Input.GetKeyDown(axisSpiritKey))
         {
             ToggleSpirit(true);
@@ -158,8 +159,12 @@ public class PlayerCameraController : MonoBehaviour
             case GameMode.Normal:
                 UpdateNormal();
                 break;
+            case GameMode.Frozen:
+                // 冻结且未飞行：与 Normal 一致，锁定原点只转视角（绝不进入可移动飞行）
+                UpdateNormal();
+                break;
             case GameMode.Spirit:
-                UpdateSpirit();
+                UpdateSpirit(); // 冻结中亦走此分支：移动使用 unscaledDeltaTime，timeScale=0 仍可飞行
                 break;
         }
     }
@@ -188,34 +193,57 @@ public class PlayerCameraController : MonoBehaviour
     private void Resume()
     {
         Mode = modeBeforePause;            // 恢复暂停前的模式（Normal / Spirit / Frozen）
-        Time.timeScale = (Mode == GameMode.Frozen) ? 0f : 1f; // 若原为时间冻结则保持冻结
+        Time.timeScale = timeFrozen ? 0f : 1f; // 若处于时间冻结则保持冻结（正交标记，不依赖 Mode）
         SetCursorLocked(true);
         if (settingsPanel != null)
             settingsPanel.HidePanel();
         Debug.Log("[PlayerCameraController] 恢复游戏（当前模式：" + Mode + "）");
     }
 
-    /// <summary>E 键时间冻结切换：冻结 / 解除冻结游戏时间，玩家保持可自由移动。</summary>
+    /// <summary>E 键时间冻结切换：仅冻结 / 解除冻结游戏时间，绝不改变移动 / 飞行模式。</summary>
     private void ToggleTimeStop()
     {
-        if (Mode == GameMode.Frozen)
+        if (timeFrozen)
         {
-            Mode = modeBeforePause;        // 恢复冻结前的模式
+            // 解除冻结：仅恢复时间，飞行状态保持
+            timeFrozen = false;
             Time.timeScale = 1f;
-            Debug.Log("[PlayerCameraController] 解除时间冻结，恢复：" + Mode);
+            if (Mode == GameMode.Frozen)
+                Mode = GameMode.Normal;    // 冻结时未飞行：解除后回到 Normal 锁定原点
+            // Spirit 冻结解除：Mode 保持 Spirit，继续飞行
+            Debug.Log("[PlayerCameraController] 解除时间冻结，当前模式：" + Mode);
         }
         else
         {
-            modeBeforePause = Mode;        // 暂存当前模式
-            Mode = GameMode.Frozen;
+            // 进入冻结：仅暂停时间，绝不改变飞行模式
+            timeFrozen = true;
             Time.timeScale = 0f;           // 冻结游戏逻辑，但不释放鼠标、不弹设置面板
-            Debug.Log("[PlayerCameraController] 时间冻结：E 键暂停时间，玩家仍可自由移动");
+            if (Mode == GameMode.Spirit)
+            {
+                // 飞行中冻结：Mode 保持 Spirit，继续飞行（UpdateSpirit 使用 unscaledDeltaTime）
+                Debug.Log("[PlayerCameraController] 时间冻结（飞行中）：保持飞行模式，仅暂停时间");
+            }
+            else
+            {
+                // 未飞行：进入 Frozen（锁定原点只转视角）
+                Mode = GameMode.Frozen;
+                Debug.Log("[PlayerCameraController] 时间冻结：保持锁定原点视角，仅暂停时间");
+            }
         }
     }
 
     private void ToggleSpirit(bool axisMovement)
     {
-        if (Mode == GameMode.Normal)
+        if (Mode == GameMode.Frozen)
+        {
+            // 冻结中进入灵魂出窍：冻结保持（timeFrozen 不变，timeScale 仍 0），退出后回到 Frozen
+            Mode = GameMode.Spirit;
+            strictAxisMovement = axisMovement;
+            Debug.Log(axisMovement
+                ? "[PlayerCameraController] 时间冻结中：灵魂出窍（严格坐标轴移动，再按 Q 返回原点）"
+                : "[PlayerCameraController] 时间冻结中：灵魂出窍（自由飞行，再按 F1 返回原点）");
+        }
+        else if (Mode == GameMode.Normal)
         {
             Mode = GameMode.Spirit;
             strictAxisMovement = axisMovement;
@@ -227,10 +255,13 @@ public class PlayerCameraController : MonoBehaviour
         {
             if (strictAxisMovement == axisMovement)
             {
-                Mode = GameMode.Normal;
+                // 退出灵魂出窍：冻结中回到 Frozen，否则回到 Normal；相机回原点
+                Mode = timeFrozen ? GameMode.Frozen : GameMode.Normal;
                 if (playerCamera != null)
                     playerCamera.transform.position = origin;
-                Debug.Log("[PlayerCameraController] 已返回原点，恢复视角锁定");
+                Debug.Log(timeFrozen
+                    ? "[PlayerCameraController] 已返回原点，恢复时间冻结"
+                    : "[PlayerCameraController] 已返回原点，恢复视角锁定");
             }
             else
             {
@@ -276,8 +307,9 @@ public class PlayerCameraController : MonoBehaviour
     private Vector3 GetAxisMovement()
     {
         Vector3 move = Vector3.zero;
-        move += Vector3.right * Input.GetAxisRaw("Vertical");     // W / S -> X
-        move += Vector3.forward * -Input.GetAxisRaw("Horizontal"); // A / D -> Y
+        // 严格坐标轴移动：W/S 前后（深度，对应项目 X 轴/蓝），A/D 左右（对应项目 Y 轴/红）
+        move += Vector3.forward * Input.GetAxisRaw("Vertical");     // W / S -> 深度（项目 X 轴）
+        move += Vector3.right * Input.GetAxisRaw("Horizontal");     // A / D -> 右（项目 Y 轴）
         if (Input.GetKey(upKey)) move += Vector3.up;              // Space -> Z
         if (Input.GetKey(downKey)) move += Vector3.down;          // C -> Z
         return move;
@@ -338,6 +370,13 @@ public class PlayerCameraController : MonoBehaviour
     {
         if (Mode == GameMode.Paused)
             Resume();
+    }
+
+    /// <summary>外部组件（如指令框关闭后）要求恢复暂停状态：当前非暂停时进入暂停。</summary>
+    public void PauseNow()
+    {
+        if (Mode != GameMode.Paused)
+            Pause();
     }
 
     private void SetCursorLocked(bool locked)

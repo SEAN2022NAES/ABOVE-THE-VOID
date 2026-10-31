@@ -40,6 +40,10 @@ public class CommandConsoleController : MonoBehaviour
     private InputField inputField;
     private Text outputText;
     private PlayerCameraController playerController;
+    // 打开指令框前游戏是否处于暂停（关闭后需还原暂停状态，不让游戏继续）
+    private bool wasPausedBeforeOpen;
+    // 打开指令框前是否处于 E 键时间冻结（timeScale=0，关闭后需保持冻结，不让游戏继续）
+    private bool wasFrozenBeforeOpen;
 
     /// <summary>指令框当前是否打开。</summary>
     public bool IsOpen => consoleRoot != null && consoleRoot.activeSelf;
@@ -84,8 +88,11 @@ public class CommandConsoleController : MonoBehaviour
     {
         if (playerController != null)
         {
-            // 若暂停菜单正打开，先恢复，避免两个模态 UI 叠加
-            if (playerController.Mode == PlayerCameraController.GameMode.Paused)
+            // 若暂停菜单正打开，先恢复，避免两个模态 UI 叠加；记录状态供关闭时还原
+            wasPausedBeforeOpen = (playerController.Mode == PlayerCameraController.GameMode.Paused);
+            // 记录打开前是否处于 E 键时间冻结（关闭后需保持冻结，不解除）
+            wasFrozenBeforeOpen = playerController.IsTimeFrozen;
+            if (wasPausedBeforeOpen)
                 playerController.ResumeExternal();
             playerController.SetExternalBlock(true);
         }
@@ -102,14 +109,32 @@ public class CommandConsoleController : MonoBehaviour
         Debug.Log("[CommandConsole] 指令框打开");
     }
 
-    /// <summary>关闭指令框：恢复时间流速、锁定鼠标、解除视角输入占用。</summary>
+    /// <summary>关闭指令框：恢复时间流速、锁定鼠标、解除视角输入占用；若打开前处于暂停则还原暂停。</summary>
     public void Close()
     {
         consoleRoot.SetActive(false);
-        Time.timeScale = 1f;
-        SetCursorLocked(true);
         if (playerController != null)
             playerController.SetExternalBlock(false);
+
+        if (wasPausedBeforeOpen && playerController != null)
+        {
+            // 打开指令框前游戏处于暂停：关闭后恢复暂停状态，不让游戏继续
+            playerController.PauseNow();
+            wasPausedBeforeOpen = false;
+            wasFrozenBeforeOpen = false;
+        }
+        else if (wasFrozenBeforeOpen)
+        {
+            // 打开指令框前处于 E 键时间冻结：保持 timeScale=0，不解除冻结
+            SetCursorLocked(true);
+            Time.timeScale = 0f;
+            wasFrozenBeforeOpen = false;
+        }
+        else
+        {
+            Time.timeScale = 1f;
+            SetCursorLocked(true);
+        }
         Debug.Log("[CommandConsole] 指令框关闭");
     }
 

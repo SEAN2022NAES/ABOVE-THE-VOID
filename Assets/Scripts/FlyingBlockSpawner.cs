@@ -1,0 +1,173 @@
+﻿using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// 飞行长方体生成器与全局登记表：
+///   - 开局前 startDelay 秒不生成任何长方体（留出缓冲）；
+///   - 定时从坐标轴边缘（x/y/z 任一轴坐标 = ±edgeExtent 的面）生成长方体，仅沿该轴朝原点移动；
+///   - 生成与运动均不允许重叠：IsPositionFree 对所有活跃长方体做 AABB 相交检测；
+///   - 提供 Unregister 供长方体受控销毁时注销登记。
+/// </summary>
+public class FlyingBlockSpawner : MonoBehaviour
+{
+    public static FlyingBlockSpawner Instance { get; private set; }
+
+    [Header("生成配置")]
+    [Tooltip("坐标轴边缘（长方体在该轴的面坐标 = ±edgeExtent，默认 10 与坐标轴 [-10,10] 一致）")]
+    public float edgeExtent = 10f;
+    [Tooltip("随机边长下限（每边 ≥ minSide，默认 0.4）")]
+    public float minSide = 0.4f;
+    [Tooltip("生成间隔（秒）")]
+    public float spawnInterval = 1.2f;
+    [Tooltip("开局延迟（秒），此期间不生成任何长方体")]
+    public float startDelay = 5f;
+    [Tooltip("活跃长方体数量上限")]
+    public int maxBlocks = 40;
+    [Tooltip("飞行速度下限（单位/秒）")]
+    public float speedMin = 0.5f;
+    [Tooltip("飞行速度上限（单位/秒）")]
+    public float speedMax = 1.2f;
+
+    [Header("类型概率（%）")]
+    [Tooltip("攻击型（红）刷新概率")]
+    public int attackChance = 50;
+    [Tooltip("炸弹型（蓝）刷新概率")]
+    public int bombChance = 30;
+    [Tooltip("恢复型（绿）刷新概率（剩余部分）")]
+    public int healChance = 20;
+
+    /// <summary>所有活跃长方体（生成器与检测器共用登记表）。</summary>
+    public readonly List<FlyingBlock> ActiveBlocks = new List<FlyingBlock>();
+
+    private float timer;
+    private int nextBlockId = 1;
+
+    private void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+        timer = -startDelay; // 开局前 startDelay 秒不生成任何长方体
+    }
+
+    private void Update()
+    {
+        timer += Time.deltaTime;
+        if (timer >= spawnInterval)
+        {
+            timer = 0f;
+            if (ActiveBlocks.Count < maxBlocks)
+                SpawnBlock();
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
+    /// <summary>注销长方体（受控销毁流程调用）。</summary>
+    public void Unregister(FlyingBlock block)
+    {
+        if (block != null)
+            ActiveBlocks.Remove(block);
+    }
+
+    /// <summary>目标 AABB 是否与除 ignore 外的任意活跃长方体重叠（生成与运动防重叠共用）。</summary>
+    public bool IsPositionFree(Vector3 center, Vector3 halfExtents, FlyingBlock ignore)
+    {
+        for (int i = 0; i < ActiveBlocks.Count; i++)
+        {
+            FlyingBlock other = ActiveBlocks[i];
+            if (other == null || other == ignore || other.Destroyed)
+                continue;
+
+            Vector3 oCenter = other.transform.position;
+            Vector3 oHalf = other.HalfExtents;
+            if (AabbOverlap(center, halfExtents, oCenter, oHalf))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>生成一个长方体（自动选择边缘面 / 尺寸 / 位置，并做防重叠重试）。</summary>
+    public FlyingBlock SpawnBlock()
+    {
+        for (int attempt = 0; attempt < 50; attempt++)
+        {
+            Vector3 size = PickBlockSize();
+            Vector3 half = size * 0.5f;
+
+            // 选定单一轴向：生成面与该轴一致，移动方向只有该轴分量（其余轴为 0）
+            int axis = Random.Range(0, 3);        // 0=x, 1=y, 2=z
+            int sign = Random.Range(0, 2) == 0 ? -1 : 1; // 生成于 -1 / +1 两个面
+            Vector3 spawnPos = PickEdgePosition(half, axis, sign);
+            if (!IsPositionFree(spawnPos, half, null))
+                continue;
+
+            Vector3 dir = Vector3.zero;
+            dir[axis] = -sign; // 指向原点：+面朝 -1 方向，-面朝 +1 方向
+
+            GameObject go = new GameObject("FlyingBlock_" + nextBlockId, typeof(FlyingBlock));
+            FlyingBlock block = go.GetComponent<FlyingBlock>();
+            FlyingBlock.BlockType type = PickBlockType();
+            float speed = Random.Range(speedMin, speedMax);
+            block.Init(type, size, spawnPos, speed, nextBlockId, dir);
+            nextBlockId++;
+            ActiveBlocks.Add(block);
+            return block;
+        }
+        return null; // 空间不足时放弃本次生成
+    }
+
+    /// <summary>随机浮点边长：每边 ≥ minSide，三边和 ≤ 3（按三边和 [2, 3] 随机分配）。</summary>
+    private Vector3 PickBlockSize()
+    {
+        float target = Random.Range(2f, 3f);         // 三边和约束，始终 ≤ 3
+        float x = Random.Range(minSide, target - 2f * minSide); // 保留 y/z 各 ≥ minSide
+        float y = Random.Range(minSide, target - x - minSide);  // 保留 z ≥ minSide
+        float z = target - x - y;                    // 三边和 = target
+        return new Vector3(x, y, z);
+    }
+
+    /// <summary>按配置概率选择类型：红(attack) / 蓝(bomb) / 绿(heal)。</summary>
+    private FlyingBlock.BlockType PickBlockType()
+    {
+        int roll = Random.Range(0, 100);
+        if (roll < attackChance)
+            return FlyingBlock.BlockType.Attack;
+        if (roll < attackChance + bombChance)
+            return FlyingBlock.BlockType.Bomb;
+        return FlyingBlock.BlockType.Heal;
+    }
+
+    /// <summary>按指定坐标轴边缘面生成点（外边缘朝内偏移半个尺寸，保证初始完全落在范围内）。</summary>
+    private Vector3 PickEdgePosition(Vector3 half, int axis, int sign)
+    {
+        Vector3 pos = Vector3.zero;
+        pos[axis] = sign * (edgeExtent - half[axis]);
+
+        // 另外两个轴在 [-edgeExtent+half, edgeExtent-half] 内随机
+        for (int i = 0; i < 3; i++)
+        {
+            if (i == axis)
+                continue;
+            float min = -edgeExtent + half[i];
+            float max = edgeExtent - half[i];
+            pos[i] = Random.Range(min, max);
+        }
+        return pos;
+    }
+
+    /// <summary>AABB 相交检测（带最小间距 margin）。</summary>
+    private static bool AabbOverlap(Vector3 aCenter, Vector3 aHalf, Vector3 bCenter, Vector3 bHalf, float margin = 0.05f)
+    {
+        return Mathf.Abs(aCenter.x - bCenter.x) < (aHalf.x + bHalf.x + margin) &&
+               Mathf.Abs(aCenter.y - bCenter.y) < (aHalf.y + bHalf.y + margin) &&
+               Mathf.Abs(aCenter.z - bCenter.z) < (aHalf.z + bHalf.z + margin);
+    }
+}

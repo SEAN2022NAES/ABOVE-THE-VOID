@@ -20,6 +20,7 @@ public class GameBootstrap : MonoBehaviour
     public bool createDevOverlay = true;
     public bool createTimeHint = true;
     public bool createCommandConsole = true;
+    public bool createFlyingBlocks = true;
 
     private void Awake()
     {
@@ -94,6 +95,14 @@ public class GameBootstrap : MonoBehaviour
         {
             GameObject console = new GameObject("UI_CommandConsole");
             console.AddComponent<CommandConsoleController>();
+        }
+
+        // 9. 飞行长方体系统（生成器 + 准心检测指示器）
+        if (createFlyingBlocks && FindObjectOfType<FlyingBlockSpawner>() == null)
+        {
+            GameObject blocks = new GameObject("FlyingBlockSystem");
+            blocks.AddComponent<FlyingBlockSpawner>();
+            blocks.AddComponent<BlockHitIndicator>();
         }
     }
 }
