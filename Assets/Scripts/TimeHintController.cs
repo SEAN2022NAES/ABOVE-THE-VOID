@@ -53,6 +53,12 @@ public class TimeHintController : MonoBehaviour
             canvas.enabled = visible;
     }
 
+    /// <summary>重置本局计时基准（再次进入 Level 3 时调用，顶部时间重新从 00:00 开始）。</summary>
+    public void ResetTimer()
+    {
+        startTime = Time.time;
+    }
+
     // ---------------- UI 构建 ----------------
 
     private void BuildUI()
@@ -64,6 +70,7 @@ public class TimeHintController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+        gameObject.AddComponent<UIFitScreen>();
 
         gameObject.AddComponent<GraphicRaycaster>();
 

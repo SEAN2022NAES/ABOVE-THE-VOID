@@ -13,10 +13,13 @@ public class TutorialController : MonoBehaviour
 {
     public static TutorialController Instance { get; private set; }
 
+    /// <summary>Level 1 - Part 1 教学是否已启动（启动期间禁用 E 键时间冻结）。</summary>
+    public bool Started { get; private set; }
+
     [Header("UI")]
     public int titleFontSize = 26;
-    public int bodyFontSize = 30;
-    public Color panelColor = new Color(0.04f, 0.05f, 0.09f, 0.90f);
+    public int bodyFontSize = 26; // v0.2.1：字号收敛，缓解排版拥挤
+    public Color panelColor = new Color(0.04f, 0.05f, 0.09f, 0f); // v0.2.1：完全透明背景（无底色、不遮挡 3D 场景）
     public Color titleColor = new Color(0.55f, 0.75f, 0.9f, 1f);
     public Color bodyColor = Color.white;
 
@@ -109,15 +112,21 @@ public class TutorialController : MonoBehaviour
         {
             spawner.ClearAllBlocks();
             spawner.SuspendSpawning(); // 教学前期先不生成方块
-            spawner.ResetPlayerKills();
+            spawner.ResetSession(); // 重置本局会话：消灭计数清零、方块编号从 1 开始
         }
 
         TimeHintController timeHint = FindObjectOfType<TimeHintController>();
         if (timeHint != null)
             timeHint.SetVisible(false);
 
+        // Level 1 教学关不显示炮台实体，仅保留原点炮台功能（Level 3 由 LevelDirector 重新显示）
+        CodeTower tower = FindObjectOfType<CodeTower>();
+        if (tower != null)
+            tower.SetVisualVisible(false);
+
         spawnStarted = false;
         active = true;
+        Started = true; // 教学进行中：PlayerCameraController 据此禁用 E 键时间冻结
         panelRoot.SetActive(true);
         SetStep(Step.Welcome);
         Debug.Log("[Tutorial] Level 1 - Part 1 引导教学开始（先不生成方块，等待玩家完成操作引导）。");
@@ -288,6 +297,7 @@ public class TutorialController : MonoBehaviour
     public void ExitToMenu()
     {
         active = false;
+        Started = false; // 教学结束：恢复 E 键时间冻结
         spawnStarted = false;
         if (panelRoot != null)
             panelRoot.SetActive(false);
@@ -325,7 +335,7 @@ public class TutorialController : MonoBehaviour
             return;
 
         bool zh = Localization.IsChinese;
-        stepText.text = "引导教学 · Tutorial   (Level 1 · Part 1)";
+        stepText.text = zh ? "引导教学（关卡 1 · 第 1 部分）" : "Tutorial (Level 1 · Part 1)";
 
         switch (currentStep)
         {
@@ -379,7 +389,7 @@ public class TutorialController : MonoBehaviour
         if (panelRt == null)
             return;
 
-        // 正文在当前宽度（面板宽 1500 - 左右边距 80）下换行后的期望高度
+        // 正文在当前宽度（面板宽 1200 - 左右边距 80）下换行后的期望高度
         float bodyH = bodyText.preferredHeight;
         if (bodyH <= 1f)
             bodyH = 120f; // 兜底：空文本时按最小正文高度处理
@@ -388,21 +398,13 @@ public class TutorialController : MonoBehaviour
         float bottomReserve = (currentStep == Step.Move) ? 128f : 40f;
 
         // 面板高度 = 标题区 + 正文期望高度 + 底部预留区 + 上下边距
-        const float titleZone = 70f;    // 标题(44) + 顶部间距 + 分隔线区域
-        const float topMargin = 20f;    // 分隔线到正文起点
+        const float titleZone = 70f;    // 标题(44) + 顶部间距 + 标题区高度
+        const float topMargin = 20f;    // 标题区到正文起点
         const float bottomMargin = 40f; // 面板底部留白
         float target = titleZone + topMargin + bodyH + bottomReserve + bottomMargin;
-        target = Mathf.Clamp(target, 300f, 620f);
+        target = Mathf.Clamp(target, 300f, 420f); // v0.2.1：上限收敛，避免面板过大占满画面
 
         panelRt.sizeDelta = new Vector2(panelRt.sizeDelta.x, target);
-
-        // 左右边框高度跟随面板（原固定 400，面板伸缩后需同步）
-        Transform borderL = panelRt.Find("BorderLeft");
-        Transform borderR = panelRt.Find("BorderRight");
-        if (borderL != null)
-            ((RectTransform)borderL).sizeDelta = new Vector2(2f, target);
-        if (borderR != null)
-            ((RectTransform)borderR).sizeDelta = new Vector2(2f, target);
 
         // 正文区底部预留随步骤调整（Move 给充能行留 128，其余收窄为 40，正文区随面板自然伸缩）
         RectTransform bodyRt = bodyText.rectTransform;
@@ -432,20 +434,15 @@ public class TutorialController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+        gameObject.AddComponent<UIFitScreen>();
 
         gameObject.AddComponent<GraphicRaycaster>();
 
-        RectTransform panelRt = CreateRect("TutorialPanel", canvas.transform, new Vector2(0.5f, 1f), new Vector2(0f, -36f), new Vector2(1500f, 400f), new Vector2(0.5f, 1f));
+        RectTransform panelRt = CreateRect("TutorialPanel", canvas.transform, new Vector2(0.5f, 1f), new Vector2(0f, -36f), new Vector2(1200f, 400f), new Vector2(0.5f, 1f));
         panelRoot = panelRt.gameObject;
         Image panelImg = panelRoot.AddComponent<Image>();
-        panelImg.color = panelColor;
-
-        // ---- 四周细边框（v0.1.1）：浅蓝白细线提升面板层次 ----
-        Color borderColor = new Color(0.75f, 0.85f, 1f, 0.38f);
-        CreateBorder(panelRt, "BorderTop", new Vector2(0.5f, 1f), new Vector2(0f, 0f), new Vector2(1500f, 2f), new Vector2(0.5f, 1f), borderColor);
-        CreateBorder(panelRt, "BorderBottom", new Vector2(0.5f, 0f), new Vector2(0f, 0f), new Vector2(1500f, 2f), new Vector2(0.5f, 0f), borderColor);
-        CreateBorder(panelRt, "BorderLeft", new Vector2(0f, 0.5f), new Vector2(0f, 0f), new Vector2(2f, 400f), new Vector2(0f, 0.5f), borderColor);
-        CreateBorder(panelRt, "BorderRight", new Vector2(1f, 0.5f), new Vector2(0f, 0f), new Vector2(2f, 400f), new Vector2(1f, 0.5f), borderColor);
+        panelImg.color = panelColor; // v0.2.1：alpha=0 完全透明，仅作文本容器，不遮挡 3D 场景
+        panelImg.raycastTarget = false; // v0.2.1：透明容器不拦截射线
 
         stepText = CreateText("Step", panelRt, "", titleFontSize, titleColor, TextAnchor.MiddleLeft);
         stepText.fontStyle = FontStyle.Bold; // v0.1.1：标题加粗
@@ -456,16 +453,13 @@ public class TutorialController : MonoBehaviour
         stepRt.anchoredPosition = new Vector2(0f, -18f);
         stepRt.sizeDelta = new Vector2(-60f, 44f);
 
-        // ---- 标题下方分隔线（v0.1.1）：半透明白细线 ----
-        CreateBorder(panelRt, "TitleDivider", new Vector2(0.5f, 1f), new Vector2(0f, -70f), new Vector2(1380f, 2f), new Vector2(0.5f, 1f), new Color(1f, 1f, 1f, 0.16f));
-
         bodyText = CreateText("Body", panelRt, "", bodyFontSize, bodyColor, TextAnchor.MiddleCenter);
         RectTransform bodyRt = bodyText.rectTransform;
         bodyRt.anchorMin = Vector2.zero;
         bodyRt.anchorMax = Vector2.one;
         bodyRt.offsetMin = new Vector2(40f, 128f); // 底部留出六键充能行空间
         bodyRt.offsetMax = new Vector2(-40f, -50f);
-        bodyText.lineSpacing = 1.25f;
+        bodyText.lineSpacing = 1.4f; // v0.2.1：增大行距，增加呼吸感
         bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
         bodyText.verticalOverflow = VerticalWrapMode.Overflow;
 
@@ -572,18 +566,6 @@ public class TutorialController : MonoBehaviour
         rt.anchoredPosition = pos;
         rt.sizeDelta = size;
         return rt;
-    }
-
-    /// <summary>创建细线 / 边框 Image（v0.1.1：面板边框与分隔线共用）。</summary>
-    private Image CreateBorder(Transform parent, string name, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot, Color color)
-    {
-        RectTransform rt = CreateRect(name, parent, anchor, pos, size, pivot);
-        Image img = rt.gameObject.AddComponent<Image>();
-        img.sprite = WhiteSprite();
-        img.type = Image.Type.Simple;
-        img.color = color;
-        img.raycastTarget = false;
-        return img;
     }
 
     private Text CreateText(string name, Transform parent, string content, int fontSizeValue, Color color, TextAnchor anchor)

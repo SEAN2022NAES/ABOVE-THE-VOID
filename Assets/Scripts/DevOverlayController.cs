@@ -30,6 +30,10 @@ public class DevOverlayController : MonoBehaviour
     private DateTime startTime;   // 精确开始时间（墙钟，毫秒级）
     private float startGameTime;  // 开始时刻的 Time.time（运行时长基准，暂停时冻结）
 
+    private float fpsValue = 60f; // 平滑帧率（每 0.5s 采样一次）
+    private float fpsAccumulator; // 帧率采样累计耗时（unscaled）
+    private int fpsFrameCount;    // 帧率采样累计帧数
+
     public bool IsVisible => overlayRoot != null && overlayRoot.activeSelf;
 
     private void Awake()
@@ -49,6 +53,7 @@ public class DevOverlayController : MonoBehaviour
 
     private void LateUpdate()
     {
+        SampleFps(); // 每帧累计采样，0.5s 平滑一次帧率（面板隐藏时也持续采样，避免打开瞬间显示旧值）
         if (overlayRoot != null && overlayRoot.activeSelf)
             UpdateText();
     }
@@ -71,6 +76,7 @@ public class DevOverlayController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+        gameObject.AddComponent<UIFitScreen>();
 
         gameObject.AddComponent<GraphicRaycaster>();
 
@@ -101,7 +107,28 @@ public class DevOverlayController : MonoBehaviour
             "ABOVE THE VOID - Dev Mode [F3]\n" +
             "Position: x=" + pos.x.ToString("F2") + "  y=" + pos.y.ToString("F2") + "  z=" + pos.z.ToString("F2") + "\n" +
             "Start: " + startTime.ToString("yyyy-MM-dd HH:mm:ss.fff") + "\n" +
-            "Runtime: " + FormatElapsed(elapsed);
+            "Runtime: " + FormatElapsed(elapsed) + "\n" +
+            "FPS: " + fpsValue.ToString("F0");
+    }
+
+    /// <summary>累计帧数与耗时，每 0.5s 更新一次平滑帧率（使用 unscaledDeltaTime，不受 timeScale / 暂停影响）。</summary>
+    private void SampleFps()
+    {
+        fpsAccumulator += Time.unscaledDeltaTime;
+        fpsFrameCount++;
+        if (fpsAccumulator >= 0.5f)
+        {
+            fpsValue = fpsFrameCount / fpsAccumulator;
+            fpsAccumulator = 0f;
+            fpsFrameCount = 0;
+        }
+    }
+
+    /// <summary>重置运行基准时间（再次进入 Level 3 时调用，Start / Runtime 全部重新计时）。</summary>
+    public void ResetRuntime()
+    {
+        startTime = DateTime.Now;
+        startGameTime = Time.time;
     }
 
     private static string FormatElapsed(TimeSpan elapsed)

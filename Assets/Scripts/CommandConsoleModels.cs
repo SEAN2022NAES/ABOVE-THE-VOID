@@ -11,7 +11,8 @@ public enum CommandType
 {
     Unknown,     // 无法识别的指令
     Help,        // help / 帮助
-    Level        // /level <关卡> <部分>：跳转开发者关卡指令
+    Level,       // /level <关卡> <部分>：跳转开发者关卡指令
+    Exit         // /exit：关闭指令框并返回主页
 }
 
 /// <summary>解析后的指令数据（结构体：指令类型 + 原始文本 + 参数列表）。</summary>
@@ -64,6 +65,11 @@ public static class CommandParser
             case "level":
             case "关卡":
                 type = CommandType.Level;
+                break;
+            case "/exit":
+            case "exit":
+            case "退出":
+                type = CommandType.Exit;
                 break;
             default:
                 type = CommandType.Unknown;

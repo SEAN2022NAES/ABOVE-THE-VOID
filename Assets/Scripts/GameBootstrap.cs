@@ -23,6 +23,8 @@ public class GameBootstrap : MonoBehaviour
     public bool createFlyingBlocks = true;
     public bool createMainMenu = true;
     public bool createTutorial = true;
+    public bool createCodeTower = true;
+    public bool createCodeEditor = true;
 
     private void Awake()
     {
@@ -119,6 +121,21 @@ public class GameBootstrap : MonoBehaviour
         {
             GameObject tutorial = new GameObject("UI_Tutorial");
             tutorial.AddComponent<TutorialController>();
+        }
+
+        // 12. 原点炮台（代码编辑器控制的炮台，位置恒定在原点）
+        if (createCodeTower && FindObjectOfType<CodeTower>() == null)
+        {
+            GameObject tower = new GameObject("CodeTower");
+            CodeTower towerComp = tower.AddComponent<CodeTower>();
+            towerComp.SetVisualVisible(false); // Level 1 教学关不显示炮台实体，仅保留原点炮台功能
+        }
+
+        // 13. 炮台代码编辑器（Enter 开关，C# 运行时编译驱动炮台）
+        if (createCodeEditor && FindObjectOfType<CodeEditorController>() == null)
+        {
+            GameObject editor = new GameObject("UI_CodeEditor");
+            editor.AddComponent<CodeEditorController>();
         }
     }
 }

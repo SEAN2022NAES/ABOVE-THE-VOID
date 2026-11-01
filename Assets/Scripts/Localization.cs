@@ -13,7 +13,7 @@ public enum GameLanguage
 /// </summary>
 public static class Localization
 {
-    public static GameLanguage Current { get; private set; } = GameLanguage.Chinese;
+    public static GameLanguage Current { get; private set; } = GameLanguage.English; // v0.1.1：英文作为首选项
 
     /// <summary>语言切换事件（主页 / 教学等 UI 订阅后刷新文本）。</summary>
     public static event System.Action OnLanguageChanged;

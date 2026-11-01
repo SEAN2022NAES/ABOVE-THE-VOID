@@ -149,7 +149,8 @@ public class PlayerCameraController : MonoBehaviour
             return;
 
         // E 键：仅切换时间冻结（timeScale 0<->1），绝不改变移动 / 飞行模式
-        if (Input.GetKeyDown(timeStopKey))
+        // Level 1 - Part 1 教学进行中禁用 E 键（TutorialController.Instance.Started）
+        if (Input.GetKeyDown(timeStopKey) && (TutorialController.Instance == null || !TutorialController.Instance.Started))
         {
             ToggleTimeStop();
             return;
@@ -244,6 +245,14 @@ public class PlayerCameraController : MonoBehaviour
                 Debug.Log("[PlayerCameraController] 时间冻结：保持锁定原点视角，仅暂停时间");
             }
         }
+    }
+
+    /// <summary>外部组件（如关卡跳转）直接设置时间冻结状态（等价于 E 键按下 / 松开）。</summary>
+    public void SetTimeFrozen(bool frozen)
+    {
+        if (frozen == timeFrozen)
+            return;
+        ToggleTimeStop();
     }
 
     private void ToggleSpirit(bool axisMovement)

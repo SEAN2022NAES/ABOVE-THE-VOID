@@ -24,6 +24,11 @@ public class SettingsPanelController : MonoBehaviour
     public float maxSensitivity = 10f;
     public float defaultSensitivity = 1.75f;
 
+    [Header("帧率范围")]
+    public float minFps = 30f;
+    public float maxFps = 240f;
+    public float defaultFps = 60f;
+
     [Header("UI 颜色")]
     public Color panelBackgroundColor = new Color(0.06f, 0.06f, 0.10f, 0.85f);
     public Color accentColor = new Color(0.20f, 0.45f, 1.00f);
@@ -31,6 +36,8 @@ public class SettingsPanelController : MonoBehaviour
     private GameObject pausePanel;
     private Slider sensitivitySlider;
     private Text sensitivityValueText;
+    private Slider fpsSlider;
+    private Text fpsValueText;
 
     /// <summary>暂停面板当前是否可见。</summary>
     public bool IsPanelVisible => pausePanel != null && pausePanel.activeSelf;
@@ -64,6 +71,7 @@ public class SettingsPanelController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+        gameObject.AddComponent<UIFitScreen>();
 
         gameObject.AddComponent<GraphicRaycaster>();
 
@@ -79,7 +87,7 @@ public class SettingsPanelController : MonoBehaviour
         card.anchorMax = new Vector2(0.5f, 0.5f);
         card.pivot = new Vector2(0.5f, 0.5f);
         card.anchoredPosition = Vector2.zero;
-        card.sizeDelta = new Vector2(560f, 460f);
+        card.sizeDelta = new Vector2(560f, 560f);
         Image cardImg = card.gameObject.AddComponent<Image>();
         cardImg.color = panelBackgroundColor;
 
@@ -121,17 +129,47 @@ public class SettingsPanelController : MonoBehaviour
         slider.onValueChanged.AddListener(OnSliderChanged);
         sensitivitySlider = slider;
 
+        // 帧率行（标签 + 滑块 + 数值）
+        Text fpsLabel = CreateText("FpsLabel", card, "帧率 / FPS", 22, Color.white);
+        fpsLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
+        fpsLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
+        fpsLabel.rectTransform.pivot = new Vector2(0f, 1f);
+        fpsLabel.rectTransform.anchoredPosition = new Vector2(36f, -210f);
+        fpsLabel.rectTransform.sizeDelta = new Vector2(160f, 40f);
+        fpsLabel.alignment = TextAnchor.MiddleLeft;
+
+        fpsValueText = CreateText("FpsValue", card, defaultFps.ToString("F0"), 22, accentColor);
+        fpsValueText.rectTransform.anchorMin = new Vector2(1f, 1f);
+        fpsValueText.rectTransform.anchorMax = new Vector2(1f, 1f);
+        fpsValueText.rectTransform.pivot = new Vector2(1f, 1f);
+        fpsValueText.rectTransform.anchoredPosition = new Vector2(-36f, -210f);
+        fpsValueText.rectTransform.sizeDelta = new Vector2(60f, 40f);
+        fpsValueText.alignment = TextAnchor.MiddleRight;
+
+        fpsSlider = CreateSlider("FpsSlider", card);
+        RectTransform fpsRt = fpsSlider.GetComponent<RectTransform>();
+        fpsRt.anchorMin = new Vector2(0f, 1f);
+        fpsRt.anchorMax = new Vector2(1f, 1f);
+        fpsRt.pivot = new Vector2(0.5f, 1f);
+        fpsRt.anchoredPosition = new Vector2(0f, -262f);
+        fpsRt.sizeDelta = new Vector2(-72f, 24f);
+        fpsSlider.minValue = minFps;
+        fpsSlider.maxValue = maxFps;
+        fpsSlider.SetValueWithoutNotify(defaultFps);
+        fpsSlider.onValueChanged.AddListener(OnFpsSliderChanged);
+        Application.targetFrameRate = (int)defaultFps; // 初始化即应用默认帧率（拖动滑杆后再按滑杆值调整）
+
         // 键位说明
         Text help = CreateText("HelpText", card,
             "移动：W / A / S / D        上升 / 下降：Space / C\n" +
             "视角旋转：鼠标              Q：坐标轴模式 / F1：自由模式\n" +
             "再按对应按键返回原点       加速：LeftShift   暂停：ESC / 时间冻结：E",
             18, new Color(0.85f, 0.85f, 0.85f, 1f));
-        help.rectTransform.anchorMin = new Vector2(0f, 0.5f);
-        help.rectTransform.anchorMax = new Vector2(1f, 0.5f);
-        help.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        help.rectTransform.anchoredPosition = new Vector2(0f, -16f);
-        help.rectTransform.sizeDelta = new Vector2(-72f, 120f);
+        help.rectTransform.anchorMin = new Vector2(0f, 1f);
+        help.rectTransform.anchorMax = new Vector2(1f, 1f);
+        help.rectTransform.pivot = new Vector2(0.5f, 1f);
+        help.rectTransform.anchoredPosition = new Vector2(0f, -310f);
+        help.rectTransform.sizeDelta = new Vector2(-72f, 150f);
         help.alignment = TextAnchor.UpperLeft;
         help.horizontalOverflow = HorizontalWrapMode.Wrap;
 
@@ -172,6 +210,13 @@ public class SettingsPanelController : MonoBehaviour
         if (sensitivityValueText != null)
             sensitivityValueText.text = value.ToString("F1");
         OnSensitivityChanged?.Invoke(value);
+    }
+
+    private void OnFpsSliderChanged(float value)
+    {
+        if (fpsValueText != null)
+            fpsValueText.text = ((int)value).ToString();
+        Application.targetFrameRate = (int)value;
     }
 
     // ---------------- UI 构建辅助 ----------------

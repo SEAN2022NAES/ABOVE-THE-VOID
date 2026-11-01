@@ -19,6 +19,13 @@ public class CommandConsoleController : MonoBehaviour
     /// <summary>激光发射事件（教学 / 自动化脚本监听用，鼠标左键与代码开火都会触发）。</summary>
     public static event System.Action OnLaserFired;
 
+    /// <summary>触发激光发射事件（事件只能在声明类型内 invoke，供 CodeTower 等外部类转发）。</summary>
+    public static void NotifyLaserFired()
+    {
+        if (OnLaserFired != null)
+            OnLaserFired();
+    }
+
     [Header("按键")]
     [Tooltip("打开 / 切换指令框（` 键）")]
     public KeyCode openKey = KeyCode.BackQuote;
@@ -207,6 +214,9 @@ public class CommandConsoleController : MonoBehaviour
             case CommandType.Level:
                 ExecuteLevel(cmd);
                 break;
+            case CommandType.Exit:
+                ExecuteExit();
+                break;
             default:
                 AppendOutput("未知指令：" + cmd.Raw + "（输入 help 查看可用指令）");
                 break;
@@ -216,14 +226,18 @@ public class CommandConsoleController : MonoBehaviour
     private void ExecuteHelp()
     {
         AppendOutput(
-            "开发者指令：\n" +
-            "  /level <关卡> <部分>  - 跳转到指定关卡分区（如 /level 1 1）\n" +
-            "  help                - 显示帮助");
+            "开发者指令 / Developer Commands：\n" +
+            "  /exit                     - 关闭指令框并返回主页\n" +
+            "                              / close console and return to home\n" +
+            "  /level <关卡> <部分>       - 跳转到指定关卡分区（如 /level 3 1）\n" +
+            "                              / jump to level part, e.g. /level 3 1\n" +
+            "  help / 帮助               - 显示帮助\n" +
+            "                              / show this help");
     }
 
     /// <summary>
     /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt;：跳转到指定关卡的分区。
-    /// 当前已实现 level 1 - part 1（回到本部分开头）；其余分区提示未开放。
+    /// 当前已实现 level 1 - part 1（教学关）、level 3 - part 1（完整玩法关）；其余分区提示未开放。
     /// </summary>
     private void ExecuteLevel(CommandData cmd)
     {
@@ -239,6 +253,20 @@ public class CommandConsoleController : MonoBehaviour
         AppendOutput(message);
         if (message.Contains("已跳转"))
             CloseAndForceResume(); // 跳转成功后关闭指令框，回到正常游戏状态
+    }
+
+    /// <summary>
+    /// 开发者指令 /exit：强制关闭指令框并恢复正常游戏状态，
+    /// 再复用主页返回逻辑统一收尾（终止教学、清场暂停生成、解除暂停回原点、主页接管输入）。
+    /// </summary>
+    private void ExecuteExit()
+    {
+        CloseAndForceResume();
+        MainMenuController menu = FindObjectOfType<MainMenuController>();
+        if (menu != null)
+            menu.ShowMenu();
+        else
+            AppendOutput("[exit] 未找到主菜单，无法返回主页。");
     }
 
     /// <summary>强制关闭指令框并恢复正常游戏状态（关卡跳转后调用，忽略打开前的暂停 / 冻结状态）。</summary>
@@ -461,6 +489,7 @@ public class CommandConsoleController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+        gameObject.AddComponent<UIFitScreen>();
 
         gameObject.AddComponent<GraphicRaycaster>();
 

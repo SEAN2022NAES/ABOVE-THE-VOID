@@ -128,6 +128,13 @@ public class FlyingBlockSpawner : MonoBehaviour
         PlayerKills = 0;
     }
 
+    /// <summary>重置本局会话：清零消灭计数并重置方块编号（再次进入 Level 3 时调用；教学关不调用以免打断教学统计）。</summary>
+    public void ResetSession()
+    {
+        PlayerKills = 0;
+        nextBlockId = 1;
+    }
+
     /// <summary>目标 AABB 是否与除 ignore 外的任意活跃长方体重叠（生成与运动防重叠共用）。</summary>
     public bool IsPositionFree(Vector3 center, Vector3 halfExtents, FlyingBlock ignore)
     {

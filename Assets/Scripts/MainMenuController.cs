@@ -76,11 +76,11 @@ public class MainMenuController : MonoBehaviour
         }
     }
 
-    /// <summary>点击关卡入口：隐藏主页并启动对应关卡（当前仅关卡1可用）。</summary>
+    /// <summary>点击关卡入口：隐藏主页并启动对应关卡（当前关卡1教学、关卡3完整玩法可用）。</summary>
     public void StartLevel(int levelIndex)
     {
-        if (levelIndex != 1)
-            return; // 关卡2 / 3 占位未开放
+        if (levelIndex != 1 && levelIndex != 3)
+            return; // 关卡2 占位未开放
 
         if (root != null)
             root.SetActive(false);
@@ -90,14 +90,34 @@ public class MainMenuController : MonoBehaviour
 
         SetCursorLocked(true);
 
-        // Level 1 由教学控制器接管：先不生成方块，逐步引导操作（无教学组件时回退旧逻辑）
         TutorialController tutorial = FindObjectOfType<TutorialController>();
-        if (tutorial != null)
-            tutorial.StartTutorial();
-        else if (spawner != null)
-            spawner.BeginSpawning(); // 开始出块（保留进游戏前5秒缓冲）
-
-        Debug.Log("[MainMenu] 进入关卡1：主页隐藏，游戏开始。");
+        if (levelIndex == 1)
+        {
+            // Level 1 由教学控制器接管：先不生成方块，逐步引导操作（无教学组件时回退旧逻辑）
+            if (tutorial != null)
+                tutorial.StartTutorial();
+            else if (spawner != null)
+                spawner.BeginSpawning(); // 开始出块（保留进游戏前5秒缓冲）
+            Debug.Log("[MainMenu] 进入关卡1：主页隐藏，游戏开始。");
+        }
+        else
+        {
+            // Level 3 完整玩法：跳过教学，隐藏教学面板并恢复 E 键，重开会话（全部重新计时）后正常生成方块
+            if (tutorial != null)
+                tutorial.ExitToMenu();
+            if (spawner != null)
+            {
+                spawner.ResetSession();    // 重开会话：清零消灭计数与方块编号
+                spawner.BeginSpawning();   // 开始出块（保留进游戏前5秒缓冲）
+            }
+            TimeHintController timeHint = FindObjectOfType<TimeHintController>();
+            if (timeHint != null)
+            {
+                timeHint.ResetTimer();     // 顶部时间提示重新从 00:00 开始
+                timeHint.SetVisible(true); // 确保顶部计时显示（教学退出时可能已隐藏）
+            }
+            Debug.Log("[MainMenu] 进入关卡3：主页隐藏，完整玩法开始。");
+        }
     }
 
     /// <summary>隐藏主页并解除输入占用（供关卡跳转 / 开发者指令调用；已在游戏内时无操作）。</summary>
@@ -156,6 +176,7 @@ public class MainMenuController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+        gameObject.AddComponent<UIFitScreen>();
 
         gameObject.AddComponent<GraphicRaycaster>();
 
@@ -189,12 +210,12 @@ public class MainMenuController : MonoBehaviour
 
         // ---- 项目目的（扩写：编程兴趣 + 数学思维；语言切换后刷新）----
         bodyText = CreateText("Goal", root.transform, "", bodyFontSize, new Color(0.92f, 0.94f, 0.98f, 1f), TextAnchor.MiddleCenter, false);
-        SetRect(bodyText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -30f), new Vector2(1550f, 330f));
+        SetRect(bodyText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -20f), new Vector2(1550f, 360f));
         bodyText.lineSpacing = 1.25f;
 
         // ---- 作者 ----
         authorText = CreateText("Author", root.transform, "", authorFontSize, new Color(1f, 0.85f, 0.35f, 1f), TextAnchor.MiddleCenter, false);
-        SetRect(authorText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -196f), new Vector2(1200f, 48f));
+        SetRect(authorText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -235f), new Vector2(1200f, 48f));
 
         // ---- 语言选择：中文 / English ----
         CreateLanguageSelector();
@@ -205,7 +226,7 @@ public class MainMenuController : MonoBehaviour
 
         CreateLevelButton("Level1", new Vector2(-280f, -382f), true, 1, out level1Label);
         CreateLevelButton("Level2", new Vector2(0f, -382f), false, 2, out level2Label);
-        CreateLevelButton("Level3", new Vector2(280f, -382f), false, 3, out level3Label);
+        CreateLevelButton("Level3", new Vector2(280f, -382f), true, 3, out level3Label);
 
         // ---- 底部说明 ----
         hintText = CreateText("Hint", root.transform, "", 20, new Color(0.6f, 0.65f, 0.75f, 0.9f), TextAnchor.MiddleCenter, false);
@@ -249,8 +270,8 @@ public class MainMenuController : MonoBehaviour
     /// <summary>创建语言选择按钮（中文 / English）：点击切换全局语言，并高亮当前语言。</summary>
     private void CreateLanguageSelector()
     {
-        langZhLabel = CreateLangButton("LangZh", new Vector2(-80f, -252f), "中文", true);
-        langEnLabel = CreateLangButton("LangEn", new Vector2(80f, -252f), "English", false);
+        langZhLabel = CreateLangButton("LangZh", new Vector2(660f, 480f), "中文", true);
+        langEnLabel = CreateLangButton("LangEn", new Vector2(830f, 480f), "English", false);
         ApplyLanguage(); // 初始高亮当前语言
     }
 
@@ -276,30 +297,36 @@ public class MainMenuController : MonoBehaviour
 
         if (subtitleText != null)
             subtitleText.text = zh
-                ? "A 3D Cartesian Coordinate Adventure  ·  三维直角坐标系冒险"
+                ? "三维直角坐标系冒险"
                 : "A 3D Cartesian Coordinate Adventure";
 
         if (bodyText != null)
+        {
             bodyText.text = zh
-                ? "项 目 目 的   ·   P R O J E C T   G O A L\n\n《ABOVE THE VOID》致力于以游戏化的方式，激发学生的编程兴趣与数学思维。\n玩家在三维直角坐标系中自由飞行，亲手感受空间坐标、向量方向与几何变换：\n每一次躲避、瞄准与射击，都是对数学直觉的淬炼；每一次观察规律、调整策略，\n都在悄然建立逻辑推理与抽象思维的能力。\n让数学不再是纸上的符号，而是触手可及的世界——\n在探索与创造中，点燃对科学与技术的热爱。"
+                ? "项 目 目 的\n\n《ABOVE THE VOID》致力于以游戏化的方式，激发学生的编程兴趣与数学思维。\n玩家在三维直角坐标系中自由飞行，亲手感受空间坐标、向量方向与几何变换：\n每一次躲避、瞄准与射击，都是对数学直觉的淬炼；每一次观察规律、调整策略，\n都在悄然建立逻辑推理与抽象思维的能力。\n让数学不再是纸上的符号，而是触手可及的世界——\n在探索与创造中，点燃对科学与技术的热爱。"
                 : "P R O J E C T   G O A L\n\nABOVE THE VOID aims to spark students' interest in programming and mathematical thinking through gameplay.\nFly freely inside a 3D Cartesian coordinate system, and feel coordinates, vectors and geometry firsthand:\nevery dodge, aim and shot sharpens your mathematical intuition; every pattern you notice and every strategy\nyou adjust quietly builds logical reasoning and abstract thinking.\nMake math no longer symbols on paper, but a world within reach —\nignite your passion for science and technology through exploration and creation.";
+
+            // v0.1.1：中文文案较长 → 缩小字号、增大行距，缓解拥挤
+            bodyText.fontSize = zh ? 22 : bodyFontSize;
+            bodyText.lineSpacing = zh ? 1.55f : 1.25f;
+        }
 
         if (authorText != null)
             authorText.text = zh
-                ? "作者  ·  Author  ·  SEAN2022NAES"
+                ? "作者  ·  SEAN2022NAES"
                 : "Author  ·  SEAN2022NAES";
 
         if (levelTitleText != null)
             levelTitleText.text = zh
-                ? "选择关卡   S E L E C T   L E V E L"
+                ? "选择关卡"
                 : "S E L E C T   L E V E L";
 
         if (level1Label != null)
-            level1Label.text = zh ? "关卡 1\nLevel 1" : "Level 1";
+            level1Label.text = zh ? "关卡 1" : "Level 1";
         if (level2Label != null)
             level2Label.text = zh ? "关卡 2\n敬请期待" : "Level 2\nComing Soon";
         if (level3Label != null)
-            level3Label.text = zh ? "关卡 3\n敬请期待" : "Level 3\nComing Soon";
+            level3Label.text = zh ? "关卡 3\n完整玩法" : "Level 3\nFull Game";
 
         if (hintText != null)
             hintText.text = zh

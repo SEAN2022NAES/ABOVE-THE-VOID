@@ -9,9 +9,16 @@ AIGC:
     ReservedCode2: t64hLD960epjqYxq13Ff3Z+90HlWeNxWGKKuulFbBBs8MiRMD4edW2bx/an2+vGkJFkRDVLaobX1srjx1iZzPJMxpx4pM7Jm0gciRAVFFDdHXMLoUxtckki8bTVTJAtilLDwRSuKcizKzhXlGtjRNIMwDHhiSImnlypP20seeB2Dv0XL6gdDASHgTsU=
 ---
 
-# ABOVE THE VOID - Unity 3D Coordinate System Framework
+# ABOVE THE VOID - Tuanjie 3D Coordinate System Framework
 
-Current version: **v0.1.1**
+Current version: **v0.1.2**
+
+### v0.1.2
+
+- Added the in-game code editor interface for the code tower.
+- Added C# syntax highlighting, line numbers, vertical and horizontal scrolling, and font zoom.
+- Added undo/redo support, compile diagnostics, runtime error feedback, and code execution controls.
+- Added code tower and screen-fitting UI support.
 
 ### v0.1.1
 
@@ -43,13 +50,14 @@ The core experience includes a 3D coordinate system, an origin camera, mouse loo
 | Level 1 tutorial | Guided introduction to movement, camera control, and flying blocks. |
 | Flying blocks | Axis-aligned blocks travel toward the origin with type-specific colors and behavior. |
 | Developer console | Inspect state and navigate to supported level parts. |
+| Code editor | Press Enter to edit tower code with syntax highlighting, diagnostics, undo/redo, and runtime execution. |
 | Pause | Press ESC in any gameplay mode to pause and resume. |
 | Q / F1 modes | Strict axis movement or camera-relative free flight. |
 
 ## 2. Requirements
 
-- Unity **2021.3 LTS or later**. Unity 2022.3 LTS or newer is recommended.
-- Built-in Render Pipeline or URP.
+- Tuanjie **1.11.0**, based on the `2022.3.62t17` editor line.
+- Built-in Render Pipeline or URP as supported by the installed Tuanjie editor.
 - The project uses the legacy Input Manager API (`Input.GetAxis`, `Input.GetKey`).
 - Set `Project Settings -> Player -> Active Input Handling` to **Both** or **Input Manager**.
 
@@ -61,30 +69,33 @@ ABOVE THE VOID/
 │   ├── Editor/
 │   │   └── GameSceneSetup.cs           # Scene setup utility
 │   └── Scripts/
-│       ├── GameBootstrap.cs            # Runtime scene bootstrap
-│       ├── MainMenuController.cs       # Main menu and level entry points
-│       ├── TutorialController.cs       # Level 1 guided tutorial
-│       ├── Localization.cs             # English/Chinese UI localization
-│       ├── LevelDirector.cs             # Level and part navigation
-│       ├── FlyingBlock.cs               # Flying block behavior and visuals
-│       ├── FlyingBlockSpawner.cs        # Block spawning and registration
-│       ├── BlockHitIndicator.cs         # Crosshair hit feedback
-│       ├── PlayerCameraController.cs    # Camera and movement state machine
-│       ├── CoordinateAxesDrawer.cs      # 3D coordinate axes
-│       └── SettingsPanelController.cs   # Pause and settings UI
+│       ├── GameBootstrap.cs              # Runtime scene bootstrap
+│       ├── MainMenuController.cs         # Main menu and level entry points
+│       ├── TutorialController.cs         # Level 1 guided tutorial
+│       ├── Localization.cs               # English/Chinese UI localization
+│       ├── LevelDirector.cs               # Level and part navigation
+│       ├── FlyingBlock.cs                 # Flying block behavior and visuals
+│       ├── FlyingBlockSpawner.cs          # Block spawning and registration
+│       ├── BlockHitIndicator.cs           # Crosshair hit feedback
+│       ├── CodeEditorController.cs        # In-game code editor and runner
+│       ├── CodeTower.cs                   # Code-controlled tower interface
+│       ├── UIFitScreen.cs                 # Screen-fitting UI helper
+│       ├── PlayerCameraController.cs      # Camera and movement state machine
+│       ├── CoordinateAxesDrawer.cs        # 3D coordinate axes
+│       └── SettingsPanelController.cs     # Pause and settings UI
 ├── Packages/
-│   └── manifest.json                   # Unity package dependencies
+│   └── manifest.json                   # Package dependencies
 └── README.md
 ```
 
 ## 4. Quick Start
 
-1. Open this folder with Unity Hub.
+1. Open this folder with the Tuanjie editor or its project manager.
 2. The editor automatically creates and opens `Assets/Scenes/Main.unity` when the scene does not exist.
 3. Press Play to open the main menu.
 4. Choose a language and start Level 1. The tutorial controls the initial spawning sequence.
 
-If the scene is not generated automatically, use `ABOVE THE VOID -> Setup Game Scene` in the Unity editor. The tool enables the required input handling, creates the scene, attaches `GameBootstrap`, and saves `Assets/Scenes/Main.unity`.
+If the scene is not generated automatically, use `ABOVE THE VOID -> Setup Game Scene` in the Tuanjie editor. The tool enables the required input handling, creates the scene, attaches `GameBootstrap`, and saves `Assets/Scenes/Main.unity`.
 
 For a manual setup, create an empty scene, add an empty GameObject with `GameBootstrap.cs`, and press Play. The bootstrap creates or reuses the Main Camera, coordinate axes, player controller, UI, menu, tutorial, and block systems.
 
@@ -114,6 +125,7 @@ For a manual setup, create an empty scene, add an empty GameObject with `GameBoo
 | E | Freeze or resume time. |
 | ESC | Pause or resume gameplay. |
 | `~` | Open or close the developer console. |
+| Enter | Open or close the code editor. |
 | Settings button | Open the pause/settings panel. |
 
 ## 7. Camera State Machine
@@ -153,6 +165,7 @@ Use the Inspector to adjust:
 - `SettingsPanelController`: sensitivity range and UI colors.
 - `FlyingBlockSpawner`: spawn interval, block size limits, speed, spawn distance, and block type probabilities.
 - `FlyingBlock`: size, speed, overlap margin, and externally controlled destruction.
+- `CodeEditorController`: editor font sizes, colors, line height, caret blink rate, and the Enter key binding.
 
 ## 10. Future Extensions
 
