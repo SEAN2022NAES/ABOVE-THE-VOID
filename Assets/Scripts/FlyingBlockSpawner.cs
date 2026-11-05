@@ -18,23 +18,21 @@ public class FlyingBlockSpawner : MonoBehaviour
     [Tooltip("随机边长下限（每边 ≥ minSide，默认 0.4）")]
     public float minSide = 0.4f;
     [Tooltip("生成间隔（秒）")]
-    public float spawnInterval = 1.2f;
+    public float spawnInterval = 0.12f;
     [Tooltip("开局延迟（秒），此期间不生成任何长方体")]
     public float startDelay = 5f;
-    [Tooltip("活跃长方体数量上限")]
-    public int maxBlocks = 40;
+    [Tooltip("活跃长方体数量上限（与生成间隔按同倍数放大，否则会吞掉提速后的速率）")]
+    public int maxBlocks = 400;
     [Tooltip("飞行速度下限（单位/秒）")]
     public float speedMin = 0.5f;
     [Tooltip("飞行速度上限（单位/秒）")]
     public float speedMax = 1.2f;
 
-    [Header("类型概率（%）")]
-    [Tooltip("攻击型（红）刷新概率")]
-    public int attackChance = 50;
-    [Tooltip("炸弹型（蓝）刷新概率")]
-    public int bombChance = 30;
-    [Tooltip("恢复型（绿）刷新概率（剩余部分）")]
-    public int healChance = 20;
+    [Header("类型概率权重（运行时自动归一化到 100%）")]
+    [Tooltip("攻击型（红）权重：80（在原来 40 的基础上翻倍）")]
+    public int attackChance = 80;
+    [Tooltip("炸弹型（蓝）权重：60（保持原值不变；可被击毁，但击毁既不加分也不扣分）")]
+    public int bombChance = 60;
 
     /// <summary>所有活跃长方体（生成器与检测器共用登记表）。</summary>
     public readonly List<FlyingBlock> ActiveBlocks = new List<FlyingBlock>();
@@ -174,7 +172,8 @@ public class FlyingBlockSpawner : MonoBehaviour
             FlyingBlock block = go.GetComponent<FlyingBlock>();
             FlyingBlock.BlockType type = PickBlockType();
             float speed = Random.Range(speedMin, speedMax);
-            block.Init(type, size, spawnPos, speed, nextBlockId, dir);
+            int hp = Random.Range(1, 8); // 血量 1~7 等概率随机（HP 恒 ≥ 1，不会出现一击即毁/0 血块）
+            block.Init(type, size, spawnPos, speed, nextBlockId, dir, hp);
             nextBlockId++;
             ActiveBlocks.Add(block);
             return block;
@@ -187,14 +186,14 @@ public class FlyingBlockSpawner : MonoBehaviour
     /// 新尺寸/新中心由切割计算给出，并继承源块初始尺寸与受击次数（形态阶段连续），
     /// 注册进全局登记表（受数量上限约束，超限返回 null）。
     /// </summary>
-    public FlyingBlock CreateRemnant(FlyingBlock source, FlyingBlock.BlockType type, Vector3 newSize, Vector3 newCenter, Vector3 dir, float moveSpeed, Vector3 originSize, int hitCount)
+    public FlyingBlock CreateRemnant(FlyingBlock source, FlyingBlock.BlockType type, Vector3 newSize, Vector3 newCenter, Vector3 dir, float moveSpeed, Vector3 originSize, int hitCount, int maxHits)
     {
         if (ActiveBlocks.Count >= maxBlocks)
             return null;
         int blockId = source != null ? source.BlockId : nextBlockId; // 子块沿用源块编号，HUD 编号不随击打变化
         GameObject go = new GameObject("FlyingBlock_" + blockId, typeof(FlyingBlock));
         FlyingBlock block = go.GetComponent<FlyingBlock>();
-        block.InitRemnant(type, newSize, newCenter, moveSpeed, blockId, dir, originSize, hitCount);
+        block.InitRemnant(type, newSize, newCenter, moveSpeed, blockId, dir, originSize, hitCount, maxHits);
         ActiveBlocks.Add(block);
         return block;
     }
@@ -209,15 +208,19 @@ public class FlyingBlockSpawner : MonoBehaviour
         return new Vector3(x, y, z);
     }
 
-    /// <summary>按配置概率选择类型：红(attack) / 蓝(bomb) / 绿(heal)。</summary>
+    /// <summary>
+    /// 按配置权重选择类型：红(attack) / 蓝(bomb)。绿色 heal 已彻底移除，任何情况下都不会再生成。
+    /// 权重按 attackChance : bombChance 归一化到 100%，roll ∈ [0,100) 必然被其中一支覆盖，
+    /// 不存在"两者之和不足 100 的空白区间"。默认 80 : 60 → 红约 57.14%、蓝约 42.86%。
+    /// </summary>
     private FlyingBlock.BlockType PickBlockType()
     {
-        int roll = Random.Range(0, 100);
-        if (roll < attackChance)
+        float total = Mathf.Max(1, attackChance + bombChance);
+        float attackPercent = attackChance * 100f / total; // 归一化后的红色概率（0~100）
+        float roll = Random.Range(0f, 100f);
+        if (roll < attackPercent)
             return FlyingBlock.BlockType.Attack;
-        if (roll < attackChance + bombChance)
-            return FlyingBlock.BlockType.Bomb;
-        return FlyingBlock.BlockType.Heal;
+        return FlyingBlock.BlockType.Bomb;
     }
 
     /// <summary>按指定坐标轴边缘面生成点（外边缘朝内偏移半个尺寸，保证初始完全落在范围内）。</summary>

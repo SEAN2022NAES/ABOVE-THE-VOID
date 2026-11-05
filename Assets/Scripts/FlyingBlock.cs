@@ -5,14 +5,19 @@ using UnityEngine;
 /// <summary>
 /// 飞行长方体单体（纯代码构建）：
 ///   - 尺寸：长/宽/高为浮点（生成器保证每边 ≥ minSide、三边总和 ≤ 3），使用标准立方体网格 + 加粗线框棱；
-///   - 类型：Attack=红 / Heal=绿 / Bomb=蓝；
+///   - 类型：Attack=红 / Bomb=蓝（Heal=绿 已废弃，生成器不再产出，枚举仅为兼容保留）；
 ///   - 运动：仅沿生成时的单个坐标轴方向朝原点飞行（其余轴坐标不变）；任一 AABB 边缘首次到达任意轴坐标 0 平面时销毁；
 ///   - 防重叠：移动前通过 FlyingBlockSpawner 检测目标 AABB，若与其它长方体相交则本帧原地等待；
 ///   - 高亮：准心指向时整体变亮、线框加粗，并在几何中心显示高亮原点标记；
 ///   - 行进面：长方体使用 6-submesh 单位立方体网格，行进方向对应的面渲染为白色；
 ///   - 中心标记：从白色面一侧查看时中心点渲染为黑色，其余角度为白色；
-///   - 受击四阶段：每个块沿攻击方向分 4 层厚度（每层 = 初始尺寸的 1/4），每次激光命中从入射侧
-///     吃掉一层，剩余部分保留为子块继续飞行；累计 4 次被吃光即死亡。受击阶段颜色逐档变暗。
+///   - 受击阶段（HP）：每个块生成时 HP 随机为 1~7（等概率，恒 ≥ 1）。HP=1 表示首次被命中即碎掉（不产生残骸）；
+///     HP=N 表示沿攻击方向分 N 层厚度（每层 = 初始尺寸的 1/N），每次激光命中从入射侧吃掉一层，
+///     剩余部分保留为子块继续飞行，累计 N 次被吃光即死亡。受击阶段颜色逐档变暗。
+///   - 类型规则：蓝色（Bomb）炸弹块可被激光正常击打并击毁，但击毁既不加分也不扣分（score-neutral）；
+///     红色（Attack）方块抵达 0 平面基地时按剩余体积扣分，击毁红色方块按 初始体积 + 初始 HP 加分（详见 ScoreManager）。
+///   - 超时清理：方块记录生成时刻，存活超过 expireAfterSeconds（默认 60s）或已抵达/越过 0 平面时静默清除，
+///     不计分、不扣分、不触发任何 ScoreManager 逻辑（红块正常抵达基地的漏块罚分不受影响）。
 /// </summary>
 public class FlyingBlock : MonoBehaviour
 {
@@ -20,8 +25,8 @@ public class FlyingBlock : MonoBehaviour
     public enum BlockType
     {
         Attack, // 攻击型：红
-        Heal,   // 恢复型：绿
-        Bomb    // 炸弹型：蓝
+        Heal,   // 恢复型：绿（已废弃：生成器不再产出，仅为兼容旧引用 / 序列化值保留）
+        Bomb    // 炸弹型：蓝（可被击打并击毁，击毁不加分也不扣分）
     }
 
     [Header("配置")]
@@ -32,9 +37,14 @@ public class FlyingBlock : MonoBehaviour
     [Tooltip("防重叠检测允许的最小间距")]
     public float overlapMargin = 0.05f;
 
-    [Header("受击阶段")]
-    [Tooltip("受击总层数：每层 = 初始尺寸沿攻击方向的 1/4，累计打满即死亡")]
+    [Header("受击阶段 / 血量")]
+    [Tooltip("血量（= 受击总层数），生成时由 FlyingBlockSpawner 随机赋值为 1~7（恒 ≥ 1）：1 = 首次被命中即碎掉（无残骸），" +
+             "N = 沿攻击方向分 N 层（每层 = 初始尺寸的 1/N），累计 N 次被吃光死亡")]
     public int maxHits = 4;
+
+    [Header("超时清理")]
+    [Tooltip("存活时长上限（秒）：生成后超过此时间仍未被消灭则静默清除（不计分、不扣分）。<= 0 表示不启用超时清理")]
+    public float expireAfterSeconds = 60f;
 
     /// <summary>类型。</summary>
     public BlockType Type { get; private set; }
@@ -42,8 +52,14 @@ public class FlyingBlock : MonoBehaviour
     /// <summary>累计受击次数（形态阶段：0=完整，1~3=被吃掉对应层数，≥maxHits 死亡）。</summary>
     public int HitCount { get; private set; }
 
-    /// <summary>剩余血量（剩余层数）：maxHits - HitCount，供 HUD 显示。</summary>
+    /// <summary>剩余血量（剩余层数）：maxHits - HitCount，供 HUD 显示。血量恒 ≥ 1，被吃光前不会为 0。</summary>
     public int RemainingHits => Mathf.Max(0, maxHits - HitCount);
+
+    /// <summary>当前剩余体积（三边之积）：红色方块抵达基地时按此体积扣分。</summary>
+    public float Volume => size.x * size.y * size.z;
+
+    /// <summary>初始体积（生成时三边之积，不随受击削减）：击毁得分按此体积计算。</summary>
+    public float InitialVolume => initialSize.x * initialSize.y * initialSize.z;
 
     /// <summary>几何中心（世界坐标，长方体不旋转时即 transform.position）。</summary>
     public Vector3 GeometryCenter => colliderRef != null ? colliderRef.bounds.center : transform.position;
@@ -51,8 +67,17 @@ public class FlyingBlock : MonoBehaviour
     /// <summary>半尺寸（AABB 半宽/半高/半深）。</summary>
     public Vector3 HalfExtents => size * 0.5f;
 
+    /// <summary>当前速度向量（单位/秒）：移动方向 × 速度，供 GetAllObjects 暴露。</summary>
+    public Vector3 Velocity => moveDir * speed;
+
     /// <summary>编号（生成器分配，HUD 显示）。</summary>
     public int BlockId { get; private set; }
+
+    /// <summary>生成时刻（Time.time）。受击后产生的剩余子块从自身创建时刻重新计时。</summary>
+    public float SpawnTime => spawnTime;
+
+    /// <summary>已存活时长（秒）。</summary>
+    public float AliveSeconds => Time.time - spawnTime;
 
     /// <summary>是否已进入销毁流程。</summary>
     public bool Destroyed { get; private set; }
@@ -71,12 +96,15 @@ public class FlyingBlock : MonoBehaviour
     private Vector3 moveDir = Vector3.zero;
     private Vector3 initialSize; // 生成时的初始尺寸，用于固定每层厚度（与受击后的当前尺寸无关）
     private bool highlighted;
+    private float spawnTime; // 生成时刻（以 Time.time 记录，用于"存活过久静默清除"判定；暂停时 Time.time 不增长故不会误清）
 
-    /// <summary>初始化（由生成器调用）。</summary>
-    public void Init(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir)
+    /// <summary>初始化（由生成器调用）。hp = 该块血量（受击层数），1~7，由生成器 Random.Range(1, 8) 随机给出。</summary>
+    public void Init(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir, int hp)
     {
         Type = type;
         BlockId = blockId;
+        maxHits = Mathf.Max(1, hp); // 血量 = 受击层数，恒 ≥ 1：HP=1 时第 1 发命中即吃满死亡（不会出现 0 血块）
+        spawnTime = Time.time;      // 记录生成时刻，供超时静默清除判定
         size = new Vector3(
             Mathf.Max(blockSize.x, 0.4f),
             Mathf.Max(blockSize.y, 0.4f),
@@ -91,11 +119,13 @@ public class FlyingBlock : MonoBehaviour
         ReapplyColor();
     }
 
-    /// <summary>受击剩余子块专用初始化：尺寸使用切割计算的精确值，不做每边 ≥0.4 的保底；继承源块初始尺寸与受击次数（形态阶段连续）。</summary>
-    public void InitRemnant(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir, Vector3 originSize, int hitCount)
+    /// <summary>受击剩余子块专用初始化：尺寸使用切割计算的精确值，不做每边 ≥0.4 的保底；继承源块初始尺寸、血量与受击次数（形态阶段连续）。</summary>
+    public void InitRemnant(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir, Vector3 originSize, int hitCount, int hp)
     {
         Type = type;
         BlockId = blockId;
+        maxHits = Mathf.Max(1, hp); // 继承源块血量（恒 ≥ 1）：子块与源块共用同一份 HP，避免被打过的块血量被重置
+        spawnTime = Time.time;      // 子块从自身创建时刻重新计时（超时清理以子块生命周期为准）
         size = blockSize; // 不 clamp：激光切割出的精确剩余尺寸
         initialSize = originSize; // 继承源块初始尺寸：后续受击每层厚度仍按初始尺寸的 1/maxHits 计算
         HitCount = hitCount;
@@ -122,6 +152,8 @@ public class FlyingBlock : MonoBehaviour
     /// 剩余部分保留为一个子块继续飞行，形态阶段（HitCount）连续累计；
     /// 累计 maxHits 次受击后整块被吃光，直接死亡销毁。
     /// 返回剩余子块列表（空 = 本块被吃光死亡）；未命中返回 null。
+    /// 蓝色炸弹块与红色攻击块走完全相同的切割流程（可被击打、可被击毁），
+    /// 区别仅在于击毁蓝块不产生任何分数变化（ScoreManager.ApplyKill 对 Bomb 直接返回）。
     /// </summary>
     public List<FlyingBlock> CutByLaser(Vector3 laserOrigin, Vector3 laserDir, float laserRadius)
     {
@@ -138,13 +170,16 @@ public class FlyingBlock : MonoBehaviour
         float ax = Mathf.Abs(rayDir.x), ay = Mathf.Abs(rayDir.y), az = Mathf.Abs(rayDir.z);
         int cutAxis = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
 
-        // 受击计数：第 maxHits 次受击整块被吃光，直接死亡
+        // 受击计数：第 maxHits 次受击整块被吃光，直接死亡（maxHits 由生成器给出 1~7，恒 ≥ 1；
+        // HP=1 的块第 1 发命中即被吃光，不存在 HP=0 的一击即毁块）
         HitCount++;
         if (HitCount >= maxHits)
         {
             FlyingBlockSpawner killerSpawner = FlyingBlockSpawner.Instance;
             if (killerSpawner != null)
                 killerSpawner.RegisterPlayerKill(); // 玩家激光消灭计数（教学任务用）
+            // 击毁奖励：按 初始体积 + 初始 HP 加分（分值规则见 ScoreManager.ApplyKill）
+            ScoreManager.NotifyBlockDestroyed(Type, InitialVolume, maxHits);
             DestroyBlock("hit_exhausted");
             return new List<FlyingBlock>();
         }
@@ -153,8 +188,8 @@ public class FlyingBlock : MonoBehaviour
         if (spawner == null)
             return null;
 
-        // 每层厚度 = 初始尺寸沿攻击轴的 1/maxHits（固定，不受已吃层数影响）
-        float layerThickness = Mathf.Abs(initialSize[cutAxis]) / maxHits;
+        // 每层厚度 = 初始尺寸沿攻击轴的 1/maxHits（固定，不受已吃层数影响）；maxHits=0 已在上面死亡返回，此处仅作除零保护
+        float layerThickness = Mathf.Abs(initialSize[cutAxis]) / Mathf.Max(1, maxHits);
         float minA = center[cutAxis] - half[cutAxis];
         float maxA = center[cutAxis] + half[cutAxis];
 
@@ -180,7 +215,7 @@ public class FlyingBlock : MonoBehaviour
             Vector3 newCenter = center;
             newSize[cutAxis] = remainHigh - remainLow;
             newCenter[cutAxis] = (remainLow + remainHigh) * 0.5f; // 剩余子块中心 = 剩余区间中点
-            FlyingBlock r = spawner.CreateRemnant(this, Type, newSize, newCenter, moveDir, speed, initialSize, HitCount);
+            FlyingBlock r = spawner.CreateRemnant(this, Type, newSize, newCenter, moveDir, speed, initialSize, HitCount, maxHits);
             if (r != null) remnants.Add(r);
         }
 
@@ -257,6 +292,14 @@ public class FlyingBlock : MonoBehaviour
         if (Destroyed)
             return;
 
+        // 0) 超时静默清除：存活超过 expireAfterSeconds（默认 60s）仍未被消灭 → 直接清除
+        //    不计分、不扣分、不触发任何 ScoreManager 逻辑，避免久飞不落的方块长期占场
+        if (expireAfterSeconds > 0f && Time.time - spawnTime > expireAfterSeconds)
+        {
+            DestroyBlock("life_expired");
+            return;
+        }
+
         // 1) 防重叠移动：目标位置若与其它长方体相交则本帧原地等待
         Vector3 nextPos = transform.position + moveDir * speed * Time.deltaTime;
         FlyingBlockSpawner spawner = FlyingBlockSpawner.Instance;
@@ -266,6 +309,8 @@ public class FlyingBlock : MonoBehaviour
         }
 
         // 2) 边界销毁：任一 AABB 边缘首次到达任意轴坐标 = 0（0 平面进入长方体）即销毁
+        //    红色攻击方块：抵达/跨过基地 → 按剩余体积扣分；
+        //    蓝色炸弹块：抵达/跨过 0 平面 → 静默清除（不计分、不扣分）
         Vector3 center = transform.position;
         Vector3 half = HalfExtents;
         Vector3 min = center - half;
@@ -274,7 +319,16 @@ public class FlyingBlock : MonoBehaviour
             (min.y <= 0f && max.y >= 0f) ||
             (min.z <= 0f && max.z >= 0f))
         {
-            DestroyBlock("edge_reached_zero");
+            // 红色攻击方块抵达基地：按当前剩余体积扣分（被打小的块扣得少）
+            if (Type == BlockType.Attack)
+            {
+                ScoreManager.NotifyAttackLeaked(Volume);
+                DestroyBlock("edge_reached_zero");
+            }
+            else
+            {
+                DestroyBlock("zero_plane_cleared");
+            }
         }
     }
 

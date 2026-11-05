@@ -11,7 +11,13 @@ AIGC:
 
 # ABOVE THE VOID - Tuanjie 3D Coordinate System Framework
 
-Current version: **v0.1.2**
+Current version: **v0.1.3**
+
+### v0.1.3
+
+- Added per-run scoring with kill rewards, leak penalties, and score delta feedback.
+- Added the top-left score HUD, including negative-score styling and automatic delta fading.
+- Added score reset integration when starting or restarting a level.
 
 ### v0.1.2
 
@@ -49,6 +55,7 @@ The core experience includes a 3D coordinate system, an origin camera, mouse loo
 | Main menu | Startup menu with project information, language selection, and level entry points. |
 | Level 1 tutorial | Guided introduction to movement, camera control, and flying blocks. |
 | Flying blocks | Axis-aligned blocks travel toward the origin with type-specific colors and behavior. |
+| Score system | Earn points for destroying Attack and Heal blocks, receive penalties when Attack blocks leak, and keep Bomb blocks score-neutral. |
 | Developer console | Inspect state and navigate to supported level parts. |
 | Code editor | Press Enter to edit tower code with syntax highlighting, diagnostics, undo/redo, and runtime execution. |
 | Pause | Press ESC in any gameplay mode to pause and resume. |
@@ -77,6 +84,7 @@ ABOVE THE VOID/
 │       ├── FlyingBlock.cs                 # Flying block behavior and visuals
 │       ├── FlyingBlockSpawner.cs          # Block spawning and registration
 │       ├── BlockHitIndicator.cs           # Crosshair hit feedback
+│       ├── ScoreManager.cs                # Per-run score and HUD
 │       ├── CodeEditorController.cs        # In-game code editor and runner
 │       ├── CodeTower.cs                   # Code-controlled tower interface
 │       ├── UIFitScreen.cs                 # Screen-fitting UI helper

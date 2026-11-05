@@ -71,6 +71,14 @@ public static class LevelDirector
         if (tower != null)
             tower.SetVisualVisible(level3);
 
+        // 计分：每次跳转关卡都重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
+        ScoreManager.ResetAll();
+
+        // 鼠标左键手动激光：Level 3 完整玩法关关闭（改由代码编辑器 / 炮台自动开火接管），
+        // Level 1 教学关保留（教学 Step.FireLaser 需要左键开火）。
+        // 仅影响「左键 → FireLaser」手动链路，不影响 tower.FireAtPlane 等自动化调用。
+        CommandConsoleController.ManualLaserEnabled = !level3;
+
         // Level 3 完整玩法关：进入即自动进入 E 键时间冻结状态，并提示按下 Enter 输入代码
         if (level3)
         {

@@ -25,6 +25,7 @@ public class GameBootstrap : MonoBehaviour
     public bool createTutorial = true;
     public bool createCodeTower = true;
     public bool createCodeEditor = true;
+    public bool createScore = true;
 
     private void Awake()
     {
@@ -136,6 +137,13 @@ public class GameBootstrap : MonoBehaviour
         {
             GameObject editor = new GameObject("UI_CodeEditor");
             editor.AddComponent<CodeEditorController>();
+        }
+
+        // 14. 计分系统（击毁红块加分 / 红色方块抵达基地扣分 / 蓝色方块可击毁但不计分，左上角 HUD）
+        if (createScore && FindObjectOfType<ScoreManager>() == null)
+        {
+            GameObject score = new GameObject("UI_Score");
+            score.AddComponent<ScoreManager>();
         }
     }
 }

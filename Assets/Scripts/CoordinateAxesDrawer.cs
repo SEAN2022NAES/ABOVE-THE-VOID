@@ -35,7 +35,22 @@ public class CoordinateAxesDrawer : MonoBehaviour
 
     private void Awake()
     {
+        // 先清除本物体下旧的可视化元素，再重建：
+        // 避免 Play 模式热重载脚本时旧箭头/旧标签残留叠加成"延长线"或"小太阳"。
+        ClearExistingDrawings();
         DrawAxes();
+    }
+
+    /// <summary>清除本物体下此前程序创建的可视化物体（仅限本脚本命名的前缀，不影响场景其它物体）。</summary>
+    private void ClearExistingDrawings()
+    {
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            Transform child = transform.GetChild(i);
+            string childName = child.name;
+            if (childName.StartsWith("Axis_") || childName.StartsWith("Tick_") || childName.StartsWith("Label_"))
+                Destroy(child.gameObject);
+        }
     }
 
     private void DrawAxes()
@@ -43,7 +58,8 @@ public class CoordinateAxesDrawer : MonoBehaviour
         // 当前视图约定：Z 竖直且居中，X（蓝）为深度方向（世界 Z），Y（红）为右方向（世界 X）。
         Vector3 xTip = new Vector3(0f, 0f, axisLength);   // X 轴（蓝）：画在世界 Z 方向（深度）
         Vector3 yTip = new Vector3(axisLength, 0f, 0f);   // Y 轴（红）：画在世界 X 方向（右）
-        // Z 轴正方向向上；标签单独做水平镜像以匹配当前图示。
+        // Z 轴正方向向上；标签朝向由 BillboardToCamera 统一保证"正面朝相机可正读"，
+        // 这里不再使用水平镜像（镜像会让 Z 显示成反字）。
         Vector3 zTip = new Vector3(0f, axisLength, 0f);   // Z 轴（绿）：竖直向上
 
         // 正方向使用轴颜色，负方向使用对应的反色。
@@ -54,21 +70,18 @@ public class CoordinateAxesDrawer : MonoBehaviour
         DrawLine(Vector3.zero, -yTip, InvertColor(yColor), axisWidth, "Axis_Negative_Y");
         DrawLine(Vector3.zero, -zTip, InvertColor(zColor), axisWidth, "Axis_Negative_Z");
 
-        // 正方向箭头（方向随轴角色互换：X 沿深度、Y 沿右、Z 仍竖直）
-        DrawArrowTip(xTip, Vector3.forward, Vector3.up, xColor, "Arrow_X");
-        DrawArrowTip(yTip, Vector3.right, Vector3.up, yColor, "Arrow_Y");
-        DrawArrowTip(zTip, Vector3.up, Vector3.right, zColor, "Arrow_Z");
-
         // 仅 ±1 刻度使用轴颜色，其余刻度统一为白色。
         DrawTicks(Vector3.forward, Vector3.up, xColor, "Tick_X");
         DrawTicks(Vector3.right, Vector3.up, yColor, "Tick_Y");
         DrawTicks(Vector3.up, Vector3.right, zColor, "Tick_Z");
 
         // 轴名称标签（Billboard 面向玩家，加载外部图片素材，便于替换）
-        // X 在深度端用居中；Y 在右端保持底部对齐避免遮挡；Z 竖直端保持水平镜像
+        // X 在深度端用居中；Y 在右端保持底部对齐避免遮挡；Z 在竖直轴顶端底部对齐，字身向上让开轴端。
+        // 注：Z 标签曾被当成“小太阳”装饰删掉，现恢复；三处标签均为纯字母，不含 < > 等
+        //     RichText 标记字符，TextMesh 默认 richText 不会吞字或改变显示。
         DrawLabel(xTip + Vector3.up * 0.45f, "X", "Label_X", xColor);
         DrawLabel(yTip, "Y", "Label_Y", yColor, false, true);
-        DrawLabel(zTip + Vector3.up * 0.45f, "Z", "Label_Z", zColor, true);
+        DrawLabel(zTip + Vector3.up * 0.35f, "Z", "Label_Z", zColor, false, true);
     }
 
     /// <summary>创建一条线段（LineRenderer）。</summary>

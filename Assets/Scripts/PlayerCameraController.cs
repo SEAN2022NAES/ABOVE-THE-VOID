@@ -72,9 +72,9 @@ public class PlayerCameraController : MonoBehaviour
     }
 
     // 视角朝向
-    // 初始朝向同时观察三个正方向：X=右、Y=左、Z=上。
-    private float yaw = 45f;    // 绕 Y 轴（水平）
-    private float pitch = -35.264f;  // 绕 X 轴（垂直），初始同时朝向三个正方向
+    // 出生即面向蓝色 X 轴正方向：X 轴画在世界 +Z，故相机前向 = 世界 +Z（yaw=0），俯仰 0° 保持水平正视。
+    private float yaw = 0f;    // 绕 Y 轴（水平）
+    private float pitch = 0f;  // 绕 X 轴（垂直），0 表示水平直视 X 轴正方向
 
     // 暂停前模式，恢复时回到原模式
     private GameMode modeBeforePause = GameMode.Normal;
@@ -424,8 +424,8 @@ public class PlayerCameraController : MonoBehaviour
         Mode = GameMode.Normal;
         modeBeforePause = GameMode.Normal;
         Time.timeScale = 1f;
-        yaw = 45f;
-        pitch = -35.264f;
+        yaw = 0f;
+        pitch = 0f;
         if (playerCamera != null)
         {
             playerCamera.transform.position = origin;

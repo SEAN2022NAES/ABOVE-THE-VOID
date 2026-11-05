@@ -1,31 +1,42 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
 /// 原点炮台（Code Tower）：
 ///   - 位置恒定在原点 (0,0,0)（每帧强制归位），为「代码编辑器」的用户代码提供可调用接口；
 ///   - 视觉：纯代码构建简易炮台——底座圆柱 + 可旋转炮管圆柱（深灰 #3A3A3A），炮口端亮青色；
-///   - 激光：从炮口沿 AimDirection 发射（射程 laserMaxLength=60、半径 laserRadius=0.15），复用现有规则——
-///     命中 FlyingBlock 调 block.CutByLaser（受击四阶段），并触发 CommandConsoleController.OnLaserFired 事件；
-///   - 冷却：cooldownSeconds = 0.25s，用 Time.time 判断，冷却中 FireLaser 返回 false；
-///   - 公开 API（签名固定）供运行时编译的用户代码直接调用。
+///   - 激光：从炮口沿当前朝向发射（射程 laserMaxLength=60、作用/视觉半径 laserRadius=0.02 超级小，
+///     与鼠标左键触发的玩家激光等效的动画：双层圆柱 + 命中火花，淡出销毁），
+///     每个命中 FlyingBlock 只扣 1 层 HP（CutByLaser 吃一层厚度，累计吃满该块随机 HP 即死亡，HP 恒 ≥ 1、HP=1 一击即毁）；
+///     蓝色炸弹块（Bomb）可被激光正常击打并击毁，但击毁既不加分也不扣分（与红块同等切割流程）；
+///     并触发 CommandConsoleController.OnLaserFired 事件；
+///   - 冷却：cooldownSeconds = 0.0285s（约 35 发/秒，为 0.03s 节奏留余量；即原 0.019s 的 1.5 倍），
+///     用 Time.time 判断，冷却中发射返回 false；
+///   - 公开 API（签名固定，编辑器用户代码可直接调用）：
+///     GetAllObjects() / FireAtPlane(A,B,C,D) / GetFireCooldown() /
+///     Print(format, args...) / PrintLine(format, args...) / ClearPrint()。
+///   - print 荧幕：立在蓝色 X 轴正方向（世界 +Z）上方、面朝原点的世界空间显示面板，
+///     用户代码调用 Print / PrintLine 即把文本输出到荧幕上（不写 Unity Debug 日志）。
 /// </summary>
 public class CodeTower : MonoBehaviour
 {
     [Header("激光")]
-    [Tooltip("激光半径（粗细）")]
-    public float laserRadius = 0.15f;
+    [Tooltip("激光作用/视觉半径（粗细，超级小；仅影响视觉粗细，命中判定为射线与 AABB 求交，不依赖此值）")]
+    public float laserRadius = 0.02f;
     [Tooltip("激光最大射程（单位）")]
     public float laserMaxLength = 60f;
-    [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）")]
-    public float laserVisualDuration = 0.9f;
+    [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）。" +
+             "高频连射（0.02s）下需保持短促，否则同时叠加数十组激光视觉")]
+    public float laserVisualDuration = 0.15f;
     [Tooltip("激光视觉颜色（亮青色）")]
     public Color laserColor = new Color(0.3f, 1f, 1f, 0.9f);
 
     [Header("炮台")]
-    [Tooltip("开火冷却时间（秒）")]
-    public float cooldownSeconds = 0.25f;
+    [Tooltip("开火冷却时间（秒，射击间隔下限）。0.0285s（约 35 发/秒，为原 0.019s 的 1.5 倍），"
+             + "给用户代码 0.03s 节奏留出余量，避免内部冷却把间隔拦回更长")]
+    public float cooldownSeconds = 0.0285f;
     [Tooltip("炮台主体颜色（深灰 #3A3A3A）")]
     public Color towerColor = new Color(0.227f, 0.227f, 0.227f, 1f);
     [Tooltip("炮口高亮颜色（亮青色）")]
@@ -35,98 +46,141 @@ public class CodeTower : MonoBehaviour
     private GameObject baseVisual; // 底座（炮台实体根，SetVisualVisible 控制）
     private Transform barrelRoot;  // 炮管旋转轴（位于底座顶面中心）
     private Transform muzzleTip;   // 炮口端亮青色小球
-    private LineRenderer aimLine;  // 瞄准预览线（DrawAimLine 控制）
+    private LineRenderer aimLine;  // 瞄准预览线（内部 UpdateAimLine 控制）
 
     // 朝向与冷却
     private Vector3 aimDir = Vector3.forward;
     private float lastFireTime = -1000f; // 初始视为已冷却，可立即发射
 
-    /// <summary>炮台世界位置（恒定原点）。</summary>
-    public Vector3 Position => transform.position;
+    // print 荧幕（世界空间，立在蓝色 X 轴正方向即世界 +Z 上方、面朝原点，由 BuildPrintScreen 构建）
+    private const float PrintScreenDistance = 12f;  // 距原点距离（沿世界 +Z，即蓝色 X 轴方向）
+    private const float PrintScreenWidthMin = 5.2f; // 荧幕最小宽度（世界米，比原 3.4 加宽）
+    private const float PrintScreenWidthMax = 9.5f; // 荧幕最大宽度（世界米，防止过宽遮挡场景）
+    private const float PrintScreenHeight = 1.9f;   // 荧幕世界高度（米，初始值；高度自适应后动态调整）
+    private const float PrintScreenHeightMin = 1.2f; // 荧幕最小高度（世界米，约 3 行）
+    private const float PrintScreenHeightMax = 5.5f; // 荧幕最大高度（世界米，防止过高遮挡场景）
+    private const float PrintScreenBaseY = 2.8f;    // 荧幕底部离地高度（米）
+    private const int PrintMaxLines = 24;           // 荧幕最多保留行数（超出滚动丢弃最旧）
+    private const int PrintFontSize = 26;           // 荧幕字号（Canvas 局部像素单位）
+    private Text printText;                          // 荧幕文本（null 表示尚未构建）
+    private RectTransform printCanvasRt;             // 荧幕 Canvas 的 RectTransform（自适应宽度用）
+    private readonly List<string> printLines = new List<string>(); // 荧幕当前行
 
-    /// <summary>当前炮口朝向（归一化）。</summary>
-    public Vector3 AimDirection => aimDir;
+    /// <summary>剩余冷却秒数（0 表示已就绪）。</summary>
+    private float CooldownLeft => Mathf.Max(0f, cooldownSeconds - (Time.time - lastFireTime));
 
-    /// <summary>是否已冷却完毕可发射。</summary>
-    public bool CanFire => Time.time - lastFireTime >= cooldownSeconds;
+    // ---------------- 公开 API（炮台代码编辑器用户代码可直接调用） ----------------
 
-    /// <summary>冷却进度（0=冷却完毕可发射，1=刚发射完）。</summary>
-    public float Cooldown01
+    /// <summary>场上单个 object 的信息：编号 / 类型 / HP / 位置 / 速度 / 参数。</summary>
+    public struct TowerObjectInfo
     {
-        get
+        public int Index;        // 编号（FlyingBlock 生成编号，由生成器全局递增分配，非数组下标）
+        public string Type;      // 类型文本：ATTACK（红，击毁加分）/ BOMB（蓝，可击毁但不加分不扣分）/ HEAL（已废弃，不再生成）
+        public int HP;           // 剩余血量（剩余受击层数）
+        public Vector3 Position; // 几何中心（世界坐标）
+        public Vector3 Velocity; // 速度向量（单位/秒，飞行方向 × 速度）
+        public string Params;    // 参数摘要：尺寸 / 速度 / 受击进度等
+
+        // ---- 计分 / 几何扩展字段（供用户代码做收益最大化决策；追加字段不影响任何现有按名访问） ----
+        public float Volume;        // 当前剩余体积（随受击切割变小；用于估算漏块罚分）
+        public float InitialVolume; // 初始体积（计分用，切割后不变）
+        public int MaxHits;         // 初始受击层数（= FlyingBlock.maxHits；计分用）
+        public Vector3 Size;        // 当前尺寸（三边长，用于激光路径 AABB 求交）
+
+        public override string ToString()
         {
-            float t = Time.time - lastFireTime;
-            if (t >= cooldownSeconds)
-                return 0f;
-            return Mathf.Clamp01(1f - t / Mathf.Max(0.0001f, cooldownSeconds));
+            return "{#" + Index + " " + Type + ", HP=" + HP + ", Position=" + Position.ToString("F2") +
+                   ", Velocity=" + Velocity.ToString("F2") + ", [" + Params + "]}";
         }
     }
 
-    /// <summary>剩余冷却秒数。</summary>
-    public float CooldownLeft => Mathf.Max(0f, cooldownSeconds - (Time.time - lastFireTime));
-
-    /// <summary>场上离原点最近的活跃块（无则 null）。</summary>
-    public FlyingBlock NearestBlock
+    /// <summary>返回场上所有活跃 object 的列表（含编号、类型、HP、位置、速度、参数）。</summary>
+    public List<TowerObjectInfo> GetAllObjects()
     {
-        get
+        List<TowerObjectInfo> result = new List<TowerObjectInfo>();
+        FlyingBlockSpawner spawner = FlyingBlockSpawner.Instance;
+        if (spawner == null || spawner.ActiveBlocks == null)
+            return result;
+        for (int i = 0; i < spawner.ActiveBlocks.Count; i++)
         {
-            FlyingBlockSpawner spawner = FlyingBlockSpawner.Instance;
-            if (spawner == null || spawner.ActiveBlocks == null || spawner.ActiveBlocks.Count == 0)
-                return null;
-
-            Vector3 towerPos = transform.position;
-            FlyingBlock best = null;
-            float bestSqr = float.MaxValue;
-            for (int i = 0; i < spawner.ActiveBlocks.Count; i++)
+            FlyingBlock b = spawner.ActiveBlocks[i];
+            if (b == null || b.Destroyed)
+                continue;
+            result.Add(new TowerObjectInfo
             {
-                FlyingBlock b = spawner.ActiveBlocks[i];
-                if (b == null || b.Destroyed)
-                    continue;
-                float d = (b.GeometryCenter - towerPos).sqrMagnitude;
-                if (d < bestSqr)
-                {
-                    bestSqr = d;
-                    best = b;
-                }
-            }
-            return best;
+                Index = b.BlockId, // 编号 = 生成器分配的全局递增编号（非数组下标）
+                Type = FlyingBlock.GetTypeText(b.Type),
+                HP = b.RemainingHits,
+                Position = b.GeometryCenter,
+                Velocity = b.Velocity,
+                Params = "size=" + b.size.ToString("F2") +
+                         " speed=" + b.speed.ToString("F2") +
+                         " hits=" + b.HitCount + "/" + b.maxHits,
+                Volume = b.Volume,
+                InitialVolume = b.InitialVolume,
+                MaxHits = b.maxHits,
+                Size = b.size
+            });
         }
-    }
-
-    /// <summary>尝试获取离原点最近的活跃块。</summary>
-    public bool TryGetNearestBlock(out FlyingBlock block)
-    {
-        block = NearestBlock;
-        return block != null;
-    }
-
-    /// <summary>场上方块数量。</summary>
-    public int ActiveBlockCount
-        => FlyingBlockSpawner.Instance != null ? FlyingBlockSpawner.Instance.ActiveBlocks.Count : 0;
-
-    /// <summary>已流逝时间（游戏时间，受 timeScale 影响）。</summary>
-    public float Elapsed => Time.time;
-
-    /// <summary>本帧时间增量（受时间冻结影响）。</summary>
-    public float DeltaTime => Time.deltaTime;
-
-    /// <summary>随机范围（min ~ max）。</summary>
-    public float RandomRange(float min, float max) => Random.Range(min, max);
-
-    /// <summary>打印日志。</summary>
-    public void Log(string message) => Debug.Log("[CodeTower] " + message);
-
-    /// <summary>是否显示炮口朝向预览线（从炮口到射程末端）。</summary>
-    public void DrawAimLine(bool on)
-    {
-        if (aimLine != null)
-            aimLine.gameObject.SetActive(on);
+        return result;
     }
 
     /// <summary>
-    /// 控制炮台实体视觉显隐（Level 1 教学关不显示炮台模型，仅保留原点炮台功能；
-    /// Level 3 完整玩法关显示实体炮台）。隐藏仅关掉底座 / 炮管 / 炮口 / 瞄准线，
-    /// Aim / FireLaser / NearestBlock 等 API 与激光发射功能不受影响。
+    /// 按平面方程 Ax+By+Cz+D=0 发射：炮台自动瞄准该平面（从原点指向平面垂足方向）并开火。
+    /// 冷却中返回 false；法向量 (A,B,C) 为零向量时返回 false。
+    /// </summary>
+    public bool FireAtPlane(float A, float B, float C, float D)
+    {
+        Vector3 normal = new Vector3(A, B, C);
+        if (normal.sqrMagnitude <= 0.0001f)
+            return false;
+        Vector3 dir;
+        if (Mathf.Abs(D) < 1e-6f)
+            dir = normal;      // 平面过原点：沿法线方向发射
+        else
+            dir = -D * normal; // 从原点指向平面垂足方向
+        Aim(dir);
+        return FireLaser();
+    }
+
+    /// <summary>返回距下一发可发射的剩余冷却时间（秒，0 表示已就绪）。</summary>
+    public float GetFireCooldown() => CooldownLeft;
+
+    // ---------------- print 荧幕 API（用户代码调用后输出到 +X 前方荧幕，不写 Debug 日志） ----------------
+
+    /// <summary>
+    /// 向 +X 前方荧幕打印文本（不换行）。
+    /// format 使用 C# 原生 string.Format 占位符（{0} {1} ...），等价于 C++ printf 的格式化风格。
+    /// 示例：tower.Print("HP={0}", 100);
+    /// </summary>
+    public void Print(string format, params object[] args)
+    {
+        string text = (args != null && args.Length > 0) ? string.Format(format, args) : format;
+        AppendToScreen(text, false);
+    }
+
+    /// <summary>
+    /// 向 +X 前方荧幕打印文本并换行。
+    /// format 使用 C# 原生 string.Format 占位符（{0} {1} ...），等价于 C++ printf 的格式化风格。
+    /// 示例：tower.PrintLine("HP={0} pos={1}", hp, pos);
+    /// </summary>
+    public void PrintLine(string format, params object[] args)
+    {
+        string text = (args != null && args.Length > 0) ? string.Format(format, args) : format;
+        AppendToScreen(text, true);
+    }
+
+    /// <summary>清空荧幕全部内容。</summary>
+    public void ClearPrint()
+    {
+        printLines.Clear();
+        RefreshPrintScreen();
+    }
+
+    /// <summary>
+    /// 控制炮台实体视觉显隐（仅供关卡脚本 GameBootstrap / LevelDirector / TutorialController 调用，
+    /// 不面向编辑器用户代码）。隐藏仅关掉底座 / 炮管 / 炮口 / 瞄准线，
+    /// 激光发射等接口功能不受影响。
     /// </summary>
     public void SetVisualVisible(bool visible)
     {
@@ -134,12 +188,13 @@ public class CodeTower : MonoBehaviour
             baseVisual.SetActive(visible);
         if (barrelRoot != null)
             barrelRoot.gameObject.SetActive(visible);
-        // 瞄准线不随实体显隐：由 DrawAimLine 单独控制（默认关闭）
+        // 瞄准线不随实体显隐：保持自身当前显隐状态（默认关闭）
     }
 
     private void Awake()
     {
         BuildVisual();
+        BuildPrintScreen();
     }
 
     private void Update()
@@ -153,8 +208,8 @@ public class CodeTower : MonoBehaviour
             UpdateAimLine();
     }
 
-    /// <summary>设置炮口朝向（非零向量归一化，旋转炮管子物体；零向量忽略）。</summary>
-    public void Aim(Vector3 direction)
+    /// <summary>设置炮口朝向（非零向量归一化，旋转炮管子物体；零向量忽略）。仅供内部 / FireAtPlane 使用。</summary>
+    private void Aim(Vector3 direction)
     {
         if (direction.sqrMagnitude <= 0.0001f)
             return;
@@ -166,13 +221,13 @@ public class CodeTower : MonoBehaviour
     }
 
     /// <summary>
-    /// 发射激光：冷却中返回 false；成功则从炮口沿 AimDirection 发射
-    /// （射程 60、半径 0.15），命中所有 FlyingBlock 调 block.CutByLaser（受击四阶段），
+    /// 发射激光：冷却中返回 false；成功则从炮口沿当前朝向发射
+    /// （射程 60、半径 0.05；半径只影响视觉粗细，命中判定用射线 + AABB 求交），
     /// 触发 CommandConsoleController.OnLaserFired，并生成双层激光视觉（命中点带火花）。
     /// </summary>
-    public bool FireLaser()
+    private bool FireLaser()
     {
-        if (!CanFire)
+        if (Time.time - lastFireTime < cooldownSeconds)
             return false;
         lastFireTime = Time.time;
 
@@ -190,33 +245,26 @@ public class CodeTower : MonoBehaviour
             FlyingBlock block = hits[i].collider != null
                 ? hits[i].collider.GetComponentInParent<FlyingBlock>()
                 : null;
-            if (block != null && !block.Destroyed)
-            {
-                hitBlocks.Add(block);
-                if (hits[i].distance < nearestT)
-                    nearestT = hits[i].distance;
-            }
+            if (block == null || block.Destroyed)
+                continue;
+
+            // 蓝色炸弹块与红色攻击块同等对待：正常加入切割列表、正常可被击毁
+            // （击毁蓝块不加分也不扣分，该规则集中由 ScoreManager.ApplyKill 处理）
+            hitBlocks.Add(block);
+            if (hits[i].distance < nearestT)
+                nearestT = hits[i].distance;
         }
 
-        // 逐个命中：每个块从入射侧吃掉一层厚度（受击四阶段），第 4 层吃光即死亡
-        int hitCount = 0;
-        int deathCount = 0;
+        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~7，吃满即死亡；HP=1 一击即毁）
         foreach (FlyingBlock block in hitBlocks)
         {
-            List<FlyingBlock> remnants = block.CutByLaser(origin, dir, laserRadius);
-            if (remnants != null)
-            {
-                hitCount++;
-                if (remnants.Count == 0)
-                    deathCount++; // 被吃光死亡（无剩余子块）
-            }
+            block.CutByLaser(origin, dir, laserRadius);
         }
 
-        // 激光视觉：从炮口到最近命中点（未命中则打满射程）；命中时在端点额外显示火花特效
+        // 激光视觉：从炮口到最近命中点（未命中则打满射程）；命中任意目标时在端点额外显示火花特效
         Vector3 endPoint = origin + dir * nearestT;
         SpawnLaserVisual(origin, endPoint, hitBlocks.Count > 0);
 
-        Debug.Log("[CodeTower] 发射激光：hits=" + hitBlocks.Count + " deaths=" + deathCount);
         return true;
     }
 
@@ -290,6 +338,140 @@ public class CodeTower : MonoBehaviour
         Vector3 origin = MuzzleWorldPosition();
         aimLine.SetPosition(0, origin);
         aimLine.SetPosition(1, origin + aimDir * laserMaxLength);
+    }
+
+    // ---------------- print 荧幕（世界空间显示面板，立在蓝色 X 轴正方向即世界 +Z 上方、面朝原点） ----------------
+
+    /// <summary>
+    /// 构建 print 荧幕：世界空间 Canvas，位于蓝色 X 轴（世界 +Z）正方向上方（面朝原点），
+    /// 黑底半透明背景 + 亮青文字。此面板完全独立于 Unity Debug 日志，
+    /// Print / PrintLine 的输出只会显示在荧幕上。
+    /// </summary>
+    private void BuildPrintScreen()
+    {
+        // 根物体：世界空间 Canvas（局部坐标固定 → 父级原点炮台归位不影响）
+        GameObject canvasGo = new GameObject("PrintScreen");
+        canvasGo.transform.SetParent(transform, false);
+        canvasGo.transform.localPosition = new Vector3(
+            0f,
+            PrintScreenBaseY + PrintScreenHeight * 0.5f,
+            PrintScreenDistance);
+        // 不旋转：Canvas 正面（局部 -Z）保持指向世界 -Z，即从世界 +Z 侧回望原点
+        canvasGo.transform.localRotation = Quaternion.identity;
+        canvasGo.transform.localScale = Vector3.one * 0.01f; // 1:100，sizeDelta 像素 → 世界米
+
+        Canvas canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        // 注意：WorldSpace Canvas 不挂 CanvasScaler，避免其重写 localScale 导致面板尺寸异常
+        printCanvasRt = canvasGo.GetComponent<RectTransform>();
+        printCanvasRt.sizeDelta = new Vector2(PrintScreenWidthMin / 0.01f, PrintScreenHeight / 0.01f);
+
+        // 背景：极淡黑色衬底，保证文字可读但不形成大块黑色遮挡
+        GameObject bgGo = new GameObject("PrintScreen_Bg");
+        bgGo.transform.SetParent(canvasGo.transform, false);
+        Image bg = bgGo.AddComponent<Image>();
+        bg.color = new Color(0f, 0f, 0f, 0.22f);
+        RectTransform bgRt = bgGo.GetComponent<RectTransform>();
+        bgRt.anchorMin = Vector2.zero;
+        bgRt.anchorMax = Vector2.one;
+        bgRt.offsetMin = Vector2.zero;
+        bgRt.offsetMax = Vector2.zero;
+
+        // 文字：左上对齐、自动换行、超行滚动（RefreshPrintScreen 按内容自动选字体）
+        GameObject textGo = new GameObject("PrintScreen_Text");
+        textGo.transform.SetParent(canvasGo.transform, false);
+        printText = textGo.AddComponent<Text>();
+        printText.font = UIFontHelper.LoadForText("print screen", PrintFontSize);
+        printText.fontSize = PrintFontSize;
+        printText.color = new Color(0.3f, 1f, 1f, 1f);
+        printText.alignment = TextAnchor.UpperLeft;
+        printText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        printText.verticalOverflow = VerticalWrapMode.Overflow;
+        printText.supportRichText = false;
+        RectTransform textRt = textGo.GetComponent<RectTransform>();
+        textRt.anchorMin = Vector2.zero;
+        textRt.anchorMax = Vector2.one;
+        textRt.offsetMin = new Vector2(16f, 12f);
+        textRt.offsetMax = new Vector2(-16f, -12f);
+
+        printLines.Clear();
+        printLines.Add("== print screen ==");
+        RefreshPrintScreen();
+    }
+
+    /// <summary>向荧幕追加文本：newLine=false 时接在最后一行尾部，true 时新起一行；超出行数丢弃最旧。</summary>
+    private void AppendToScreen(string text, bool newLine)
+    {
+        if (printText == null)
+            return;
+        if (!newLine && printLines.Count > 0)
+            printLines[printLines.Count - 1] += text;
+        else
+            printLines.Add(text);
+        if (printLines.Count > PrintMaxLines)
+            printLines.RemoveRange(0, printLines.Count - PrintMaxLines);
+        RefreshPrintScreen();
+    }
+
+    /// <summary>用当前行列表刷新荧幕文本；按内容自动切换中 / 英字体（中→微软雅黑，英→Consolas）。</summary>
+    private void RefreshPrintScreen()
+    {
+        if (printText == null)
+            return;
+        string joined = string.Join("\n", printLines);
+        Font want = UIFontHelper.LoadForText(joined, PrintFontSize);
+        if (want != null && printText.font != want)
+            printText.font = want;
+        printText.text = joined;
+        UpdatePrintScreenWidth();
+        UpdatePrintScreenHeight();
+    }
+
+    /// <summary>
+    /// 按最长文本行自适应荧幕宽度：临时切 Overflow 取 preferredWidth（整段不换行所需宽度），
+    /// clamp 到 [PrintScreenWidthMin, PrintScreenWidthMax]；超出上限时保持 Wrap 在面板内折行，
+    /// 避免面板过宽遮挡场景。
+    /// </summary>
+    private void UpdatePrintScreenWidth()
+    {
+        if (printText == null || printCanvasRt == null)
+            return;
+        HorizontalWrapMode prev = printText.horizontalOverflow;
+        printText.horizontalOverflow = HorizontalWrapMode.Overflow; // 临时不换行，测真实宽度
+        Canvas.ForceUpdateCanvases();
+        float prefPx = printText.preferredWidth;
+        printText.horizontalOverflow = prev;
+
+        float maxPx = PrintScreenWidthMax / 0.01f;
+        float minPx = PrintScreenWidthMin / 0.01f;
+        float wPx = Mathf.Clamp(prefPx, minPx, maxPx);
+        printCanvasRt.sizeDelta = new Vector2(wPx, printCanvasRt.sizeDelta.y); // y 由高度自适应 UpdatePrintScreenHeight 控制
+
+        // 超过上限：保持自动换行，超长行在面板内折行显示
+        printText.horizontalOverflow = prefPx > maxPx ? HorizontalWrapMode.Wrap : HorizontalWrapMode.Overflow;
+    }
+
+    /// <summary>
+    /// 按文本实际行数 × 行高 + 上下边距自适应荧幕高度：宽度确定后读取 preferredHeight
+    /// （此时已按最终宽度折行），clamp 到 [PrintScreenHeightMin, PrintScreenHeightMax]，
+    /// 并同步中心 Y（底部基线 PrintScreenBaseY 固定，高度增加时整体上移）。
+    /// </summary>
+    private void UpdatePrintScreenHeight()
+    {
+        if (printText == null || printCanvasRt == null)
+            return;
+        Canvas.ForceUpdateCanvases(); // 确保 preferredHeight 按最新宽度 / 换行结果计算
+        float contentPx = printText.preferredHeight;
+        const float vMarginPx = 24f; // 上下各 12px（与文字 RectTransform offsetMin/offsetMax 一致）
+        float minPx = PrintScreenHeightMin / 0.01f;
+        float maxPx = PrintScreenHeightMax / 0.01f;
+        float hPx = Mathf.Clamp(contentPx + vMarginPx, minPx, maxPx);
+        printCanvasRt.sizeDelta = new Vector2(printCanvasRt.sizeDelta.x, hPx);
+
+        // 底部基线固定：中心 Y = 底部离地高度 + 高度一半（localPosition 单位为世界米）
+        Vector3 pos = printCanvasRt.localPosition;
+        pos.y = PrintScreenBaseY + hPx * 0.01f * 0.5f;
+        printCanvasRt.localPosition = pos;
     }
 
     // ---------------- 激光视觉（参考 CommandConsoleController 写法） ----------------

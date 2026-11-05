@@ -13,7 +13,7 @@ using Microsoft.CSharp;
 ///   - 打开时：Time.timeScale = 0、释放鼠标、PlayerCameraController.SetExternalBlock(true) 占用视角输入，
 ///     关闭时按记录还原（与指令框联动逻辑一致）；
 ///   - UI 布局：顶部标题栏 + 最左侧行号列 + 主代码区（双层语法高亮：底层透明 InputField + 上层只读富文本 Text）+ 底部错误 / 状态区；
-///   - C# 词法高亮：关键字青、字符串绿、数字粉、注释灰绿、默认白；富文本中 < 替换为全角 ＜；
+///   - C# 词法高亮：关键字青、字符串绿、数字粉、注释灰绿、默认白；富文本中 < 替换为全角 ＜ 并以 <size> 缩小至约半角一半；
 ///   - 编译执行：CSharpCodeProvider 运行时编译（模板包裹用户代码），错误行号映射回用户代码；
 ///     编译成功自动关闭编辑器并在每帧调用用户代码 Run(tower)；运行时异常捕获后停止并提示。
 /// </summary>
@@ -76,6 +76,10 @@ public class CodeEditorController : MonoBehaviour
     private float codeContentWidth;           // 代码区内容宽度缓存（横向滚动范围，长行不换行时大于视口宽）
     private RectTransform enterPromptRt; // Level 3 进场「按 Enter 输入代码」提示
     private int lastCaretPos = -1;       // 上次光标位置（轮询检测移动 / 换行）
+    // 拖拽选择越界抑制：指针仍在代码视口内时记录的最后一个合法选区位置
+    private bool selectionDragInside;
+    private int lastValidSelectionAnchor = -1;
+    private int lastValidSelectionFocus = -1;
     private PlayerCameraController playerController;
     private CommandConsoleController commandConsole;
     private SettingsPanelController settingsPanel;
@@ -115,16 +119,23 @@ public class CodeEditorController : MonoBehaviour
         "unchecked","unsafe","ushort","using","var","virtual","void","volatile","while"
     };
 
-    /// <summary>默认示例代码（首次打开填入，展示炮台接口语法）。</summary>
+    /// <summary>默认示例代码（首次打开填入，简洁演示三个新接口，不含每帧自动循环；输出走 +X 前方 print 荧幕，不写 Debug 日志）。</summary>
     private const string DEFAULT_CODE =
-        "// 原点炮台示例：瞄准最近方块并开火（每帧自动执行）\n" +
-        "// 接口：tower.Aim(dir) / tower.FireLaser() / tower.NearestBlock / tower.Cooldown01\n" +
-        "if (tower.NearestBlock != null)\n" +
-        "{\n" +
-        "    tower.Aim(tower.NearestBlock.GeometryCenter - tower.Position);\n" +
-        "    if (tower.Cooldown01 <= 0f)\n" +
-        "        tower.FireLaser();\n" +
-        "}\n";
+        "// 炮台接口示例：GetAllObjects / FireAtPlane / GetFireCooldown（简洁版，不自动循环）\n" +
+        "// 输出走 print 荧幕（X 轴前方），不写 Debug 日志；print 支持 printf 风格格式化 {0} {1}\n" +
+        "// 引擎每帧调用 Run(tower)；如需循环 / 限频，请自行编写 while / if 条件\n" +
+        "tower.ClearPrint();\n" +
+        "tower.PrintLine(\"== 炮台接口示例 ==\");\n" +
+        "float cd = tower.GetFireCooldown();\n" +
+        "tower.PrintLine(\"GetFireCooldown={0:F3}\", cd);\n" +
+        "bool fired1 = tower.FireAtPlane(0f, 1f, 0f, -5f);\n" +
+        "tower.PrintLine(\"FireAtPlane fired={0}\", fired1);\n" +
+        "var objects = tower.GetAllObjects();\n" +
+        "tower.PrintLine(\"GetAllObjects count={0}\", objects.Count);\n" +
+        "for (int i = 0; i < objects.Count && i < 5; i++)\n" +
+        "    tower.PrintLine(\"obj[{0}] = #{1} {2} HP={3} pos={4} vel={5} [{6}]\",\n" +
+        "        i, objects[i].Index, objects[i].Type, objects[i].HP,\n" +
+        "        objects[i].Position, objects[i].Velocity, objects[i].Params);\n";
 
     private void Awake()
     {
@@ -165,6 +176,12 @@ public class CodeEditorController : MonoBehaviour
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 Close();
+                return;
+            }
+            // F6：编译运行（与 Compile & Run 按钮同逻辑）
+            if (Input.GetKeyDown(KeyCode.F6))
+            {
+                CompileAndRun();
                 return;
             }
         }
@@ -214,10 +231,53 @@ public class CodeEditorController : MonoBehaviour
             catch (System.Exception e)
             {
                 StopRunner();
-                AppendError(Localization.Pick("运行时错误：", "Runtime error: ") + e.GetBaseException().Message);
+                System.Exception baseEx = e.GetBaseException();
+                string msg = baseEx.Message;
+                if (baseEx is System.TypeLoadException)
+                    msg = Localization.Pick(
+                        "用户程序集与当前脚本程序集不匹配（旧程序集残留或依赖缺失），已停止运行；请重新点击编译，或重启编辑器后重试。",
+                        "User assembly mismatch with current scripts (stale assembly or missing dependency). Stopped; recompile or restart editor.");
+                AppendError(Localization.Pick("运行时错误：", "Runtime error: ") + msg);
+                Debug.LogError("[CodeEditor] 运行时错误：" + msg);
                 Debug.LogException(e);
             }
         }
+    }
+
+    /// <summary>
+    /// 拖拽选择越界抑制：按住鼠标拖选时，指针还在代码视口内就持续记录当前合法选区；
+    /// 一旦指针被拖到代码区外（甚至整个编辑器外），立即把选区锚点 / 焦点回滚到最后一个合法位置，
+    /// 使选中高亮始终只在代码区矩形内绘制，不再向外延伸盖住黑色底板、顶部标题栏与周边元素。
+    /// 放在 LateUpdate 执行，确保在 InputField / EventSystem 处理完本帧拖拽事件之后再覆盖其结果。
+    /// </summary>
+    private void LateUpdate()
+    {
+        if (inputField == null || codeViewportRt == null || !IsOpen || !Input.GetMouseButton(0))
+        {
+            // 松开鼠标 / 编辑器关闭：结束本轮拖拽跟踪并清空记录
+            selectionDragInside = false;
+            lastValidSelectionAnchor = -1;
+            lastValidSelectionFocus = -1;
+            return;
+        }
+
+        if (RectTransformUtility.RectangleContainsScreenPoint(codeViewportRt, Input.mousePosition, null))
+        {
+            selectionDragInside = true;
+            lastValidSelectionAnchor = inputField.selectionAnchorPosition;
+            lastValidSelectionFocus = inputField.selectionFocusPosition;
+            return;
+        }
+
+        if (!selectionDragInside || lastValidSelectionAnchor < 0 || lastValidSelectionFocus < 0)
+            return;
+        if (inputField.selectionAnchorPosition == lastValidSelectionAnchor &&
+            inputField.selectionFocusPosition == lastValidSelectionFocus)
+            return;
+
+        // 指针已离开代码区：撤销越界的选区扩展，仅保留离开前的合法选区（不修改文本内容）
+        inputField.selectionAnchorPosition = lastValidSelectionAnchor;
+        inputField.selectionFocusPosition = lastValidSelectionFocus;
     }
 
     // ---------------- 开关逻辑（与 PlayerCameraController 联动） ----------------
@@ -263,13 +323,19 @@ public class CodeEditorController : MonoBehaviour
         undoList.Clear();
         redoList.Clear();
         RefreshCodeView(); // 刷新高亮 / 行号 / 内容高度与滚动位置
+        // 打开时强制滚到代码最上面（优先级高于鼠标行缩放锚点残留位置与光标行跟随）
+        if (codeRt != null)
+        {
+            ApplyScrollY(0f);
+            UpdateScrollBars();
+        }
         inputField.ActivateInputField();
         inputField.Select();
 
         Time.timeScale = 0f;
         SetCursorLocked(false);
         AppendError("");
-        SetStatus(Localization.Pick("编辑器已打开（Enter / Esc 关闭，✕ 也可关闭）", "Editor opened (Enter / Esc or ✕ to close)"), false);
+        SetStatus(Localization.Pick("编辑器已打开（Esc / ✕ 关闭）", "Editor opened (Esc or ✕ to close)"), false);
         Debug.Log("[CodeEditor] 编辑器打开");
     }
 
@@ -351,6 +417,14 @@ public class CodeEditorController : MonoBehaviour
                 AddReferencedAssembly(parameters, typeof(UnityEngine.UI.Text).Assembly.Location);
                 AddReferencedAssembly(parameters, typeof(CodeTower).Assembly.Location);
                 AddReferencedAssembly(parameters, typeof(UIFontHelper).Assembly.Location);
+                // 引用 netstandard 2.1（优先编辑器 Mono 运行时 Facades 版，与运行时同源同版本，类型转发不产生 CS0433 二义性；
+                // 回退 NetStandard 参考程序集）。用户代码用到 System.Object / 泛型集合等类型时需显式引用，否则报 CS0012。
+                // 实测：无论 facade 还是 ref，编译产物均不依赖 netstandard（统一引用 mscorlib），不会引入运行时加载失败。
+                string netStandardPath = ResolveNetStandardPath();
+                if (netStandardPath != null)
+                    AddReferencedAssembly(parameters, netStandardPath);
+                else
+                    Debug.LogWarning("[CodeEditor] 未找到 netstandard.dll，用户代码可能报 CS0012。");
 
                 CompilerResults results = provider.CompileAssemblyFromSource(parameters, fullSource);
 
@@ -371,6 +445,7 @@ public class CodeEditorController : MonoBehaviour
                         if (e.IsWarning)
                             continue;
                         int userLine = e.Line - userCodeStartLine;
+                        Debug.LogError("[CodeEditor] 编译错误 模板行 " + e.Line + " / 用户代码第 " + userLine + " 行,第 " + e.Column + " 列：CS" + e.ErrorNumber + " " + e.ErrorText);
                         sb.Append(Localization.Pick("第 ", "L"))
                           .Append(userLine)
                           .Append(Localization.Pick(" 行,第 ", ", C"))
@@ -430,6 +505,7 @@ public class CodeEditorController : MonoBehaviour
         catch (System.Exception e)
         {
             AppendError(Localization.Pick("编译异常：", "Compile exception: ") + e.GetBaseException().Message);
+            Debug.LogError("[CodeEditor] 编译异常：" + e.GetBaseException().Message);
             Debug.LogException(e);
         }
     }
@@ -482,12 +558,36 @@ public class CodeEditorController : MonoBehaviour
         return template;
     }
 
-    /// <summary>添加编译引用程序集（去重；Location 为空则跳过并告警）。</summary>
+    /// <summary>解析 netstandard.dll 编译引用路径：优先编辑器 Mono 运行时 Facades（与运行时同源同版本、类型转发不产生 CS0433），
+    /// 其次 NetStandard 参考程序集；全部不存在返回 null。</summary>
+    private static string ResolveNetStandardPath()
+    {
+        string[] candidates = new string[]
+        {
+            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\MonoBleedingEdge\lib\mono\unityjit-win32\Facades\netstandard.dll",
+            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\MonoBleedingEdge\lib\mono\net_4_x-win32\Facades\netstandard.dll",
+            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\MonoBleedingEdge\lib\mono\4.8-api\Facades\netstandard.dll",
+            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\NetStandard\ref\2.1.0\netstandard.dll",
+        };
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (System.IO.File.Exists(candidates[i]))
+                return candidates[i];
+        }
+        return null;
+    }
+
+    /// <summary>添加编译引用程序集（去重；Location 为空或文件不存在则跳过并告警）。</summary>
     private static void AddReferencedAssembly(CompilerParameters parameters, string location)
     {
         if (string.IsNullOrEmpty(location))
         {
             Debug.LogWarning("[CodeEditor] 引用程序集位置为空，已跳过。");
+            return;
+        }
+        if (!System.IO.File.Exists(location))
+        {
+            Debug.LogWarning("[CodeEditor] 引用程序集文件不存在，已跳过：" + location);
             return;
         }
         if (!parameters.ReferencedAssemblies.Contains(location))
@@ -496,9 +596,10 @@ public class CodeEditorController : MonoBehaviour
 
     // ---------------- C# 词法高亮 ----------------
 
-    /// <summary>将 C# 代码转为 UGUI 富文本（彩色语法高亮）；所有 < 替换为全角 ＜ 防误吞标签。</summary>
+    /// <summary>将 C# 代码转为 UGUI 富文本（彩色语法高亮）；所有 < 替换为全角 ＜ 防误吞标签，并包 <size> 标签把显示字号缩至约半角一半。</summary>
     private string HighlightCSharp(string code)
     {
+        int smallSize = Mathf.Max(2, codeFontSize / 2); // 全角 ＜ 显示字号 ≈ 普通半角一半（随缩放联动）
         StringBuilder sb = new StringBuilder(code.Length + 256);
         int i = 0;
         int n = code.Length;
@@ -512,7 +613,7 @@ public class CodeEditorController : MonoBehaviour
                 int start = i;
                 i += 2;
                 while (i < n && code[i] != '\n') i++;
-                AppendToken(sb, code.Substring(start, i - start), C_COMMENT);
+                AppendToken(sb, code.Substring(start, i - start), C_COMMENT, smallSize);
                 continue;
             }
 
@@ -523,7 +624,7 @@ public class CodeEditorController : MonoBehaviour
                 i += 2;
                 while (i < n && !(code[i] == '*' && i + 1 < n && code[i + 1] == '/')) i++;
                 if (i < n) i += 2;
-                AppendToken(sb, code.Substring(start, Mathf.Min(i, n) - start), C_COMMENT);
+                AppendToken(sb, code.Substring(start, Mathf.Min(i, n) - start), C_COMMENT, smallSize);
                 continue;
             }
 
@@ -538,7 +639,7 @@ public class CodeEditorController : MonoBehaviour
                     if (code[i] == '"') { i++; break; }
                     i++;
                 }
-                AppendToken(sb, code.Substring(start, i - start), C_STRING);
+                AppendToken(sb, code.Substring(start, i - start), C_STRING, smallSize);
                 continue;
             }
 
@@ -553,7 +654,7 @@ public class CodeEditorController : MonoBehaviour
                     if (code[i] == '\'') { i++; break; }
                     i++;
                 }
-                AppendToken(sb, code.Substring(start, i - start), C_STRING);
+                AppendToken(sb, code.Substring(start, i - start), C_STRING, smallSize);
                 continue;
             }
 
@@ -563,7 +664,7 @@ public class CodeEditorController : MonoBehaviour
                 int start = i;
                 while (i < n && (char.IsLetterOrDigit(code[i]) || code[i] == '_')) i++;
                 string word = code.Substring(start, i - start);
-                AppendToken(sb, word, keywords.Contains(word) ? C_KEYWORD : C_DEFAULT);
+                AppendToken(sb, word, keywords.Contains(word) ? C_KEYWORD : C_DEFAULT, smallSize);
                 continue;
             }
 
@@ -598,29 +699,37 @@ public class CodeEditorController : MonoBehaviour
                            code[i] == 'm' || code[i] == 'M' || code[i] == 'l' || code[i] == 'L' ||
                            code[i] == 'u' || code[i] == 'U')) i++;
                 }
-                AppendToken(sb, code.Substring(start, i - start), C_NUMBER);
+                AppendToken(sb, code.Substring(start, i - start), C_NUMBER, smallSize);
                 continue;
             }
 
             // 其它字符原样输出（< 替换为全角）
-            AppendRaw(sb, c);
+            AppendRaw(sb, c, smallSize);
             i++;
         }
         return sb.ToString();
     }
 
-    /// <summary>追加带颜色标签的 token；< 替换为全角 ＜ 防止 UGUI 富文本误吞。</summary>
-    private static void AppendToken(StringBuilder sb, string token, string color)
+    /// <summary>追加带颜色标签的 token；< 替换为全角 ＜ 并包 <size> 缩小至约半角一半（防止 UGUI 富文本误吞且保持等宽观感）。</summary>
+    private static void AppendToken(StringBuilder sb, string token, string color, int smallSize)
     {
         sb.Append("<color=").Append(color).Append('>');
         for (int i = 0; i < token.Length; i++)
-            sb.Append(token[i] == '<' ? '＜' : token[i]);
+        {
+            if (token[i] == '<')
+                sb.Append("<size=").Append(smallSize).Append(">＜</size>");
+            else
+                sb.Append(token[i]);
+        }
         sb.Append("</color>");
     }
 
-    private static void AppendRaw(StringBuilder sb, char c)
+    private static void AppendRaw(StringBuilder sb, char c, int smallSize)
     {
-        sb.Append(c == '<' ? '＜' : c);
+        if (c == '<')
+            sb.Append("<size=").Append(smallSize).Append(">＜</size>");
+        else
+            sb.Append(c);
     }
 
     // ---------------- 视图刷新 ----------------
@@ -859,7 +968,7 @@ public class CodeEditorController : MonoBehaviour
         inputField.selectionFocusPosition = pos;
     }
 
-    /// <summary>Ctrl+滚轮：代码字号缩放（放大 / 缩小），鼠标需在代码视口内；以鼠标所在行为缩放锚点，缩放后该行保持原位。</summary>
+    /// <summary>Ctrl+滚轮：代码字号缩放（放大 / 缩小），鼠标需在代码视口内；缩放后代码视图最上方吸附到最上端（优先于旧鼠标行锚点逻辑）。</summary>
     private void HandleFontZoom()
     {
         float wheel = Input.mouseScrollDelta.y;
@@ -871,21 +980,6 @@ public class CodeEditorController : MonoBehaviour
         if (newSize == codeFontSize)
             return;
 
-        // 记录鼠标所在行与行内比例（缩放锚点，随鼠标位置实时计算）
-        int anchorLine = 0;
-        float anchorFrac = 0f;
-        float mouseFromTop = codeViewportRt.rect.height * 0.5f; // 兜底：视口中部
-        float oldLH = Mathf.Max(1f, codeFontSize * lineHeightFactor);
-        Vector2 localPoint;
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(codeViewportRt, Input.mousePosition, null, out localPoint))
-        {
-            mouseFromTop = Mathf.Clamp(-localPoint.y, 0f, codeViewportRt.rect.height);
-            float contentOffset = mouseFromTop + codeRt.anchoredPosition.y; // 鼠标对应的内容偏移（距内容顶，向下正）
-            anchorLine = Mathf.FloorToInt((contentOffset - 8f) / oldLH);
-            anchorLine = Mathf.Clamp(anchorLine, 0, Mathf.Max(0, CountLines(inputField.text) - 1));
-            anchorFrac = Mathf.Clamp01((contentOffset - 8f - anchorLine * oldLH) / oldLH);
-        }
-
         codeFontSize = newSize;
         if (inputText != null)
             inputText.fontSize = codeFontSize;
@@ -895,12 +989,9 @@ public class CodeEditorController : MonoBehaviour
             lineNumberText.fontSize = codeFontSize;
         RefreshCodeView(); // 重算高亮 / 行号 / 内容高度与滚动范围
 
-        // 缩放后恢复锚点行到鼠标位置：行顶 + 行内比例 - 鼠标距顶部距离，再钳制到有效滚动范围。
-        // 缩小后内容变矮、锚点行整体上移，允许负滚动（内容顶部低于视口顶，露出背景留白）以保证该行原位不动。
-        float newLH = Mathf.Max(1f, codeFontSize * lineHeightFactor);
-        float targetY = 8f + anchorLine * newLH + anchorFrac * newLH - mouseFromTop;
-        targetY = Mathf.Clamp(targetY, -codeViewportRt.rect.height * 0.5f, GetScrollMaxY());
-        ApplyScrollY(targetY);
+        // 缩放（尤其缩小）后：代码视图最上方吸附到最上端，优先级高于旧的“锚定鼠标所在行/行内比例”逻辑。
+        // 旧逻辑在缩小后保留鼠标行原位（允许负滚动露出顶部留白），现统一吸附顶部，避免内容上端悬空。
+        ApplyScrollY(0f);
         // 水平方向：放大时左侧保持不动（横向偏移不变，右侧内容随字号扩展出去），
         // 超出的部分用 → 键逐字符或 Shift+滚轮访问；RefreshCodeView 已保留横向偏移并钳制。
         UpdateScrollBars();
@@ -1070,6 +1161,10 @@ public class CodeEditorController : MonoBehaviour
 
     private bool IsInputFocused()
     {
+        if (inputField == null)
+            return false;
+        if (inputField.isFocused)
+            return true; // InputField 自身聚焦状态优先（EventSystem 选中项可能滞后 / 不同步）
         EventSystem es = EventSystem.current;
         return es != null && es.currentSelectedGameObject == inputField.gameObject;
     }
@@ -1090,7 +1185,9 @@ public class CodeEditorController : MonoBehaviour
     {
         canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 90;
+        // 编辑器为全屏模态面板：排序值取 200，高于 HUD(100) / 教程提示(60) / 指令框(0)，
+        // 保证打开时标题栏与顶部工具条永远压在其他 Canvas 之上，不被计分 HUD 等元素遮挡。
+        canvas.sortingOrder = 200;
 
         CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -1130,15 +1227,15 @@ public class CodeEditorController : MonoBehaviour
         // 右侧按钮：✕ / 停止 / 编译运行（从右往左）
         CreateButton("BtnClose", titleBarRt, "✕", Close, new Vector2(56f, 34f), new Vector2(-14f, 0f), new Vector2(1f, 0.5f), new Color(0.22f, 0.24f, 0.27f, 1f));
         CreateButton("BtnStop", titleBarRt, Localization.Pick("停止", "Stop"), StopRunner, new Vector2(76f, 34f), new Vector2(-80f, 0f), new Vector2(1f, 0.5f), new Color(0.24f, 0.18f, 0.16f, 1f));
-        CreateButton("BtnCompile", titleBarRt, Localization.Pick("编译运行", "Compile & Run"), CompileAndRun, new Vector2(110f, 34f), new Vector2(-168f, 0f), new Vector2(1f, 0.5f), new Color(0.16f, 0.34f, 0.35f, 1f));
+        CreateButton("BtnCompile", titleBarRt, Localization.Pick("编译运行 (F6)", "Compile & Run (F6)"), CompileAndRun, new Vector2(156f, 34f), new Vector2(-196f, 0f), new Vector2(1f, 0.5f), new Color(0.16f, 0.34f, 0.35f, 1f));
 
-        // ---- 行号列视口（70px，RectMask2D 裁剪 + 背景；内部行号内容随行数增高、随滚动同步） ----
-        RectTransform lineViewportRt = CreateRect("LineViewport", editorRoot.transform, new Vector2(0f, 1f), new Vector2(0f, -52f), new Vector2(70f, 868f), new Vector2(0f, 1f));
-        lineViewportRt.anchorMin = new Vector2(0f, 1f);
+        // ---- 行号列视口（宽 70，RectMask2D 裁剪 + 背景；高度随窗口拉伸：上贴标题栏下缘、下贴底部横条） ----
+        RectTransform lineViewportRt = CreateRect("LineViewport", editorRoot.transform, new Vector2(0f, 1f), Vector2.zero, new Vector2(70f, 868f), new Vector2(0f, 1f));
+        lineViewportRt.anchorMin = new Vector2(0f, 0f);
         lineViewportRt.anchorMax = new Vector2(0f, 1f);
-        lineViewportRt.pivot = new Vector2(0f, 1f);
-        lineViewportRt.anchoredPosition = new Vector2(0f, -52f);
-        lineViewportRt.sizeDelta = new Vector2(70f, 868f);
+        lineViewportRt.pivot = new Vector2(0.5f, 0.5f);
+        lineViewportRt.offsetMin = new Vector2(0f, 170f);
+        lineViewportRt.offsetMax = new Vector2(70f, -52f);
         Image lineViewportBg = lineViewportRt.gameObject.AddComponent<Image>();
         lineViewportBg.color = lineBgColor;
         lineViewportBg.raycastTarget = false;
@@ -1163,12 +1260,14 @@ public class CodeEditorController : MonoBehaviour
         lineNumberText.verticalOverflow = VerticalWrapMode.Overflow;
 
         // ---- 主代码区视口（RectMask2D 裁剪 + 背景；内部 CodeArea 随行数增高、滚动偏移 y≤0） ----
-        RectTransform codeViewportRt = CreateRect("CodeViewport", editorRoot.transform, new Vector2(0f, 1f), new Vector2(70f, -52f), new Vector2(1850f, 868f), new Vector2(0f, 1f));
-        codeViewportRt.anchorMin = new Vector2(0f, 1f);
-        codeViewportRt.anchorMax = new Vector2(0f, 1f);
-        codeViewportRt.pivot = new Vector2(0f, 1f);
-        codeViewportRt.anchoredPosition = new Vector2(70f, -52f);
-        codeViewportRt.sizeDelta = new Vector2(1850f, 868f);
+        // 四边拉伸：左 70（贴行号列右缘）、右 0（贴窗口右缘）、上 -52（贴标题栏下缘）、下 170（贴底部横条上缘）。
+        // 不再使用固定的 1850×868，避免窗口宽高比非 16:9（如 1920×1017 窗口）时视口右侧露出未覆盖的深色/黑色残留条块。
+        RectTransform codeViewportRt = CreateRect("CodeViewport", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(1850f, 868f), new Vector2(0.5f, 0.5f));
+        codeViewportRt.anchorMin = Vector2.zero;
+        codeViewportRt.anchorMax = Vector2.one;
+        codeViewportRt.pivot = new Vector2(0.5f, 0.5f);
+        codeViewportRt.offsetMin = new Vector2(70f, 170f);
+        codeViewportRt.offsetMax = new Vector2(0f, -52f);
         Image codeViewportBg = codeViewportRt.gameObject.AddComponent<Image>();
         codeViewportBg.color = new Color(0.118f, 0.118f, 0.118f, 1f);
         codeViewportBg.raycastTarget = false;
@@ -1205,7 +1304,8 @@ public class CodeEditorController : MonoBehaviour
         input.caretColor = Color.white;        // 恢复原生光标为可见白色
         input.caretBlinkRate = caretBlinkRate; // 恢复默认约 0.85f 闪烁
         input.caretWidth = 1;
-        input.selectionColor = new Color(0.3f, 0.5f, 0.9f, 0.5f);
+        // 选中高亮：半透明淡蓝（alpha 仅 0.26），叠加在深色底板上不遮字、不发白
+        input.selectionColor = new Color(0.32f, 0.52f, 0.92f, 0.26f);
         input.onValueChanged.AddListener(s => { RefreshCodeView(); RecordSnapshotForUndo(); });
         inputField = input;
         this.inputText = inputText;
@@ -1223,15 +1323,17 @@ public class CodeEditorController : MonoBehaviour
         highlightText.raycastTarget = false;
 
         // ---- 右侧竖 / 底部横滚动条（配合自实现滚动；编辑器暂停时 ScrollRect 失效，故手写轨道+滑块+拖拽） ----
-        // 竖条：贴代码视口右缘内侧（宽 10，上下各留 6px）
-        vScrollTrackRt = CreateRect("VScrollTrack", editorRoot.transform, new Vector2(0f, 1f), new Vector2(1916f, -486f), new Vector2(10f, 856f), new Vector2(1f, 0.5f));
-        vScrollTrackRt.anchorMin = new Vector2(0f, 1f);
-        vScrollTrackRt.anchorMax = new Vector2(0f, 1f);
+        // 竖条：贴窗口右缘内侧（宽 10，距右缘 6px，上下随窗口拉伸），轨道底色全透明，
+        // 只在需要滚动时显示浅灰滑块——代码区右侧不再出现深色/黑色条块。
+        vScrollTrackRt = CreateRect("VScrollTrack", editorRoot.transform, new Vector2(1f, 0f), Vector2.zero, new Vector2(10f, 856f), new Vector2(1f, 0.5f));
+        vScrollTrackRt.anchorMin = new Vector2(1f, 0f);
+        vScrollTrackRt.anchorMax = new Vector2(1f, 1f);
         vScrollTrackRt.pivot = new Vector2(1f, 0.5f);
-        vScrollTrackRt.anchoredPosition = new Vector2(1916f, -486f);
-        vScrollTrackRt.sizeDelta = new Vector2(10f, 856f);
+        vScrollTrackRt.offsetMin = new Vector2(-16f, 170f);
+        vScrollTrackRt.offsetMax = new Vector2(-6f, -52f);
         Image vTrackImg = vScrollTrackRt.gameObject.AddComponent<Image>();
-        vTrackImg.color = new Color(0.08f, 0.08f, 0.08f, 0.55f);
+        vTrackImg.color = new Color(0.08f, 0.08f, 0.08f, 0f); // 透明轨道：仅保留可点击跳转的命中区域
+        vTrackImg.raycastTarget = true;
         vScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>().Setup(vScrollTrackRt, true, t => SetScrollFromBar(0, t));
 
         vScrollHandleRt = CreateRect("VScrollHandle", vScrollTrackRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(10f, 60f), new Vector2(0.5f, 1f));
@@ -1244,15 +1346,16 @@ public class CodeEditorController : MonoBehaviour
         vHandleImg.color = new Color(0.42f, 0.42f, 0.44f, 0.9f);
         vScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>().Setup(vScrollTrackRt, true, t => SetScrollFromBar(0, t));
 
-        // 横条：贴代码视口下缘内侧（高 10，左侧对齐代码视口左缘）
-        hScrollTrackRt = CreateRect("HScrollTrack", editorRoot.transform, new Vector2(0f, 1f), new Vector2(70f, -910f), new Vector2(1834f, 10f), new Vector2(0f, 1f));
-        hScrollTrackRt.anchorMin = new Vector2(0f, 1f);
-        hScrollTrackRt.anchorMax = new Vector2(0f, 1f);
+        // 横条：贴底部错误区上缘（高 10，左 70 对齐代码视口左缘、右 16 留出竖条空间），轨道底色同样透明
+        hScrollTrackRt = CreateRect("HScrollTrack", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(1834f, 10f), new Vector2(0f, 1f));
+        hScrollTrackRt.anchorMin = Vector2.zero;
+        hScrollTrackRt.anchorMax = new Vector2(1f, 0f);
         hScrollTrackRt.pivot = new Vector2(0f, 1f);
-        hScrollTrackRt.anchoredPosition = new Vector2(70f, -910f);
-        hScrollTrackRt.sizeDelta = new Vector2(1834f, 10f);
+        hScrollTrackRt.offsetMin = new Vector2(70f, 160f);
+        hScrollTrackRt.offsetMax = new Vector2(-16f, 170f);
         Image hTrackImg = hScrollTrackRt.gameObject.AddComponent<Image>();
-        hTrackImg.color = new Color(0.08f, 0.08f, 0.08f, 0.55f);
+        hTrackImg.color = new Color(0.08f, 0.08f, 0.08f, 0f); // 透明轨道：仅保留可点击跳转的命中区域
+        hTrackImg.raycastTarget = true;
         hScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>().Setup(hScrollTrackRt, false, t => SetScrollFromBar(1, t));
 
         hScrollHandleRt = CreateRect("HScrollHandle", hScrollTrackRt, new Vector2(0f, 1f), Vector2.zero, new Vector2(120f, 10f), new Vector2(0f, 1f));
@@ -1313,6 +1416,11 @@ public class CodeEditorController : MonoBehaviour
         Stretch(promptText.rectTransform);
         enterPromptRt = promptRt;
         enterPromptRt.gameObject.SetActive(false);
+
+        // ---- 顶部区域层级置顶：标题栏（含标题文字与 ✕ / 停止 / 编译运行 按钮）置于兄弟节点最后，
+        //      渲染顺序压在行号列 / 代码视口 / 滚动条 / 底部错误区之上，避免顶部被下层元素覆盖 ----
+        if (titleBarRt != null)
+            titleBarRt.SetAsLastSibling();
     }
 
     private RectTransform CreateRect(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot)

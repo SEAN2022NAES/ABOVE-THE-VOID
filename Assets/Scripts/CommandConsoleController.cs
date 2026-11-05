@@ -51,6 +51,14 @@ public class CommandConsoleController : MonoBehaviour
     public float laserRadius = 0.15f;
     [Tooltip("激光最大射程（单位）")]
     public float laserMaxLength = 60f;
+
+    /// <summary>
+    /// 手动（鼠标左键）激光总开关：Level 3 完整玩法关关闭，Level 1 教学关保留。
+    /// 由 LevelDirector / MainMenuController 在进入关卡时设置；
+    /// 只拦截「左键 → FireLaser」这一条手动链路，不影响炮台代码 tower.FireAtPlane /
+    /// 自动打方块脚本 AutoLaserExample 等调用 console.FireLaser 的自动化链路。
+    /// </summary>
+    public static bool ManualLaserEnabled = true;
     [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）")]
     public float laserVisualDuration = 0.9f;
     [Tooltip("激光视觉颜色")]
@@ -107,8 +115,9 @@ public class CommandConsoleController : MonoBehaviour
         if (IsOpen && Input.GetKeyDown(closeKey))
             Close();
 
-        // 鼠标左键发射激光：指令框关闭、未被外部模态占用（如主页）、且非暂停状态时有效
-        if (!IsOpen && Input.GetMouseButtonDown(0))
+        // 鼠标左键发射激光：指令框关闭、未被外部模态占用（如主页）、非暂停状态、
+        // 且当前关卡允许手动激光（Level 3 完整玩法关闭，改由代码编辑器 / 炮台接管）时有效
+        if (ManualLaserEnabled && !IsOpen && Input.GetMouseButtonDown(0))
         {
             bool blocked = playerController != null && playerController.ExternalBlock;
             bool paused = playerController != null &&
@@ -307,15 +316,17 @@ public class CommandConsoleController : MonoBehaviour
             FlyingBlock block = hits[i].collider != null
                 ? hits[i].collider.GetComponentInParent<FlyingBlock>()
                 : null;
-            if (block != null && !block.Destroyed)
-            {
-                hitBlocks.Add(block);
-                if (hits[i].distance < nearestT)
-                    nearestT = hits[i].distance;
-            }
+            if (block == null || block.Destroyed)
+                continue;
+
+            // 蓝色炸弹块与红色攻击块同等对待：正常加入切割列表、正常可被击毁
+            // （击毁蓝块不加分也不扣分，该规则集中由 ScoreManager.ApplyKill 处理）
+            hitBlocks.Add(block);
+            if (hits[i].distance < nearestT)
+                nearestT = hits[i].distance;
         }
 
-        // 逐个命中：每个块从入射侧吃掉一层厚度（受击四阶段），第 4 层吃光即死亡
+        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~7，吃满即死亡；HP=1 一击即毁）
         int hitCount = 0;
         int deathCount = 0;
         foreach (FlyingBlock block in hitBlocks)
@@ -329,12 +340,13 @@ public class CommandConsoleController : MonoBehaviour
             }
         }
 
-        // 激光视觉：从发射点到最近命中点（未命中则打满射程）；命中时在端点额外显示火花特效
+        // 激光视觉：从发射点到最近命中点（未命中则打满射程）；命中任意目标时在端点额外显示火花特效
         Vector3 endPoint = origin + dir * nearestT;
         SpawnLaserVisual(origin, endPoint, radius, hitBlocks.Count > 0);
 
         if (reportToConsole)
-            AppendOutput("[laser] 半径=" + radius.ToString("F2") + "，命中 " + hitCount + " 个长方体，吃掉 " + hitCount + " 层厚度，其中 " + deathCount + " 个被打满4层死亡。");
+            AppendOutput("[laser] 半径=" + radius.ToString("F2") + "，可击打命中 " + hitCount + " 个长方体（吃掉 " + hitCount +
+                         " 层厚度，其中 " + deathCount + " 个被打满血量死亡；蓝色炸弹块可被击毁但不计分）。");
         Debug.Log("[CommandConsole] 发射激光：radius=" + radius + " hits=" + hitBlocks.Count + " deaths=" + deathCount);
     }
 

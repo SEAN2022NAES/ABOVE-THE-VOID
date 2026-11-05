@@ -90,6 +90,14 @@ public class MainMenuController : MonoBehaviour
 
         SetCursorLocked(true);
 
+        // 鼠标左键手动激光：Level 3 完整玩法关关闭（改由代码编辑器 / 炮台自动开火接管），
+        // Level 1 教学关保留（教学 Step.FireLaser 需要左键开火）。
+        // 仅影响「左键 → FireLaser」手动链路，不影响 tower.FireAtPlane 等自动化调用。
+        CommandConsoleController.ManualLaserEnabled = (levelIndex != 3);
+
+        // 计分：进入关卡即重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
+        ScoreManager.ResetAll();
+
         TutorialController tutorial = FindObjectOfType<TutorialController>();
         if (levelIndex == 1)
         {
@@ -445,3 +453,4 @@ public class MainMenuController : MonoBehaviour
         Cursor.visible = !locked;
     }
 }
+// touch refresh 2026-11-03
