@@ -52,6 +52,8 @@ public class PlayerCameraController : MonoBehaviour
 
     [Header("按键")]
     [SerializeField] private KeyCode pauseKey = KeyCode.Escape;
+    [Tooltip("用 ESC 关闭代码编辑器 / 指令框后，忽略暂停键的时长（秒，真实时间）：避免同一次 ESC 顺带把游戏暂停")]
+    [SerializeField] private float pauseInputSuppressSeconds = 0.25f;
     [SerializeField] private KeyCode timeStopKey = KeyCode.E;
     [SerializeField] private KeyCode axisSpiritKey = KeyCode.Q;
     [SerializeField] private KeyCode freeSpiritKey = KeyCode.F1;
@@ -85,6 +87,10 @@ public class PlayerCameraController : MonoBehaviour
 
     // 外部模态占用（如指令框打开）：占用期间视角 / 移动 / 暂停键均让渡给外部组件
     private bool externalBlock;
+
+    // 暂停键抑制截止时间（Time.unscaledTime 基准）：模态 UI（代码编辑器 / 指令框）用 ESC 关闭后，
+    // 同一次 ESC 不应再触发暂停，故在此时间点之前忽略 pauseKey
+    private float pauseInputSuppressedUntil;
 
     private SettingsPanelController settingsPanel;
     private System.Action<float> onSensitivityChangedHandler;
@@ -137,9 +143,15 @@ public class PlayerCameraController : MonoBehaviour
         if (externalBlock)
             return;
 
-        // 暂停键在任何模式下都生效
+        // 暂停键在任何模式下都生效；
+        // 但「用 ESC 关闭代码编辑器 / 指令框」的那一次 ESC 不再触发暂停（仅退出模态，游戏保持继续运行）
         if (Input.GetKeyDown(pauseKey))
         {
+            if (Time.unscaledTime < pauseInputSuppressedUntil)
+            {
+                Debug.Log("[PlayerCameraController] ESC 用于关闭模态界面，本次不触发暂停。");
+                return;
+            }
             TogglePause();
             return;
         }
@@ -403,6 +415,25 @@ public class PlayerCameraController : MonoBehaviour
     {
         if (Mode != GameMode.Paused)
             Pause();
+    }
+
+    /// <summary>
+    /// 抑制暂停键一段时间（真实时间）：代码编辑器 / 指令框用 ESC 关闭后调用，
+    /// 让「关闭模态的那一次 ESC」只退出模态、不再把游戏暂停，游戏保持继续运行。
+    /// seconds &lt;= 0 时使用 Inspector 配置的 pauseInputSuppressSeconds。
+    /// </summary>
+    public void SuppressPauseInput(float seconds = -1f)
+    {
+        float duration = seconds > 0f ? seconds : Mathf.Max(0.05f, pauseInputSuppressSeconds);
+        pauseInputSuppressedUntil = Mathf.Max(pauseInputSuppressedUntil, Time.unscaledTime + duration);
+    }
+
+    /// <summary>抑制暂停键（静态便捷版，供没有 playerController 引用的组件调用）。</summary>
+    public static void SuppressPauseInputGlobal(float seconds = -1f)
+    {
+        PlayerCameraController player = FindObjectOfType<PlayerCameraController>();
+        if (player != null)
+            player.SuppressPauseInput(seconds);
     }
 
     /// <summary>返回主页：交由主页控制器统一收尾（终止教学、清场、解除暂停回原点、主页接管输入）。</summary>

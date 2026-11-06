@@ -76,24 +76,35 @@ public class MainMenuController : MonoBehaviour
         }
     }
 
-    /// <summary>点击关卡入口：隐藏主页并启动对应关卡（当前关卡1教学、关卡3完整玩法可用）。</summary>
+    /// <summary>点击关卡入口：隐藏主页并启动对应关卡（关卡1引导教学、关卡2炮台API教学、关卡3完整玩法）。</summary>
     public void StartLevel(int levelIndex)
     {
+        // 关卡 2 - 1 炮台 API 教学：统一走 LevelDirector 路由，保证表现开关 / 生成控制 / 教学启动与指令框一致
+        if (levelIndex == 2)
+        {
+            string msg = LevelDirector.JumpTo(2, 1);
+            Debug.Log("[MainMenu] 进入关卡2：" + msg);
+            return;
+        }
+
         if (levelIndex != 1 && levelIndex != 3)
-            return; // 关卡2 占位未开放
+            return;
 
         if (root != null)
             root.SetActive(false);
+
+        // 从主页进入关卡：先把可能残留的「代码编辑器 C# 语法教学」重置（Part 2 进度清空、任务卡隐藏）
+        CodeSyntaxTutorialController.End();
 
         if (playerController != null)
             playerController.SetExternalBlock(false); // 解除输入占用
 
         SetCursorLocked(true);
 
-        // 鼠标左键手动激光：Level 3 完整玩法关关闭（改由代码编辑器 / 炮台自动开火接管），
-        // Level 1 教学关保留（教学 Step.FireLaser 需要左键开火）。
+        // 鼠标左键手动激光：只有 Level 1 - Part 1 允许（主页关卡 1 即 Level 1 - Part 1 引导教学关），
+        // Level 3 等其余关卡一律禁用（改由代码编辑器 / 炮台自动开火接管）。
         // 仅影响「左键 → FireLaser」手动链路，不影响 tower.FireAtPlane 等自动化调用。
-        CommandConsoleController.ManualLaserEnabled = (levelIndex != 3);
+        CommandConsoleController.SetManualLaserAllowed(levelIndex, 1);
 
         // 计分：进入关卡即重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
         ScoreManager.ResetAll();
@@ -103,9 +114,15 @@ public class MainMenuController : MonoBehaviour
         {
             // Level 1 由教学控制器接管：先不生成方块，逐步引导操作（无教学组件时回退旧逻辑）
             if (tutorial != null)
-                tutorial.StartTutorial();
-            else if (spawner != null)
-                spawner.BeginSpawning(); // 开始出块（保留进游戏前5秒缓冲）
+            {
+                tutorial.StartTutorial(); // 内部会关闭 Score / print 荧幕与蓝块生成
+            }
+            else
+            {
+                LevelPresentation.ApplyLevel1(); // 无教学组件时同样保证教学关表现一致
+                if (spawner != null)
+                    spawner.BeginSpawning(); // 开始出块（保留进游戏前5秒缓冲）
+            }
             Debug.Log("[MainMenu] 进入关卡1：主页隐藏，游戏开始。");
         }
         else
@@ -113,11 +130,12 @@ public class MainMenuController : MonoBehaviour
             // Level 3 完整玩法：跳过教学，隐藏教学面板并恢复 E 键，重开会话（全部重新计时）后正常生成方块
             if (tutorial != null)
                 tutorial.ExitToMenu();
+            LevelPresentation.ApplyLevel3(); // 恢复 Score / print 荧幕显示与蓝色 BOMB 块生成
             if (spawner != null)
-            {
                 spawner.ResetSession();    // 重开会话：清零消灭计数与方块编号
-                spawner.BeginSpawning();   // 开始出块（保留进游戏前5秒缓冲）
-            }
+            // 主页进入完整玩法关同样走统一开场停顿：先 Cancel 旧计时再重新停顿 5 秒（期间不出块、不显示炮台），
+            // 与控制台 /level 3 1 跳转路径保持一致，避免两条入口行为不一致导致「一进场就出块」
+            LevelDirector.BeginFullLevelOpening();
             TimeHintController timeHint = FindObjectOfType<TimeHintController>();
             if (timeHint != null)
             {
@@ -150,6 +168,15 @@ public class MainMenuController : MonoBehaviour
         TutorialController tutorial = FindObjectOfType<TutorialController>();
         if (tutorial != null)
             tutorial.ExitToMenu();
+
+        // 终止代码编辑器内的 C# 语法教学（隐藏任务卡与提示条；下次进入 Part 2 时进度重置）
+        CodeSyntaxTutorialController.End();
+
+        // 回到主页：不在任何关卡内，手动激光（鼠标左键）一律禁用
+        CommandConsoleController.SetManualLaserAllowed(0, 0);
+
+        // 回到主页：终止仍在进行的开场停顿（否则停顿到期会把生成器重新打开，主页上又开始出块）
+        LevelOpeningGate.Cancel();
 
         // 主页不刷方块：暂停生成并清空场上
         if (spawner != null)
@@ -233,7 +260,7 @@ public class MainMenuController : MonoBehaviour
         SetRect(levelTitleText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -304f), new Vector2(1200f, 44f));
 
         CreateLevelButton("Level1", new Vector2(-280f, -382f), true, 1, out level1Label);
-        CreateLevelButton("Level2", new Vector2(0f, -382f), false, 2, out level2Label);
+        CreateLevelButton("Level2", new Vector2(0f, -382f), true, 2, out level2Label);
         CreateLevelButton("Level3", new Vector2(280f, -382f), true, 3, out level3Label);
 
         // ---- 底部说明 ----
@@ -332,7 +359,7 @@ public class MainMenuController : MonoBehaviour
         if (level1Label != null)
             level1Label.text = zh ? "关卡 1" : "Level 1";
         if (level2Label != null)
-            level2Label.text = zh ? "关卡 2\n敬请期待" : "Level 2\nComing Soon";
+            level2Label.text = zh ? "关卡 2\nAPI 教学" : "Level 2\nAPI Tutorial";
         if (level3Label != null)
             level3Label.text = zh ? "关卡 3\n完整玩法" : "Level 3\nFull Game";
 

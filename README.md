@@ -11,7 +11,21 @@ AIGC:
 
 # ABOVE THE VOID - Tuanjie 3D Coordinate System Framework
 
-Current version: **v0.1.3**
+Current version: **v0.1.4**
+
+### v0.1.4
+
+- Fixed the level opening hold: entering Level 3 from another level with `/level` no longer spawns blocks immediately; the opening pause is now enforced by a hard timer on the spawner.
+- Added `LevelOpeningGate`, `LevelPresentation`, and `ScreenFade` for unified level openings, presentation state, and fade transitions.
+- Added `CodeSyntaxTutorialController` for the code syntax teaching flow.
+- Simplified `CodeTower.FireAtPlane` to three parameters `(A, B, C)` for a plane that always passes through the origin.
+- The code tower body stays permanently hidden; only its interface remains visible.
+- Corrected coordinate axis label orientation, color, and distance compensation.
+- Block HP is capped at 6 and decrements as hits land.
+- Manual laser (left mouse) is limited to the Level 1 - Part 1 tutorial; other level parts rely on tower code and automatic laser scripts.
+- Closing the code editor or the developer console with ESC no longer also pauses the game.
+- The `/level` developer command now accepts an optional third parameter to jump directly to a chapter.
+- Refined Level 1 tutorial hints and transitions.
 
 ### v0.1.3
 

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -29,16 +29,27 @@ public class FlyingBlockSpawner : MonoBehaviour
     public float speedMax = 1.2f;
 
     [Header("类型概率权重（运行时自动归一化到 100%）")]
-    [Tooltip("攻击型（红）权重：80（在原来 40 的基础上翻倍）")]
-    public int attackChance = 80;
-    [Tooltip("炸弹型（蓝）权重：60（保持原值不变；可被击毁，但击毁既不加分也不扣分）")]
-    public int bombChance = 60;
+    [Tooltip("攻击型（红）权重：160（在 80 基础上再翻倍；160:120 归一化后约红 57% / 蓝 43%）")]
+    public int attackChance = 160;
+    [Tooltip("炸弹型（蓝）权重：120（在原来 60 的基础上翻倍；可被击毁，但击毁既不加分也不扣分）")]
+    public int bombChance = 120;
+
+    [Header("关卡生成开关")]
+    [Tooltip("是否生成蓝色 BOMB 块：Level 1 教学关由 LevelPresentation 关闭（只出红色 ATTACK 块），其他关卡保持开启")]
+    public bool bombEnabled = true;
 
     /// <summary>所有活跃长方体（生成器与检测器共用登记表）。</summary>
     public readonly List<FlyingBlock> ActiveBlocks = new List<FlyingBlock>();
 
     /// <summary>是否允许生成：主页显示期间为 false，点击关卡后由 BeginSpawning 开启。</summary>
     public bool spawningEnabled = true;
+
+    /// <summary>
+    /// 开场停顿剩余时间（真实秒，unscaledDeltaTime 计时）：&gt; 0 期间绝不生成任何长方体。
+    /// 这是「进入完整玩法关先停 5 秒」的硬保证：即使其他入口把 spawningEnabled 置回 true、
+    /// 或 BeginSpawning 被提前调用，Update 也会在停顿未结束时直接返回，杜绝「跳转瞬间就开始出块」。
+    /// </summary>
+    private float openingHoldRemain;
 
     /// <summary>玩家激光消灭的方块总数（受击吃光死亡计 1；教学 / 统计用）。</summary>
     public int PlayerKills { get; private set; }
@@ -59,6 +70,15 @@ public class FlyingBlockSpawner : MonoBehaviour
 
     private void Update()
     {
+        // 开场停顿优先于一切生成请求：停顿期间绝不生成（真实时间计时，E 键冻结 / 编辑器暂停期间也照常倒计时）
+        if (openingHoldRemain > 0f)
+        {
+            openingHoldRemain -= Time.unscaledDeltaTime;
+            if (openingHoldRemain < 0f)
+                openingHoldRemain = 0f;
+            return;
+        }
+
         if (!spawningEnabled)
             return; // 主页显示期间不生成任何长方体
         timer += Time.deltaTime;
@@ -110,8 +130,34 @@ public class FlyingBlockSpawner : MonoBehaviour
     /// <summary>开始生成并指定缓冲时长（教学 / 特殊关卡可缩短等待）。</summary>
     public void BeginSpawning(float delay)
     {
+        if (openingHoldRemain > 0f)
+            return; // 开场停顿未结束：忽略提前开始生成的请求，统一由 LevelOpeningGate 在停顿到期后开启
+
         spawningEnabled = true;
         timer = -Mathf.Max(0f, delay);
+    }
+
+    /// <summary>
+    /// 进入开场停顿：接下来 seconds 秒（真实时间）内绝不生成任何长方体，并立即暂停生成、清零生成计时。
+    /// 重复调用会以新的秒数重置计时（不会叠加、也不会缩短）。
+    /// </summary>
+    public void BeginOpeningHold(float seconds)
+    {
+        openingHoldRemain = Mathf.Max(0f, seconds);
+        spawningEnabled = false;
+        timer = 0f;
+    }
+
+    /// <summary>结束开场停顿（停顿到期或跳转到其他关卡时调用）。</summary>
+    public void EndOpeningHold()
+    {
+        openingHoldRemain = 0f;
+    }
+
+    /// <summary>是否正处于开场停顿中。</summary>
+    public bool IsOpeningHoldActive
+    {
+        get { return openingHoldRemain > 0f; }
     }
 
     /// <summary>玩家激光消灭计数：由 FlyingBlock 受击吃光死亡时调用。</summary>
@@ -172,7 +218,7 @@ public class FlyingBlockSpawner : MonoBehaviour
             FlyingBlock block = go.GetComponent<FlyingBlock>();
             FlyingBlock.BlockType type = PickBlockType();
             float speed = Random.Range(speedMin, speedMax);
-            int hp = Random.Range(1, 8); // 血量 1~7 等概率随机（HP 恒 ≥ 1，不会出现一击即毁/0 血块）
+            int hp = Random.Range(1, 7); // 血量 1~6 等概率随机（上限 6；HP 恒 ≥ 1，不会出现一击即毁/0 血块）
             block.Init(type, size, spawnPos, speed, nextBlockId, dir, hp);
             nextBlockId++;
             ActiveBlocks.Add(block);
@@ -211,10 +257,14 @@ public class FlyingBlockSpawner : MonoBehaviour
     /// <summary>
     /// 按配置权重选择类型：红(attack) / 蓝(bomb)。绿色 heal 已彻底移除，任何情况下都不会再生成。
     /// 权重按 attackChance : bombChance 归一化到 100%，roll ∈ [0,100) 必然被其中一支覆盖，
-    /// 不存在"两者之和不足 100 的空白区间"。默认 80 : 60 → 红约 57.14%、蓝约 42.86%。
+    /// 不存在"两者之和不足 100 的空白区间"。当前 160 : 120 → 红 57.1%、蓝 42.9%。
+    /// bombEnabled = false（Level 1 教学关）时只生成红色 ATTACK 块。
     /// </summary>
     private FlyingBlock.BlockType PickBlockType()
     {
+        if (!bombEnabled)
+            return FlyingBlock.BlockType.Attack; // 教学关 / 特殊关卡：不出蓝色 BOMB 块
+
         float total = Mathf.Max(1, attackChance + bombChance);
         float attackPercent = attackChance * 100f / total; // 归一化后的红色概率（0~100）
         float roll = Random.Range(0f, 100f);

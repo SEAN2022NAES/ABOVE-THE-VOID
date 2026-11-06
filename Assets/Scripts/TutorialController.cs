@@ -32,6 +32,12 @@ public class TutorialController : MonoBehaviour
     public int targetKills = 5;
     [Tooltip("欢迎页停留秒数（真实时间）")]
     public float welcomeHoldSeconds = 2.8f;
+    [Tooltip("引导教学完成后，自动顺接进入 Level 1 - Part 2 前在结语页停留的秒数（真实时间，可调）")]
+    public float completionHoldSeconds = 2.2f;
+    [Tooltip("进入 Level 1 - Part 2 前的淡出到全黑时长（秒，真实时间，可调；0 = 无淡出）")]
+    public float transitionFadeOutSeconds = 0.35f;
+    [Tooltip("进入 Level 1 - Part 2 后的淡入时长（秒，真实时间，可调；0 = 无淡入）")]
+    public float transitionFadeInSeconds = 0.5f;
 
     private enum Step
     {
@@ -47,6 +53,9 @@ public class TutorialController : MonoBehaviour
     private bool active;
     private float welcomeTimer;
     private bool spawnStarted;
+    // 结语页 → 自动顺接 Level 1 - Part 2 的过渡计时与一次性触发标记（防重复触发）
+    private float nextLessonTimer;
+    private bool nextLessonTriggered;
 
     // 移动教学：六键逐个长按充能
     private static readonly KeyCode[] MoveKeyOrder = new KeyCode[]
@@ -124,7 +133,15 @@ public class TutorialController : MonoBehaviour
         if (tower != null)
             tower.SetVisualVisible(false);
 
+        // Level 1 教学关表现：不显示 Score 分数 UI、不显示 print 输出面板、不生成蓝色 BOMB 块（只出红块）
+        LevelPresentation.ApplyLevel1();
+
+        // 手动激光（鼠标左键）只在 Level 1 - Part 1 存在：进入本关教学即启用（其他关卡由 LevelDirector 关闭）
+        CommandConsoleController.SetManualLaserAllowed(1, 1);
+
         spawnStarted = false;
+        nextLessonTimer = 0f;
+        nextLessonTriggered = false; // 重学本关时重置顺接标记，保证下一次仍能自动进入 Part 2
         active = true;
         Started = true; // 教学进行中：PlayerCameraController 据此禁用 E 键时间冻结
         panelRoot.SetActive(true);
@@ -158,6 +175,17 @@ public class TutorialController : MonoBehaviour
                 if (spawner != null && spawner.PlayerKills >= targetKills)
                     Advance();
                 break;
+            case Step.CSharpIntro:
+                // 结语页（5/5 完成提示）先停留 completionHoldSeconds，再用黑幕淡出 → 跳转 → 淡入，丝滑进入 Level 1 - Part 2
+                if (nextLessonTriggered)
+                    break;
+                nextLessonTimer += Time.unscaledDeltaTime;
+                if (nextLessonTimer >= completionHoldSeconds)
+                {
+                    nextLessonTriggered = true; // 一次性触发：之后即使再次进入本分支也不会重复跳转
+                    GoToNextLesson();
+                }
+                break;
         }
     }
 
@@ -182,9 +210,35 @@ public class TutorialController : MonoBehaviour
                 SetStep(Step.CSharpIntro);
                 break;
             case Step.CSharpIntro:
-                active = false; // 教学结束：面板保留最终内容供回顾
+                // 已经是最后一页：保持 active，交由 Update 中的过渡计时在停留结束后自动顺接进入 Level 1 - Part 2
                 break;
         }
+    }
+
+    /// <summary>
+    /// 引导教学完成后自动顺接进入 Level 1 - Part 2（C# 基础语法教学）。
+    /// 流程：先在结语页停留（5/5 完成提示）→ 黑幕淡出到全黑 → 在全黑帧执行 LevelDirector.JumpTo(1, 2)
+    /// （完成清场、表现切换、语法教学从头开始）→ 黑幕淡入，避免关卡切换出现生硬瞬切。
+    /// 跳转前先收尾本关教学状态（面板隐藏、Started=false 解除「教学进行中禁止打开代码编辑器」互斥）。
+    /// </summary>
+    private void GoToNextLesson()
+    {
+        // 先停掉本关引导教学的逐帧判定，避免过渡期间继续刷新进度 / 再次走到本方法
+        active = false;
+        Started = false;
+
+        // 淡出 → 全黑瞬间跳转 → 淡入；三个时长均由 inspector 参数控制
+        ScreenFade.PlayTransition(transitionFadeOutSeconds, transitionFadeInSeconds, JumpToNextLesson);
+    }
+
+    /// <summary>黑幕全黑的瞬间执行关卡切换：进入 Level 1 - Part 2。</summary>
+    private void JumpToNextLesson()
+    {
+        string result = LevelDirector.JumpTo(1, 2);
+        if (string.IsNullOrEmpty(result) || result.Contains("尚未开放"))
+            Debug.LogWarning("[Tutorial] 自动顺接 Level 1 - Part 2 失败：" + result);
+        else
+            Debug.Log("[Tutorial] 引导教学完成，已自动顺接进入 Level 1 - Part 2（" + result + "）");
     }
 
     // ---------------- 移动教学：六键长按充能 ----------------
@@ -318,6 +372,12 @@ public class TutorialController : MonoBehaviour
         RefreshText();
         if (step == Step.Welcome)
             welcomeTimer = 0f;
+        // 进入结语页：重置自动顺接计时（此时才允许开始计算停留时间）
+        if (step == Step.CSharpIntro)
+        {
+            nextLessonTimer = 0f;
+            nextLessonTriggered = false;
+        }
 
         // 充能行仅在 Move 步骤可见
         if (moveKeyRowRt != null)
@@ -335,7 +395,17 @@ public class TutorialController : MonoBehaviour
             return;
 
         bool zh = Localization.IsChinese;
-        stepText.text = zh ? "引导教学（关卡 1 · 第 1 部分）" : "Tutorial (Level 1 · Part 1)";
+        // 结语页（打满目标数量后）标题直接显示「5/5 完成」，让玩家明确知道本部分已达成
+        if (currentStep == Step.CSharpIntro)
+        {
+            stepText.text = zh
+                ? "5/5 完成 · 引导教学（关卡 1 · 第 1 部分）"
+                : "5/5 Complete · Tutorial (Level 1 · Part 1)";
+        }
+        else
+        {
+            stepText.text = zh ? "引导教学（关卡 1 · 第 1 部分）" : "Tutorial (Level 1 · Part 1)";
+        }
 
         switch (currentStep)
         {
@@ -356,16 +426,16 @@ public class TutorialController : MonoBehaviour
                 break;
             case Step.FireLaser:
                 bodyText.text = zh
-                    ? "鼠标左键发射激光！\n\n激光每命中一次，吃掉长方体 1/4 的厚度；\n累计吃光 4 层，方块就被消灭。\n\n先开一枪感受一下（暂未生成方块，空射即可）。"
-                    : "Left-click to fire your laser!\n\nEach hit eats 1/4 of a block's thickness;\nafter 4 layers are consumed, the block is destroyed.\n\nTry firing once (no blocks yet, dry fire is fine).";
+                    ? "鼠标左键发射激光！\n\n激光每命中一次，吃掉长方体 1 层的厚度；\n每个方块的层数 = 它自己的最大 HP（1~6 层不等，最多 6 层），\n累计吃满它的 HP 层，方块就被消灭。\n\n屏幕底部「HP: 剩余HP/最大HP」实时显示剩余血量（如 6/6 → 5/6 → … → 1/6）。\n\n先开一枪感受一下（暂未生成方块，空射即可）。"
+                    : "Left-click to fire your laser!\n\nEach hit eats 1 layer of a block's thickness;\nlayer count = that block's own max HP (1~6 layers, max 6),\nso a block dies after its own max HP hits.\n\nThe bottom HUD shows remaining HP as \"HP: current / max HP\" (e.g. 6/6 -> 5/6 -> ... -> 1/6).\n\nTry firing once (no blocks yet, dry fire is fine).";
                 break;
             case Step.PlaneKill:
                 RefreshPlaneKillProgress();
                 break;
             case Step.CSharpIntro:
                 bodyText.text = zh
-                    ? "干得漂亮！你已经消灭了 5 个方块。\n\n接下来，我们将走入「自动化游玩」——\n让程序自己控制激光去打方块！\n\n现在请先自由体验当前关卡吧。"
-                    : "Nice work! You have destroyed 5 blocks.\n\nNext, we will move into automated play —\nletting the program control the laser by itself!\n\nFeel free to keep exploring the level for now.";
+                    ? "5/5 完成！你已经消灭了 " + targetKills + " 个方块。\n\n接下来，我们将走入「自动化游玩」——\n让程序自己控制激光去打方块！\n\n即将进入下一课：C# 基础语法\n（画面将淡出后自动切换，代码编辑器内教学无需任何输入…）"
+                    : "5/5 complete! You destroyed " + targetKills + " blocks.\n\nNext, we move into automated play —\nletting the program control the laser by itself!\n\nEntering the next lesson: C# basics\n(screen fades out and switches automatically; no input needed in the editor tutorial…)";
                 break;
         }
 
@@ -418,8 +488,8 @@ public class TutorialController : MonoBehaviour
         int kills = spawner != null ? spawner.PlayerKills : 0;
         bool zh = Localization.IsChinese;
         bodyText.text = zh
-            ? "注意观察！\n\n每个长方体都沿着坐标轴飞向原点，\n当它的表面碰到任意坐标平面（由两根坐标轴夹起来的面：X=0 / Y=0 / Z=0）时，它就会消失。\n\n现在用激光消灭 " + targetKills + " 个方块（每吃光 4 层消灭 1 个）：当前 " + kills + "/" + targetKills
-            : "Watch closely!\n\nEach block flies along an axis toward the origin. When its surface touches\nany coordinate plane (the plane spanned by two axes: X=0 / Y=0 / Z=0), it vanishes.\n\nNow destroy " + targetKills + " blocks with your laser (4 hits each): " + kills + "/" + targetKills;
+            ? "注意观察！\n\n每个长方体都沿着坐标轴飞向原点，\n当它的表面碰到任意坐标平面（由两根坐标轴夹起来的面：X=0 / Y=0 / Z=0）时，它就会消失。\n\n现在用激光消灭 " + targetKills + " 个方块（每命中 1 次吃掉 1 层，层数 = 该方块最大 HP）：当前 " + kills + "/" + targetKills
+            : "Watch closely!\n\nEach block flies along an axis toward the origin. When its surface touches\nany coordinate plane (the plane spanned by two axes: X=0 / Y=0 / Z=0), it vanishes.\n\nNow destroy " + targetKills + " blocks with your laser (1 hit eats 1 layer; layers = that block's max HP): " + kills + "/" + targetKills;
     }
 
     // ---------------- UI 构建 ----------------

@@ -100,6 +100,33 @@ public class CodeEditorController : MonoBehaviour
     /// <summary>编辑器当前是否打开。</summary>
     public bool IsOpen => editorRoot != null && editorRoot.activeSelf;
 
+    /// <summary>当前编辑器内的用户代码文本（编辑器未构建时返回空串）。代码语法教学（Level 1 - Part 2）据此判定任务。</summary>
+    public string CurrentCode => inputField != null ? inputField.text : string.Empty;
+
+    /// <summary>编译并成功启动 runner 时触发，参数为当次编译的用户代码快照（供教学等外部系统判定「编译运行成功」）。</summary>
+    public static event System.Action<string> OnCompiledSuccessfully;
+
+    /// <summary>
+    /// 教学用：把编辑器内容设为指定代码（并标记默认示例已填过，避免首次打开时被示例代码覆盖）。
+    /// 用于 Level 1 - Part 2 语法教学开局清空 / 放置代码骨架。
+    /// </summary>
+    public void SetCodeForTutorial(string code)
+    {
+        if (inputField == null)
+            return;
+        inputField.text = code ?? string.Empty;
+        defaultCodeFilled = true;          // 覆盖默认示例填充分支
+        lastCommittedText = inputField.text;
+        undoList.Clear();
+        redoList.Clear();
+        RefreshCodeView();
+        if (codeRt != null)
+        {
+            ApplyScrollY(0f);
+            UpdateScrollBars();
+        }
+    }
+
     // ---------------- 高亮配色 ----------------
     private const string C_KEYWORD = "#4EC9B0";  // 关键字青
     private const string C_STRING = "#6A9955";   // 字符串绿
@@ -124,11 +151,12 @@ public class CodeEditorController : MonoBehaviour
         "// 炮台接口示例：GetAllObjects / FireAtPlane / GetFireCooldown（简洁版，不自动循环）\n" +
         "// 输出走 print 荧幕（X 轴前方），不写 Debug 日志；print 支持 printf 风格格式化 {0} {1}\n" +
         "// 引擎每帧调用 Run(tower)；如需循环 / 限频，请自行编写 while / if 条件\n" +
+        "// 注意：FireAtPlane(A,B,C) 的平面 Ax+By+Cz=0 必过原点，只需给出法向量 (A,B,C)\n" +
         "tower.ClearPrint();\n" +
         "tower.PrintLine(\"== 炮台接口示例 ==\");\n" +
         "float cd = tower.GetFireCooldown();\n" +
         "tower.PrintLine(\"GetFireCooldown={0:F3}\", cd);\n" +
-        "bool fired1 = tower.FireAtPlane(0f, 1f, 0f, -5f);\n" +
+        "bool fired1 = tower.FireAtPlane(0f, 1f, 0f);   // 法线 (0,1,0)：平面过原点，沿 +Y 发射\n" +
         "tower.PrintLine(\"FireAtPlane fired={0}\", fired1);\n" +
         "var objects = tower.GetAllObjects();\n" +
         "tower.PrintLine(\"GetAllObjects count={0}\", objects.Count);\n" +
@@ -175,7 +203,7 @@ public class CodeEditorController : MonoBehaviour
             // ESC 同样退出代码编辑模式（编辑器占用外部输入，不会误触发暂停）
             if (Input.GetKeyDown(KeyCode.Escape))
             {
-                Close();
+                CloseFromEscape();
                 return;
             }
             // F6：编译运行（与 Compile & Run 按钮同逻辑）
@@ -366,7 +394,25 @@ public class CodeEditorController : MonoBehaviour
             Time.timeScale = 1f;
             SetCursorLocked(true);
         }
+
+        // 关闭编辑器后短暂忽略暂停键：避免「关闭编辑器」的那一次 ESC 紧接着又被当成暂停输入，
+        // 导致退出代码模式后游戏被暂停（应保持继续运行）
+        if (playerController != null)
+            playerController.SuppressPauseInput();
+        else
+            PlayerCameraController.SuppressPauseInputGlobal();
+
         Debug.Log("[CodeEditor] 编辑器关闭");
+    }
+
+    /// <summary>
+    /// ESC 退出代码编辑模式：只关闭编辑器并让游戏继续运行（不还原「打开前的暂停状态」），
+    /// 同时抑制本次 ESC 触发暂停，确保退出代码模式后游戏保持继续。
+    /// </summary>
+    private void CloseFromEscape()
+    {
+        wasPausedBeforeOpen = false; // ESC 退出后一律继续运行，不恢复暂停
+        Close();
     }
 
     /// <summary>强制关闭编辑器并恢复正常游戏状态（编译运行成功后调用，忽略打开前的暂停 / 冻结状态）。</summary>
@@ -499,6 +545,9 @@ public class CodeEditorController : MonoBehaviour
                 runnerActive = true;
                 SetStatus(Localization.Pick("编译成功，已启动运行（停止按钮可停止）", "Compiled OK, runner started (Stop to stop)"), false);
                 AppendError("");
+                // 教学判定钩子：编译并成功启动运行（Level 1 - Part 2 语法教学最后一项任务据此判定）
+                if (OnCompiledSuccessfully != null)
+                    OnCompiledSuccessfully(userCode);
                 CloseAndForceResume(); // 编译成功后强制恢复游戏状态，回到正常玩法
             }
         }

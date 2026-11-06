@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -53,12 +53,25 @@ public class CommandConsoleController : MonoBehaviour
     public float laserMaxLength = 60f;
 
     /// <summary>
-    /// 手动（鼠标左键）激光总开关：Level 3 完整玩法关关闭，Level 1 教学关保留。
-    /// 由 LevelDirector / MainMenuController 在进入关卡时设置；
+    /// 手动（鼠标左键）激光总开关：只有 Level 1 - Part 1（引导教学关）允许手动发射激光，
+    /// 其余所有关卡（Level 1 - Part 2、Level 2 - Part 1、Level 3 - Part 1 及后续完整关）一律禁用。
+    /// 由 LevelDirector / MainMenuController 在进入关卡时通过 SetManualLaserAllowed 设置；
     /// 只拦截「左键 → FireLaser」这一条手动链路，不影响炮台代码 tower.FireAtPlane /
-    /// 自动打方块脚本 AutoLaserExample 等调用 console.FireLaser 的自动化链路。
+    /// 自动打方块脚本 AutoLaserExample / 教学 Step.FireLaser 等调用 console.FireLaser 的链路。
     /// </summary>
-    public static bool ManualLaserEnabled = true;
+    public static bool ManualLaserEnabled = false;
+
+    /// <summary>
+    /// 设置手动激光开关（唯一入口，避免各关卡入口各写一套判断）：
+    /// 仅当「Level 1 - Part 1」时允许手动发射激光。
+    /// </summary>
+    public static void SetManualLaserAllowed(int level, int part)
+    {
+        bool allowed = (level == 1 && part == 1);
+        ManualLaserEnabled = allowed;
+        string where = (level <= 0) ? "主页 / 无关卡" : ("Level " + level + " - Part " + part);
+        Debug.Log("[CommandConsole] 手动激光（鼠标左键）：" + (allowed ? "已启用" : "已禁用") + "（" + where + "）");
+    }
     [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）")]
     public float laserVisualDuration = 0.9f;
     [Tooltip("激光视觉颜色")]
@@ -181,6 +194,13 @@ public class CommandConsoleController : MonoBehaviour
             Time.timeScale = 1f;
             SetCursorLocked(true);
         }
+
+        // 关闭指令框后短暂忽略暂停键：避免「关闭指令框」的那一次 ESC 紧接着触发暂停
+        if (playerController != null)
+            playerController.SuppressPauseInput();
+        else
+            PlayerCameraController.SuppressPauseInputGlobal();
+
         Debug.Log("[CommandConsole] 指令框关闭");
     }
 
@@ -238,27 +258,51 @@ public class CommandConsoleController : MonoBehaviour
             "开发者指令 / Developer Commands：\n" +
             "  /exit                     - 关闭指令框并返回主页\n" +
             "                              / close console and return to home\n" +
-            "  /level <关卡> <部分>       - 跳转到指定关卡分区（如 /level 3 1）\n" +
-            "                              / jump to level part, e.g. /level 3 1\n" +
+            "  /level <关卡> <部分>       - 跳转到指定关卡分区（如 /level 1 2、/level 2 1、/level 3 1）\n" +
+            "                              / jump to level part, e.g. /level 1 2, /level 2 1, /level 3 1\n" +
+            "  /level <关卡> <部分> <章节> - 跳转并直接定位到该关第 n 个 part 章节（n 为整数，从 1 开始）\n" +
+            "                              例：/level 1 2 3 跳到 Level 1 - Part 2 第 3 章；/level 2 1 5 跳到 Level 2 - Part 1 第 5 章\n" +
+            "                              / jump to the n-th task/chapter of that level-part, e.g. /level 1 2 3\n" +
             "  help / 帮助               - 显示帮助\n" +
             "                              / show this help");
     }
 
     /// <summary>
-    /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt;：跳转到指定关卡的分区。
-    /// 当前已实现 level 1 - part 1（教学关）、level 3 - part 1（完整玩法关）；其余分区提示未开放。
+    /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt; [章节]：跳转到指定关卡的分区，
+    /// 可选第三参数 n 表示该分区内的 part 章节序号（1 起，仅 Level 1 - Part 2 / Level 2 - Part 1 有章节拆分）。
+    /// 参数非法（非整数 / 章节越界 / 关卡未开放）时只输出提示，不抛异常。
     /// </summary>
     private void ExecuteLevel(CommandData cmd)
     {
-        if (cmd.Args.Length < 2 ||
-            !int.TryParse(cmd.Args[0], out int level) ||
-            !int.TryParse(cmd.Args[1], out int part))
+        if (cmd.Args == null || cmd.Args.Length < 2)
         {
-            AppendOutput("[level] 用法：/level <关卡> <部分>，如 /level 1 1");
+            AppendOutput("[level] 用法：/level <关卡> <部分> [章节]，如 /level 1 1、/level 1 2 3");
             return;
         }
 
-        string message = LevelDirector.JumpTo(level, part);
+        if (!int.TryParse(cmd.Args[0], out int level) || !int.TryParse(cmd.Args[1], out int part))
+        {
+            AppendOutput("[level] 用法：/level <关卡> <部分> [章节]，如 /level 1 1、/level 1 2 3（关卡 / 部分必须为整数）");
+            return;
+        }
+
+        // 可选第三参数：章节序号 n（1 起）
+        int section = 0;
+        if (cmd.Args.Length >= 3)
+        {
+            if (!int.TryParse(cmd.Args[2], out section))
+            {
+                AppendOutput("[level] 章节参数必须为整数：/level " + level + " " + part + " <章节序号>，如 /level 1 2 3");
+                return;
+            }
+            if (section < 1)
+            {
+                AppendOutput("[level] 章节序号从 1 开始：/level " + level + " " + part + " <章节序号>，如 /level 1 2 1");
+                return;
+            }
+        }
+
+        string message = LevelDirector.JumpTo(level, part, section);
         AppendOutput(message);
         if (message.Contains("已跳转"))
             CloseAndForceResume(); // 跳转成功后关闭指令框，回到正常游戏状态
@@ -289,7 +333,8 @@ public class CommandConsoleController : MonoBehaviour
     /// <summary>
     /// 从玩家视角相机位置沿准心方向发射激光（鼠标左键与 laser 指令共用）。
     /// 命中路径上的所有长方体：每个被击中的块从入射侧沿激光主导轴吃掉一层厚度
-    /// （每层 = 初始尺寸的 1/4），剩余部分保留为子块继续飞行；累计 4 次被吃光即死亡。
+    /// （每层 = 初始尺寸的 1/maxHits，层数由该块最大 HP 决定），剩余部分保留为子块继续飞行；
+    /// 累计 maxHits 次被吃光即死亡。
     /// 激光本体为受控的圆柱视觉，短暂显示后消失。
     /// </summary>
     public void FireLaser(float radius, bool reportToConsole)
@@ -326,7 +371,7 @@ public class CommandConsoleController : MonoBehaviour
                 nearestT = hits[i].distance;
         }
 
-        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~7，吃满即死亡；HP=1 一击即毁）
+        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~6，吃满即死亡；HP=1 一击即毁）
         int hitCount = 0;
         int deathCount = 0;
         foreach (FlyingBlock block in hitBlocks)

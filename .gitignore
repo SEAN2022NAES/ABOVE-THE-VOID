@@ -21,3 +21,6 @@
 *.VC.db
 *.pidb.meta
 /.vs/
+# 临时探针产物（不纳入版本控制）
+/_probe_result.txt
+_RichTextProbe_*

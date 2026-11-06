@@ -33,6 +33,20 @@ public class CoordinateAxesDrawer : MonoBehaviour
     public Color zColor = Color.green;
     public Color tickColor = new Color(1f, 1f, 1f, 0.85f);
 
+    [Header("轴名称标签（三轴统一，保证距离 / 字号 / 大小完全一致）")]
+    [Tooltip("标签中心到所属轴的垂直距离（世界米）。三个轴共用同一个值，"
+             + "方向恒取「垂直于轴且朝上」：一般轴用世界 +Y，竖直轴（世界 +Y）改用世界 +X")]
+    public float labelOffset = 0.5f;
+
+    [Tooltip("标签字形尺寸（TextMesh.fontSize，三轴统一）")]
+    public int labelFontSize = 60;
+
+    [Tooltip("标签字身缩放（TextMesh.characterSize，三轴统一）")]
+    public float labelCharacterSize = 0.0875f;
+
+    [Tooltip("标签恒定屏幕大小参考距离（BillboardToCamera，三轴统一，保证远近观感一致）")]
+    public float labelScreenSize = 10f;
+
     private void Awake()
     {
         // 先清除本物体下旧的可视化元素，再重建：
@@ -75,13 +89,27 @@ public class CoordinateAxesDrawer : MonoBehaviour
         DrawTicks(Vector3.right, Vector3.up, yColor, "Tick_Y");
         DrawTicks(Vector3.up, Vector3.right, zColor, "Tick_Z");
 
-        // 轴名称标签（Billboard 面向玩家，加载外部图片素材，便于替换）
-        // X 在深度端用居中；Y 在右端保持底部对齐避免遮挡；Z 在竖直轴顶端底部对齐，字身向上让开轴端。
-        // 注：Z 标签曾被当成“小太阳”装饰删掉，现恢复；三处标签均为纯字母，不含 < > 等
-        //     RichText 标记字符，TextMesh 默认 richText 不会吞字或改变显示。
-        DrawLabel(xTip + Vector3.up * 0.45f, "X", "Label_X", xColor);
-        DrawLabel(yTip, "Y", "Label_Y", yColor, false, true);
-        DrawLabel(zTip + Vector3.up * 0.35f, "Z", "Label_Z", zColor, false, true);
+        // 轴名称标签（Billboard 面向玩家）。
+        // 排布规则（三轴完全一致，避免历史上 X 偏位、Y 压轴身、Z 字号不一致）：
+        //   labelPos = 轴正方向端点 + LabelOffsetDir(轴方向) * labelOffset
+        //   LabelOffsetDir 恒取「垂直于该轴且朝上」：一般轴用世界 +Y，竖直轴（世界 +Y）用世界 +X；
+        //   锚点统一 MiddleCenter（字形中心正好落在计算点上，不随 Billboard 旋转而漂移）。
+        DrawLabel(xTip + LabelOffsetDir(xTip) * labelOffset, "X", "Label_X", xColor);
+        DrawLabel(yTip + LabelOffsetDir(yTip) * labelOffset, "Y", "Label_Y", yColor);
+        DrawLabel(zTip + LabelOffsetDir(zTip) * labelOffset, "Z", "Label_Z", zColor);
+    }
+
+    /// <summary>
+    /// 计算轴名称标签的偏移方向：垂直于轴且朝向"上方"。
+    /// 优先世界 +Y；当轴本身接近竖直（即世界 +Y 轴）时，+Y 与轴平行无法作为偏移，
+    /// 改用世界 +X（侧向），同样与轴垂直、且不会压到轴身上。
+    /// </summary>
+    private static Vector3 LabelOffsetDir(Vector3 axisTip)
+    {
+        Vector3 axisDir = axisTip.sqrMagnitude > 0.0001f ? axisTip.normalized : Vector3.up;
+        if (Mathf.Abs(Vector3.Dot(axisDir, Vector3.up)) > 0.9f)
+            return Vector3.right;
+        return Vector3.up;
     }
 
     /// <summary>创建一条线段（LineRenderer）。</summary>
@@ -136,10 +164,12 @@ public class CoordinateAxesDrawer : MonoBehaviour
     }
 
     /// <summary>
-    /// 创建轴末端漂浮提示。使用 TextMesh，避免 SVG 导入设置导致标签不可见。
+    /// 创建轴末端漂浮提示（TextMesh）。三个轴的标签用完全相同的字号 / 字身尺寸 /
+    /// 恒定屏幕大小 / 锚点（MiddleCenter），保证视觉上与轴的距离、大小一致。
+    /// 锚点取 MiddleCenter 是关键：字形中心恒等于传入的世界坐标，
+    /// BillBoard 旋转时标签不会像 LowerCenter 那样绕着点偏移、掉进轴身。
     /// </summary>
-    private void DrawLabel(Vector3 pos, string label, string name, Color axisColor,
-        bool horizontalFlip = false, bool bottomAlign = false)
+    private void DrawLabel(Vector3 pos, string label, string name, Color axisColor)
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(transform, false);
@@ -147,16 +177,16 @@ public class CoordinateAxesDrawer : MonoBehaviour
 
         TextMesh text = go.AddComponent<TextMesh>();
         text.text = label;
-        text.anchor = bottomAlign ? TextAnchor.LowerCenter : TextAnchor.MiddleCenter;
+        text.anchor = TextAnchor.MiddleCenter;   // 三轴统一居中：字形中心 = pos
         text.alignment = TextAlignment.Center;
         text.fontStyle = FontStyle.Bold;
-        text.fontSize = 60;
-        text.characterSize = 0.0875f;
+        text.fontSize = labelFontSize;           // 三轴统一字号
+        text.characterSize = labelCharacterSize; // 三轴统一字身尺寸
         text.color = axisColor;
 
         BillboardToCamera billboard = go.AddComponent<BillboardToCamera>();
-        billboard.SetConstantScreenSize(10f);
-        billboard.SetHorizontalFlip(horizontalFlip);
+        billboard.SetConstantScreenSize(labelScreenSize); // 三轴统一参考距离 → 屏幕上大小一致
+        billboard.SetHorizontalFlip(false);               // 三轴统一不镜像，正面正读
     }
 
     private Color InvertColor(Color color)

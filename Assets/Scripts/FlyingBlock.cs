@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -11,7 +11,7 @@ using UnityEngine;
 ///   - 高亮：准心指向时整体变亮、线框加粗，并在几何中心显示高亮原点标记；
 ///   - 行进面：长方体使用 6-submesh 单位立方体网格，行进方向对应的面渲染为白色；
 ///   - 中心标记：从白色面一侧查看时中心点渲染为黑色，其余角度为白色；
-///   - 受击阶段（HP）：每个块生成时 HP 随机为 1~7（等概率，恒 ≥ 1）。HP=1 表示首次被命中即碎掉（不产生残骸）；
+///   - 受击阶段（HP）：每个块生成时 HP 随机为 1~6（等概率，恒 ≥ 1）。HP=1 表示首次被命中即碎掉（不产生残骸）；
 ///     HP=N 表示沿攻击方向分 N 层厚度（每层 = 初始尺寸的 1/N），每次激光命中从入射侧吃掉一层，
 ///     剩余部分保留为子块继续飞行，累计 N 次被吃光即死亡。受击阶段颜色逐档变暗。
 ///   - 类型规则：蓝色（Bomb）炸弹块可被激光正常击打并击毁，但击毁既不加分也不扣分（score-neutral）；
@@ -38,7 +38,7 @@ public class FlyingBlock : MonoBehaviour
     public float overlapMargin = 0.05f;
 
     [Header("受击阶段 / 血量")]
-    [Tooltip("血量（= 受击总层数），生成时由 FlyingBlockSpawner 随机赋值为 1~7（恒 ≥ 1）：1 = 首次被命中即碎掉（无残骸），" +
+    [Tooltip("血量（= 受击总层数），生成时由 FlyingBlockSpawner 随机赋值为 1~6（恒 ≥ 1，上限 6）：1 = 首次被命中即碎掉（无残骸），" +
              "N = 沿攻击方向分 N 层（每层 = 初始尺寸的 1/N），累计 N 次被吃光死亡")]
     public int maxHits = 4;
 
@@ -98,7 +98,7 @@ public class FlyingBlock : MonoBehaviour
     private bool highlighted;
     private float spawnTime; // 生成时刻（以 Time.time 记录，用于"存活过久静默清除"判定；暂停时 Time.time 不增长故不会误清）
 
-    /// <summary>初始化（由生成器调用）。hp = 该块血量（受击层数），1~7，由生成器 Random.Range(1, 8) 随机给出。</summary>
+    /// <summary>初始化（由生成器调用）。hp = 该块血量（受击层数），1~6，由生成器 Random.Range(1, 7) 随机给出。</summary>
     public void Init(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir, int hp)
     {
         Type = type;
@@ -170,7 +170,7 @@ public class FlyingBlock : MonoBehaviour
         float ax = Mathf.Abs(rayDir.x), ay = Mathf.Abs(rayDir.y), az = Mathf.Abs(rayDir.z);
         int cutAxis = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
 
-        // 受击计数：第 maxHits 次受击整块被吃光，直接死亡（maxHits 由生成器给出 1~7，恒 ≥ 1；
+        // 受击计数：第 maxHits 次受击整块被吃光，直接死亡（maxHits 由生成器给出 1~6，恒 ≥ 1；
         // HP=1 的块第 1 发命中即被吃光，不存在 HP=0 的一击即毁块）
         HitCount++;
         if (HitCount >= maxHits)
@@ -600,8 +600,13 @@ public class FlyingBlock : MonoBehaviour
             return;
 
         Color baseColor = GetTypeColor(Type);
-        // 受击阶段形态：每被击中一次整体变暗一档（0 次=原色，1~3 次逐档变暗，第 4 次已死亡）
-        float dim = 1f - 0.18f * HitCount;
+        // 受击阶段颜色：按剩余血量比例（HP / maxHits）归一化插值，满血=类型原色，HP=0 才到纯黑端。
+        // 之前用固定步长 1 - 0.18 * HitCount 是绝对值映射：HP=6 的方块在第 5 次被击中时亮度只剩 0.1（几乎全黑），
+        // 而 HP=4 时同样 5 次已经死亡，导致高血量方块「最后几下直接变黑」。改为归一化后与 maxHits 无关：
+        // HP 比例越接近 0 越暗，仅 HP=0 时为纯黑；再取其平方根做缓动，让末段仍有明显红色（不会提前读作黑色）。
+        int maxHp = Mathf.Max(1, maxHits);
+        float hpRatio = Mathf.Clamp01((float)RemainingHits / maxHp); // 1 = 满血，0 = 被吃光
+        float dim = Mathf.Sqrt(hpRatio);
         baseColor.r *= dim;
         baseColor.g *= dim;
         baseColor.b *= dim;

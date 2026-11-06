@@ -46,6 +46,7 @@ public class BlockHitIndicator : MonoBehaviour
         if (current != null && !current.Destroyed)
         {
             Vector3 c = current.GeometryCenter;
+            // 进度统一显示「剩余 HP / 该方块最大 HP」（递减：6/6 → 5/6 → … → 1/6），吃满即死亡不显示 0
             infoText.text = "#" + current.BlockId + " " + FlyingBlock.GetTypeText(current.Type) +
                             "   HP: " + current.RemainingHits + "/" + current.maxHits +
                             "   Center: (" + c.x.ToString("F2") + ", " + c.y.ToString("F2") + ", " + c.z.ToString("F2") + ")";

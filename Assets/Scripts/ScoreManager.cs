@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
@@ -19,7 +19,7 @@ public class ScoreManager : MonoBehaviour
     public int killBaseScore = 10;
     [Tooltip("Volume factor: volume bonus = round(volume * factor); volume = initial size x*y*z (about 0.064~1.0)")]
     public float killVolumeFactor = 20f;
-    [Tooltip("Difficulty factor: difficulty bonus = factor * initial HP (HP 1~7)")]
+    [Tooltip("Difficulty factor: difficulty bonus = factor * initial HP (HP 1~6)")]
     public int killBonusPerHp = 3;
 
     [Header("Base damage penalty (red block reached zero plane)")]
@@ -38,6 +38,8 @@ public class ScoreManager : MonoBehaviour
     private Text deltaText;
     private float lastDeltaTime = -100f;
     private int shownDelta;
+    private GameObject hudRoot;                       // 分数 HUD 根物体（SetHudVisible 控制显隐）
+    private static bool hudVisibleRequested = true;    // HUD 显隐期望值（关卡可能在 Awake 前下发状态）
 
     // ---------------- static entry points (null-safe) ----------------
 
@@ -62,6 +64,23 @@ public class ScoreManager : MonoBehaviour
     {
         if (Instance != null)
             Instance.ResetScore();
+    }
+
+    /// <summary>
+    /// 控制分数 HUD 显隐：Level 1 教学关隐藏（不显示 Score），其他关卡显示。
+    /// 仅影响显示，计分逻辑照常运行（重新显示时数值立即正确）。
+    /// </summary>
+    public static void SetHudVisible(bool visible)
+    {
+        hudVisibleRequested = visible;
+        if (Instance != null)
+            Instance.ApplyHudVisible(visible);
+    }
+
+    private void ApplyHudVisible(bool visible)
+    {
+        if (hudRoot != null)
+            hudRoot.SetActive(visible);
     }
 
     // ---------------- scoring ----------------
@@ -119,6 +138,7 @@ public class ScoreManager : MonoBehaviour
         }
         Instance = this;
         BuildUI();
+        ApplyHudVisible(hudVisibleRequested); // 关卡已下发隐藏状态时（Awake 前调用）直接生效
         RefreshHud();
     }
 
@@ -181,6 +201,7 @@ public class ScoreManager : MonoBehaviour
         gameObject.AddComponent<GraphicRaycaster>();
 
         RectTransform root = CreateRect("ScoreRoot", canvas.transform, new Vector2(0f, 1f), new Vector2(24f, -24f), new Vector2(420f, 100f), new Vector2(0f, 1f));
+        hudRoot = root.gameObject; // HUD 显隐总开关（Level 1 教学关隐藏）
 
         scoreText = CreateText("ScoreText", root, "SCORE 0", 40, Color.white, TextAnchor.UpperLeft);
         RectTransform scoreRt = scoreText.rectTransform;

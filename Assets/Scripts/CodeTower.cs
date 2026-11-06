@@ -6,8 +6,9 @@ using UnityEngine.UI;
 /// <summary>
 /// 原点炮台（Code Tower）：
 ///   - 位置恒定在原点 (0,0,0)（每帧强制归位），为「代码编辑器」的用户代码提供可调用接口；
-///   - 视觉：纯代码构建简易炮台——底座圆柱 + 可旋转炮管圆柱（深灰 #3A3A3A），炮口端亮青色；
-///   - 激光：从炮口沿当前朝向发射（射程 laserMaxLength=60、作用/视觉半径 laserRadius=0.02 超级小，
+///   - 视觉：炮台本体永久隐藏（任何关卡 / 任何阶段都不现身，见 SetVisualVisible），
+///     火力逻辑、代码编辑器、发射接口完全照常工作；
+///   - 激光：从原点沿炮口当前朝向发射（射程 laserMaxLength=60、作用/视觉半径 laserRadius=0.02 超级小，
 ///     与鼠标左键触发的玩家激光等效的动画：双层圆柱 + 命中火花，淡出销毁），
 ///     每个命中 FlyingBlock 只扣 1 层 HP（CutByLaser 吃一层厚度，累计吃满该块随机 HP 即死亡，HP 恒 ≥ 1、HP=1 一击即毁）；
 ///     蓝色炸弹块（Bomb）可被激光正常击打并击毁，但击毁既不加分也不扣分（与红块同等切割流程）；
@@ -15,13 +16,20 @@ using UnityEngine.UI;
 ///   - 冷却：cooldownSeconds = 0.0285s（约 35 发/秒，为 0.03s 节奏留余量；即原 0.019s 的 1.5 倍），
 ///     用 Time.time 判断，冷却中发射返回 false；
 ///   - 公开 API（签名固定，编辑器用户代码可直接调用）：
-///     GetAllObjects() / FireAtPlane(A,B,C,D) / GetFireCooldown() /
+///     GetAllObjects() / FireAtPlane(A,B,C) / GetFireCooldown() /
 ///     Print(format, args...) / PrintLine(format, args...) / ClearPrint()。
+///     FireAtPlane 的平面恒过原点，方程为 Ax+By+Cz=0，只需给出法向量 (A,B,C)。
 ///   - print 荧幕：立在蓝色 X 轴正方向（世界 +Z）上方、面朝原点的世界空间显示面板，
 ///     用户代码调用 Print / PrintLine 即把文本输出到荧幕上（不写 Unity Debug 日志）。
 /// </summary>
 public class CodeTower : MonoBehaviour
 {
+    /// <summary>
+    /// 炮台本体是否永久隐藏（当前设计恒为 true：任何关卡、任何阶段都不显示炮台本体）。
+    /// 置 false 仅用于调试（会恢复 SetVisualVisible(true) 的显示能力）。
+    /// </summary>
+    public const bool AlwaysHideVisual = true;
+
     [Header("激光")]
     [Tooltip("激光作用/视觉半径（粗细，超级小；仅影响视觉粗细，命中判定为射线与 AABB 求交，不依赖此值）")]
     public float laserRadius = 0.02f;
@@ -126,20 +134,16 @@ public class CodeTower : MonoBehaviour
     }
 
     /// <summary>
-    /// 按平面方程 Ax+By+Cz+D=0 发射：炮台自动瞄准该平面（从原点指向平面垂足方向）并开火。
+    /// 按过原点平面 Ax+By+Cz=0 发射：炮台从原点沿该平面法线方向 (A,B,C) 开火。
+    /// 平面恒过原点（炮台就在原点），因此只需给出法向量，无需第四个参数 D。
     /// 冷却中返回 false；法向量 (A,B,C) 为零向量时返回 false。
     /// </summary>
-    public bool FireAtPlane(float A, float B, float C, float D)
+    public bool FireAtPlane(float A, float B, float C)
     {
         Vector3 normal = new Vector3(A, B, C);
         if (normal.sqrMagnitude <= 0.0001f)
             return false;
-        Vector3 dir;
-        if (Mathf.Abs(D) < 1e-6f)
-            dir = normal;      // 平面过原点：沿法线方向发射
-        else
-            dir = -D * normal; // 从原点指向平面垂足方向
-        Aim(dir);
+        Aim(normal);   // 平面必过原点 → 从原点沿法线方向发射
         return FireLaser();
     }
 
@@ -181,19 +185,42 @@ public class CodeTower : MonoBehaviour
     /// 控制炮台实体视觉显隐（仅供关卡脚本 GameBootstrap / LevelDirector / TutorialController 调用，
     /// 不面向编辑器用户代码）。隐藏仅关掉底座 / 炮管 / 炮口 / 瞄准线，
     /// 激光发射等接口功能不受影响。
+    /// <para>当前设计：炮台本体永久不现身（AlwaysHideVisual = true），
+    /// 因此传入 true 也会被强制忽略、始终按隐藏处理，避免任何关卡 / 阶段意外露出炮台。</para>
     /// </summary>
     public void SetVisualVisible(bool visible)
     {
+        bool finalVisible = visible && !AlwaysHideVisual;
         if (baseVisual != null)
-            baseVisual.SetActive(visible);
+            baseVisual.SetActive(finalVisible);
         if (barrelRoot != null)
-            barrelRoot.gameObject.SetActive(visible);
+            barrelRoot.gameObject.SetActive(finalVisible);
         // 瞄准线不随实体显隐：保持自身当前显隐状态（默认关闭）
+    }
+
+    /// <summary>强制隐藏炮台本体（Awake 构建视觉后调用一次，保证运行时任何阶段都不会露出炮台）。</summary>
+    private void HideVisualNow()
+    {
+        if (baseVisual != null)
+            baseVisual.SetActive(false);
+        if (barrelRoot != null)
+            barrelRoot.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// 控制 print 输出荧幕（世界空间面板）显隐，仅供关卡脚本调用（Level 1 教学关不显示输出面板）。
+    /// 隐藏期间 Print / PrintLine 仍照常写入内容，重新显示后内容立即正确。
+    /// </summary>
+    public void SetPrintScreenVisible(bool visible)
+    {
+        if (printCanvasRt != null)
+            printCanvasRt.gameObject.SetActive(visible);
     }
 
     private void Awake()
     {
         BuildVisual();
+        HideVisualNow();   // 炮台本体永久不现身：构建完视觉立刻隐藏，避免首帧闪一下
         BuildPrintScreen();
     }
 
@@ -255,7 +282,7 @@ public class CodeTower : MonoBehaviour
                 nearestT = hits[i].distance;
         }
 
-        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~7，吃满即死亡；HP=1 一击即毁）
+        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~6，吃满即死亡；HP=1 一击即毁）
         foreach (FlyingBlock block in hitBlocks)
         {
             block.CutByLaser(origin, dir, laserRadius);
