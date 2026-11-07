@@ -15,6 +15,12 @@ Current version: **v0.2.0**
 
 ### v0.2.0
 
+**Version numbering**
+
+- The published tags were renumbered so that each release carries a patch number one lower than before: `v0.1.5` became `v0.1.4`, `v0.1.4` became `v0.1.3`, and so on down to `v0.0.2` becoming `v0.0.1`; the Foundation notes below are now `v0.0.0`.
+- Every renamed tag still points at the original commit, and the old tag names were removed from the remote, so no commit content and no history were rewritten.
+- The release notes in this file follow the new numbering from `v0.2.0` onwards. Commits created before this release keep their original `Release vX` messages in the Git history, so a checkout of an older tag still shows the previous numbering in its copy of this file.
+
 **Engine migration**
 
 - The project moved from Tuanjie `1.11.0` on `2022.3.62t17` to Unity `2022.3.62f3c1` (changeset `1623fc0bbb97`); `ProjectSettings/ProjectVersion.txt` now pins the Unity editor and the Tuanjie version key is gone.
