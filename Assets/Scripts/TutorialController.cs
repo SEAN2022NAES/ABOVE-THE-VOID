@@ -17,8 +17,8 @@ public class TutorialController : MonoBehaviour
     public bool Started { get; private set; }
 
     [Header("UI")]
-    public int titleFontSize = 26;
-    public int bodyFontSize = 26; // v0.2.1：字号收敛，缓解排版拥挤
+    public int titleFontSize = 32;
+    public int bodyFontSize = 30; // 指导框字号放大，远距离也能看清
     public Color panelColor = new Color(0.04f, 0.05f, 0.09f, 0f); // v0.2.1：完全透明背景（无底色、不遮挡 3D 场景）
     public Color titleColor = new Color(0.55f, 0.75f, 0.9f, 1f);
     public Color bodyColor = Color.white;
@@ -464,15 +464,15 @@ public class TutorialController : MonoBehaviour
         if (bodyH <= 1f)
             bodyH = 120f; // 兜底：空文本时按最小正文高度处理
 
-        // 底部预留区：Move 步骤显示六键充能行约 128，其余步骤仅留少量边距约 40
-        float bottomReserve = (currentStep == Step.Move) ? 128f : 40f;
+        // 底部预留区：Move 步骤显示六键充能行约 150，其余步骤仅留少量边距约 48
+        float bottomReserve = (currentStep == Step.Move) ? 150f : 48f;
 
         // 面板高度 = 标题区 + 正文期望高度 + 底部预留区 + 上下边距
-        const float titleZone = 70f;    // 标题(44) + 顶部间距 + 标题区高度
-        const float topMargin = 20f;    // 标题区到正文起点
-        const float bottomMargin = 40f; // 面板底部留白
+        const float titleZone = 84f;    // 标题(56) + 顶部间距 + 标题区高度
+        const float topMargin = 24f;    // 标题区到正文起点
+        const float bottomMargin = 44f; // 面板底部留白
         float target = titleZone + topMargin + bodyH + bottomReserve + bottomMargin;
-        target = Mathf.Clamp(target, 300f, 420f); // v0.2.1：上限收敛，避免面板过大占满画面
+        target = Mathf.Clamp(target, 380f, 660f); // 字号放大后允许面板更高，避免正文被裁
 
         panelRt.sizeDelta = new Vector2(panelRt.sizeDelta.x, target);
 
@@ -508,7 +508,7 @@ public class TutorialController : MonoBehaviour
 
         gameObject.AddComponent<GraphicRaycaster>();
 
-        RectTransform panelRt = CreateRect("TutorialPanel", canvas.transform, new Vector2(0.5f, 1f), new Vector2(0f, -36f), new Vector2(1200f, 400f), new Vector2(0.5f, 1f));
+        RectTransform panelRt = CreateRect("TutorialPanel", canvas.transform, new Vector2(0.5f, 1f), new Vector2(0f, -36f), new Vector2(1400f, 420f), new Vector2(0.5f, 1f));
         panelRoot = panelRt.gameObject;
         Image panelImg = panelRoot.AddComponent<Image>();
         panelImg.color = panelColor; // v0.2.1：alpha=0 完全透明，仅作文本容器，不遮挡 3D 场景
@@ -520,15 +520,15 @@ public class TutorialController : MonoBehaviour
         stepRt.anchorMin = new Vector2(0f, 1f);
         stepRt.anchorMax = new Vector2(1f, 1f);
         stepRt.pivot = new Vector2(0.5f, 1f);
-        stepRt.anchoredPosition = new Vector2(0f, -18f);
-        stepRt.sizeDelta = new Vector2(-60f, 44f);
+        stepRt.anchoredPosition = new Vector2(0f, -20f);
+        stepRt.sizeDelta = new Vector2(-70f, 56f);
 
         bodyText = CreateText("Body", panelRt, "", bodyFontSize, bodyColor, TextAnchor.MiddleCenter);
         RectTransform bodyRt = bodyText.rectTransform;
         bodyRt.anchorMin = Vector2.zero;
         bodyRt.anchorMax = Vector2.one;
-        bodyRt.offsetMin = new Vector2(40f, 128f); // 底部留出六键充能行空间
-        bodyRt.offsetMax = new Vector2(-40f, -50f);
+        bodyRt.offsetMin = new Vector2(48f, 150f); // 底部留出六键充能行空间
+        bodyRt.offsetMax = new Vector2(-48f, -66f);
         bodyText.lineSpacing = 1.4f; // v0.2.1：增大行距，增加呼吸感
         bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
         bodyText.verticalOverflow = VerticalWrapMode.Overflow;
@@ -590,7 +590,7 @@ public class TutorialController : MonoBehaviour
             keyFill[i] = fill;
 
             // 键名
-            Text label = CreateText("Key_" + i, bgRt, KeyLabel(i), 22, new Color(0.85f, 0.9f, 1f, 1f), TextAnchor.MiddleCenter);
+            Text label = CreateText("Key_" + i, bgRt, KeyLabel(i), 24, new Color(0.85f, 0.9f, 1f, 1f), TextAnchor.MiddleCenter);
             label.fontStyle = FontStyle.Bold;
             RectTransform labelRt = label.rectTransform;
             labelRt.anchorMin = Vector2.zero;

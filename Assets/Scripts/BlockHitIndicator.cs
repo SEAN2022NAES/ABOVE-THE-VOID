@@ -26,9 +26,45 @@ public class BlockHitIndicator : MonoBehaviour
     private Text insideText; // 相机处于长方体内部时的英文提示
     private FlyingBlock current;
 
+    // 「选中方块信息」的水平位置控制：默认居中；当代码编辑器教学（左右平分屏）开启时，
+    // 由 CodeSyntaxTutorialController 把该行移到左半屏中心，避免与右侧任务卡 / 左侧底部提示条重叠。
+    private static BlockHitIndicator instance;
+    private static float globalHorizontalOffset;
+    private RectTransform infoRt;
+
+    /// <summary>底部「选中方块信息」行的垂直位置（屏幕坐标偏移，负值向下）：上移到提示条之上。</summary>
+    private const float InfoBottomY = -376f;
+
+    public static BlockHitIndicator Instance
+    {
+        get { return instance; }
+    }
+
+    /// <summary>全局设置「选中方块信息」水平偏移（0 = 屏幕居中，-480 = 左半屏中心）。</summary>
+    public static void SetHorizontalOffsetGlobal(float offsetX)
+    {
+        globalHorizontalOffset = offsetX;
+        if (instance != null)
+            instance.ApplyHorizontalOffset();
+    }
+
+    private void ApplyHorizontalOffset()
+    {
+        if (infoRt != null)
+            infoRt.anchoredPosition = new Vector2(globalHorizontalOffset, InfoBottomY);
+    }
+
     private void Awake()
     {
+        instance = this;
         BuildUI();
+        ApplyHorizontalOffset();
+    }
+
+    private void OnDestroy()
+    {
+        if (instance == this)
+            instance = null;
     }
 
     private void LateUpdate()
@@ -46,7 +82,8 @@ public class BlockHitIndicator : MonoBehaviour
         if (current != null && !current.Destroyed)
         {
             Vector3 c = current.GeometryCenter;
-            // 进度统一显示「剩余 HP / 该方块最大 HP」（递减：6/6 → 5/6 → … → 1/6），吃满即死亡不显示 0
+            // 进度统一显示「剩余 HP / 该方块最大 HP」（递减：N/N → … → 1/N），吃满即死亡不显示 0
+            // 蓝色 BOMB 块 maxHits 恒为 1，因此始终显示 1/1（未被击中即已击毁，不会出现中间档）
             infoText.text = "#" + current.BlockId + " " + FlyingBlock.GetTypeText(current.Type) +
                             "   HP: " + current.RemainingHits + "/" + current.maxHits +
                             "   Center: (" + c.x.ToString("F2") + ", " + c.y.ToString("F2") + ", " + c.z.ToString("F2") + ")";
@@ -141,8 +178,10 @@ public class BlockHitIndicator : MonoBehaviour
         rt.anchorMin = new Vector2(0.5f, 0.5f);
         rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = new Vector2(0f, -470f); // 屏幕底部，避开准心与目标长方体重叠
+        // 底部「选中方块信息」：上移到常驻提示条（屏幕底部 40~104）上方，两者不再重叠
+        rt.anchoredPosition = new Vector2(globalHorizontalOffset, InfoBottomY);
         rt.sizeDelta = new Vector2(900f, 72f);
+        infoRt = rt;
 
         infoText = go.AddComponent<Text>();
         infoText.font = UIFontHelper.LoadMono();

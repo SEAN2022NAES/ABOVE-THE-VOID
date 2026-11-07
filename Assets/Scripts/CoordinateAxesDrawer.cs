@@ -47,12 +47,76 @@ public class CoordinateAxesDrawer : MonoBehaviour
     [Tooltip("标签恒定屏幕大小参考距离（BillboardToCamera，三轴统一，保证远近观感一致）")]
     public float labelScreenSize = 10f;
 
+    /// <summary>全局实例（主页需要隐藏整套坐标系时通过静态接口调用）。</summary>
+    public static CoordinateAxesDrawer Instance { get; private set; }
+
+    // 整套坐标系显隐状态（主页隐藏、进入关卡恢复；默认显示）
+    private bool axesVisible = true;
+
+    // 全局期望显隐值：主页在绘制器 Awake 之前下发隐藏时，后续创建的实例也按此值初始化（避免竞态导致轴又出现）
+    private static bool globalVisibleRequested = true;
+
+    /// <summary>当前坐标系是否可见。</summary>
+    public bool AxesVisible { get { return axesVisible; } }
+
     private void Awake()
     {
+        Instance = this;
+        axesVisible = globalVisibleRequested; // 采用全局期望值（主页先于本物体创建时也能正确隐藏）
         // 先清除本物体下旧的可视化元素，再重建：
         // 避免 Play 模式热重载脚本时旧箭头/旧标签残留叠加成"延长线"或"小太阳"。
         ClearExistingDrawings();
         DrawAxes();
+        ApplyAxesVisible();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
+    /// <summary>显示 / 隐藏整套坐标系（轴线、箭头、刻度、轴名标签）。</summary>
+    public void SetAxesVisible(bool visible)
+    {
+        axesVisible = visible;
+        globalVisibleRequested = visible; // 记录为全局期望值，供之后创建的实例沿用
+        ApplyAxesVisible();
+    }
+
+    /// <summary>
+    /// 静态显隐开关：优先作用于已存在的实例，实例尚未创建时退化为查找场景中的绘制器。
+    /// 供 MainMenuController / LevelPresentation / LevelDirector 在进出主页时调用，幂等。
+    /// </summary>
+    public static void SetAxesVisibleGlobal(bool visible)
+    {
+        globalVisibleRequested = visible; // 先记录期望值：即便此刻绘制器还没 Awake，之后创建也会按此隐藏
+        CoordinateAxesDrawer drawer = Instance;
+        if (drawer == null)
+            drawer = FindObjectOfType<CoordinateAxesDrawer>();
+        if (drawer != null)
+            drawer.SetAxesVisible(visible);
+    }
+
+    /// <summary>把当前显隐状态应用到本脚本创建的全部可视化物体（按命名前缀识别，不影响场景其它物体）。</summary>
+    private void ApplyAxesVisible()
+    {
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            Transform child = transform.GetChild(i);
+            if (!IsOwnDrawing(child.name))
+                continue;
+            if (child.gameObject.activeSelf != axesVisible)
+                child.gameObject.SetActive(axesVisible);
+        }
+    }
+
+    /// <summary>是否为本脚本创建的可视化物体（Axis_ / Tick_ / Label_ 前缀）。</summary>
+    private static bool IsOwnDrawing(string childName)
+    {
+        if (string.IsNullOrEmpty(childName))
+            return false;
+        return childName.StartsWith("Axis_") || childName.StartsWith("Tick_") || childName.StartsWith("Label_");
     }
 
     /// <summary>清除本物体下此前程序创建的可视化物体（仅限本脚本命名的前缀，不影响场景其它物体）。</summary>
@@ -92,7 +156,8 @@ public class CoordinateAxesDrawer : MonoBehaviour
         // 轴名称标签（Billboard 面向玩家）。
         // 排布规则（三轴完全一致，避免历史上 X 偏位、Y 压轴身、Z 字号不一致）：
         //   labelPos = 轴正方向端点 + LabelOffsetDir(轴方向) * labelOffset
-        //   LabelOffsetDir 恒取「垂直于该轴且朝上」：一般轴用世界 +Y，竖直轴（世界 +Y）用世界 +X；
+        //   LabelOffsetDir：一般轴恒取世界 +Y（轴端正上方）；竖直轴（世界 +Y，即 Z 轴）
+        //   沿轴继续向上（直接落在 Z 轴正上方，而不是斜上方世界 +X）；
         //   锚点统一 MiddleCenter（字形中心正好落在计算点上，不随 Billboard 旋转而漂移）。
         DrawLabel(xTip + LabelOffsetDir(xTip) * labelOffset, "X", "Label_X", xColor);
         DrawLabel(yTip + LabelOffsetDir(yTip) * labelOffset, "Y", "Label_Y", yColor);
@@ -100,15 +165,15 @@ public class CoordinateAxesDrawer : MonoBehaviour
     }
 
     /// <summary>
-    /// 计算轴名称标签的偏移方向：垂直于轴且朝向"上方"。
-    /// 优先世界 +Y；当轴本身接近竖直（即世界 +Y 轴）时，+Y 与轴平行无法作为偏移，
-    /// 改用世界 +X（侧向），同样与轴垂直、且不会压到轴身上。
+    /// 计算轴名称标签的偏移方向：
+    ///   - 一般轴（X / Y）：垂直于轴且朝上（世界 +Y），标签落在轴端的正上方；
+    ///   - 竖直轴（世界 +Y，即 Z 轴）：沿轴方向继续向上，标签落在 Z 轴正上方（垂直正上，不是斜上方）。
     /// </summary>
     private static Vector3 LabelOffsetDir(Vector3 axisTip)
     {
         Vector3 axisDir = axisTip.sqrMagnitude > 0.0001f ? axisTip.normalized : Vector3.up;
         if (Mathf.Abs(Vector3.Dot(axisDir, Vector3.up)) > 0.9f)
-            return Vector3.right;
+            return axisDir; // Z 轴：直接沿轴向上延长标签位置（轴向正上方）
         return Vector3.up;
     }
 

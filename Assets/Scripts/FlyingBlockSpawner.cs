@@ -218,13 +218,26 @@ public class FlyingBlockSpawner : MonoBehaviour
             FlyingBlock block = go.GetComponent<FlyingBlock>();
             FlyingBlock.BlockType type = PickBlockType();
             float speed = Random.Range(speedMin, speedMax);
-            int hp = Random.Range(1, 7); // 血量 1~6 等概率随机（上限 6；HP 恒 ≥ 1，不会出现一击即毁/0 血块）
+            int hp = ResolveHpByType(type); // 按类型定血：蓝色 BOMB 恒为 1，红色 ATTACK 随机 1~6
             block.Init(type, size, spawnPos, speed, nextBlockId, dir, hp);
             nextBlockId++;
             ActiveBlocks.Add(block);
             return block;
         }
         return null; // 空间不足时放弃本次生成
+    }
+
+    /// <summary>
+    /// 按方块类型决定 HP（受击层数）：
+    ///   - 蓝色 BOMB / 阻碍块：HP 恒为 1，生成时 maxHits = HP = 1，激光命中一次即整块击毁（不产生残骸、不切层）；
+    ///   - 红色 ATTACK / 攻击块：沿用原规则，HP = Random.Range(1, 7) 在 1~6 间等概率随机（恒 ≥ 1）。
+    /// 该函数是 HP 赋值的唯一出口，保证两种类型的血量规则不会互相污染。
+    /// </summary>
+    private int ResolveHpByType(FlyingBlock.BlockType type)
+    {
+        if (type == FlyingBlock.BlockType.Bomb)
+            return 1; // 蓝色阻碍块：血量恒定 1（一击即毁）
+        return Random.Range(1, 7); // 红色攻击块：保持原随机规则 1~6
     }
 
     /// <summary>

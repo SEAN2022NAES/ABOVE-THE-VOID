@@ -25,10 +25,17 @@ public class TimeHintController : MonoBehaviour
     private Text timeText;
     private float startTime; // 本局开始时的 Time.time，作为运行时长基准
 
+    /// <summary>全局显隐期望值（静态，跨实例 / 跨创建时机生效）：默认隐藏，避免在主页菜单看到倒计时。</summary>
+    private static bool globalVisibleRequested;
+
+    /// <summary>当前是否期望显示（供外部查询）。</summary>
+    public static bool VisibleRequested => globalVisibleRequested;
+
     private void Awake()
     {
         startTime = Time.time;
         BuildUI();
+        ApplyVisible(); // 创建即按全局期望值设定（主页创建时不显示，进关卡后 SetVisible(true) 才显示）
     }
 
     private void LateUpdate()
@@ -46,11 +53,27 @@ public class TimeHintController : MonoBehaviour
             : t.ToString(@"mm\:ss");
     }
 
-    /// <summary>控制时间提示显示 / 隐藏（Level 1 Part 1 隐藏；保留实现供后续关卡使用）。</summary>
+    /// <summary>控制时间提示显示 / 隐藏（同时写入全局期望值，后续新建的实例也遵守）。</summary>
     public void SetVisible(bool visible)
     {
+        globalVisibleRequested = visible;
+        ApplyVisible();
+    }
+
+    /// <summary>静态显隐控制（供主页 / 关卡切换统一调用，实例尚未创建或即将创建同样生效）。</summary>
+    public static void SetVisibleGlobal(bool visible)
+    {
+        globalVisibleRequested = visible;
+        TimeHintController instance = FindObjectOfType<TimeHintController>();
+        if (instance != null)
+            instance.ApplyVisible();
+    }
+
+    /// <summary>把全局期望值落到 Canvas 上（隐藏时 canvas.enabled=false，文字计时仍然照常走）。</summary>
+    private void ApplyVisible()
+    {
         if (canvas != null)
-            canvas.enabled = visible;
+            canvas.enabled = globalVisibleRequested;
     }
 
     /// <summary>重置本局计时基准（再次进入 Level 3 时调用，顶部时间重新从 00:00 开始）。</summary>

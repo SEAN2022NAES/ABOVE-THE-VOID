@@ -66,7 +66,20 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
     // ---------------- UI 引用 ----------------
     private const int MaxChips = 24;   // 进度格最多预建数量（两门课程任务数均 ≤ 24）
-    private GameObject panelRoot;      // 编辑器打开时显示的任务卡
+    // 上下分栏布局：代码编辑器占上方整块，指导框（任务卡）横跨屏幕底部整条，
+    // 其高度即编辑器底部预留高度（CodeEditorController.SetBottomReservedHeight），两者上下一一对齐、互不重叠。
+    private const float ReferenceWidth = 1920f;          // CanvasScaler 参考分辨率宽（面板铺满宽度回退值）
+    private const float GuidePanelHeightMin = 300f;      // 指导框最小高度（文案短时）
+    private const float GuidePanelHeightMax = 560f;      // 指导框最大高度（保证上方代码区仍有足够可视行数）
+    private const float GuideBodyTopInset = 132f;        // 正文上边距（让开强调线 / 标题 / 进度格 / 任务名）
+    private const float GuideBodyBottomInset = 46f;      // 正文下边距（让开「任务完成 ✔」提示）
+    private const int GuideBodyFontSize = 18;            // 正文号（宽度铺满后可略小，行数更紧凑）
+    private const float GuideBodyLineSpacing = 1.05f;    // 正文行距
+    private const float HintBarMaxWidth = 1400f;         // 提示条最大宽度
+    private const float HintBarMinWidth = 420f;          // 提示条最小宽度
+    private const float HintBarMinHeight = 64f;          // 提示条最小高度
+    private GameObject panelRoot;      // 编辑器打开时显示的任务卡（底部指导框）
+    private RectTransform hintRect;    // 提示条矩形（按文案自适应宽高）
     private Text headlineText;         // 「关卡 1 · 第 2 部分 · C# 基础语法教学」
     private Text progressText;         // 「任务 2/18」
     private Text taskNameText;         // 当前任务名
@@ -365,8 +378,18 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (editor != null)
             editor.SetCodeForTutorial(string.Empty);
 
+        // 布局：上下分栏 —— 上方代码编辑器占满可用区域（代码过长时用编辑器内部竖向滚动条滚动查看），
+        // 下方指导框横向占满可用宽度、上边缘与代码编辑器下边缘平齐、下边缘贴屏幕底部，两者不重叠。
+        // 指导框高度随任务文案自适应（RefitPanelToContent），并同步给编辑器下边距，保证像素级对齐。
+        // 只在本教学（Level 1-Part 2 / Level 2-Part 1）生效，EndInternal 恢复默认全屏布局。
+        if (editor != null)
+            editor.SetRightReservedWidth(0f); // 上下分栏不再左右平分，右侧不再预留
+        // 「选中方块信息」恢复屏幕水平居中（下方指导框已横向占满，不再需要左右错位避让）
+        BlockHitIndicator.SetHorizontalOffsetGlobal(0f);
+
         LayoutChips();
         RefreshText();
+        RefitPanelToContent(); // 按当前任务文案算出指导框高度，并把该高度作为编辑器底部预留
 
         // 进入即打开代码编辑器 —— 教学发生在编辑器页面内
         autoOpenPending = true;
@@ -381,6 +404,18 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
     private void EndInternal()
     {
+        EnsureRefs();
+
+        // 离开教学（回主页 / 跳其它关卡）先无条件收尾布局与编辑器：恢复编辑器全屏、强制关闭界面并收起 Enter 提示，
+        // 避免「从 Part 2 / API 教学跳到 Level 3」时还带着打开的全屏代码编辑器（本方法可能在教学已结束后被再次调用）。
+        if (editor != null)
+        {
+            editor.SetBottomReservedHeight(0f);
+            editor.SetRightReservedWidth(0f);
+            editor.ForceCloseSelf();
+        }
+        BlockHitIndicator.SetHorizontalOffsetGlobal(0f);
+
         if (!Active)
             return;
 
@@ -402,6 +437,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         CodeEditorController.OnCompiledSuccessfully -= HandleCompiledSuccessfully;
         Localization.OnLanguageChanged -= RefreshText;
+
+        // 布局收尾（恢复编辑器全屏 / 模块居中）已在方法开头无条件完成，这里只复位教学状态
         SetAllVisible(false);
         Debug.Log("[CodeSyntaxTutorial] 教学结束，进度已重置。");
     }
@@ -524,6 +561,16 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         int completed = CurrentIndex + 1;
         CurrentIndex++;
 
+        // 断点续玩：章节（任务）推进即把「关卡 + 分区 + 章节」写入存档并 Save()
+        //   · 语法课（Course.Grammar）= Level 1 - Part 2，API 课（Course.Api）= Level 2 - Part 1；
+        //   · CurrentIndex 是 0 基任务序号，存档中的 section 是 1 起章节号，故 +1；
+        //   · 若本次推进后全部章节都已完成（整关通关），则清掉属于本分区的断点，下次从该关开头进入。
+        GameProgress.GetCourseLocation(CurrentCourse, out int progressLevel, out int progressPart);
+        if (CurrentIndex >= TaskCount)
+            GameProgress.ClearResumeIfMatches(progressLevel, progressPart);
+        else
+            GameProgress.SaveResume(progressLevel, progressPart, CurrentIndex + 1);
+
         // 进入下一个任务：编译标记清零 —— 每个任务都必须重新点一次【编译运行 (F6)】
         compiledThisTask = false;
         compiledRaw = "";
@@ -548,6 +595,12 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         finished = true;
         flashTimer = 3.5f;
+
+        // 逐级解锁：本次课程全部完成即视为整关通关（PlayerPrefs 持久化，跨重启保留）
+        //   语法课（Level 1 - Part 2）→ 关卡 1 通关，解锁关卡 2；
+        //   API 课（Level 2 - Part 1）→ 关卡 2 通关，解锁关卡 3。
+        LevelProgress.MarkLevelCompleted(CurrentCourse == Course.Api ? 2 : 1);
+
         SetLabel(flashText, Localization.Pick("全部任务完成！", "All tasks done!"));
 
         // 教学收尾：开始生成方块 —— 玩家写的程序开始自动驱动炮台（炮台本体永久不现身，只在原点工作）
@@ -634,6 +687,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         RefreshTextCore();
         RefreshFonts();
+        // 文案变化后重算指导框高度：保证多样长度的任务文案始终完整落在黑框内
+        RefitPanelToContent();
     }
 
     /// <summary>文本创建时是空串，字体按英文（Consolas）选的；写入中文后必须重选字体，否则中文缺字形。</summary>
@@ -865,6 +920,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             return;
         hintCache = text;
         SetLabel(hintText, text);
+        RefitHintBar(); // 文案长度变化时按实测宽高重排，长文案自动换行加高，不被截断
     }
 
     // ================== 任务表（C# 基础语法 18 项） ==================
@@ -1616,46 +1672,59 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
     private void BuildTaskPanel(Transform parent)
     {
-        // 任务卡：右下角浮动面板，浮在代码区上方（bottom = 196，避开底部 160px 的错误/状态区与横向滚动条）
-        // 高 648 保证「写法 + 示例代码 + 目标 + 提示 + 判定 + 完成条件（① 语法 ② 编译）」完整显示
-        // （正文有效高度 = 648 - 130 - 52 = 466px，17 号字行高约 20px，可容纳约 22 行）
-        RectTransform panelRt = CreateRect("SyntaxTaskPanel", parent, new Vector2(1f, 0f), Vector2.zero, new Vector2(620f, 648f), new Vector2(1f, 0f));
-        panelRt.anchoredPosition = new Vector2(-34f, 196f);
+        // 任务卡（指导框）：屏幕底部横向整条 —— 上下分栏布局。
+        //   · 上边缘与代码编辑器（TowerCodeEditor）下边缘严丝合缝：面板高度会同步给
+        //     CodeEditorController.SetBottomReservedHeight，编辑器整体上移收窄到上半区，两者不重叠；
+        //   · 下边缘贴屏幕底部（anchoredPosition = 0），左右铺满整个可用宽度（anchorMin.x = 0 / anchorMax.x = 1）；
+        //   · 高度按当前任务文案自适应（RefitPanelToContent），保证写法 / 示例 / 目标 / 提示 / 判定等文案
+        //     完整落在黑框内，不再出现文字超出黑框的情况。
+        RectTransform panelRt = CreateRect("SyntaxTaskPanel", parent, new Vector2(0f, 0f), Vector2.zero,
+            new Vector2(0f, GuidePanelHeightMin), new Vector2(0.5f, 0f));
+        panelRt.anchorMin = new Vector2(0f, 0f);
+        panelRt.anchorMax = new Vector2(1f, 0f);
+        panelRt.pivot = new Vector2(0.5f, 0f);
+        panelRt.anchoredPosition = Vector2.zero;
+        panelRt.sizeDelta = new Vector2(0f, GuidePanelHeightMin);
         panelRoot = panelRt.gameObject;
 
         Image bg = panelRoot.AddComponent<Image>();
         bg.sprite = WhiteSprite();
-        bg.color = new Color(0.055f, 0.075f, 0.105f, 0.90f);
+        bg.color = new Color(0.055f, 0.075f, 0.105f, 0.93f);
         bg.raycastTarget = false; // 不挡编辑器输入：点击穿透到代码区
 
-        // 顶部强调线
-        RectTransform accentRt = CreateRect("Accent", panelRt, new Vector2(0f, 1f), Vector2.zero, new Vector2(620f, 3f), new Vector2(0f, 1f));
+        // 顶部强调线（横向铺满）
+        RectTransform accentRt = CreateRect("Accent", panelRt, new Vector2(0f, 1f), Vector2.zero, new Vector2(0f, 3f), new Vector2(0.5f, 1f));
+        accentRt.anchorMin = new Vector2(0f, 1f);
+        accentRt.anchorMax = new Vector2(1f, 1f);
+        accentRt.pivot = new Vector2(0.5f, 1f);
+        accentRt.anchoredPosition = Vector2.zero;
+        accentRt.sizeDelta = new Vector2(0f, 3f);
         Image accent = accentRt.gameObject.AddComponent<Image>();
         accent.sprite = WhiteSprite();
         accent.color = new Color(0.26f, 0.62f, 0.92f, 0.95f);
         accent.raycastTarget = false;
 
         // 标题
-        headlineText = CreateText("Headline", panelRt, "", 21,
+        headlineText = CreateText("Headline", panelRt, "", 24,
             new Color(0.55f, 0.78f, 0.96f, 1f), TextAnchor.MiddleLeft);
         RectTransform hlRt = headlineText.rectTransform;
         hlRt.anchorMin = new Vector2(0f, 1f);
         hlRt.anchorMax = new Vector2(0f, 1f);
         hlRt.pivot = new Vector2(0f, 1f);
-        hlRt.anchoredPosition = new Vector2(24f, -14f);
-        hlRt.sizeDelta = new Vector2(400f, 28f);
+        hlRt.anchoredPosition = new Vector2(24f, -12f);
+        hlRt.sizeDelta = new Vector2(700f, 30f);
 
         // 进度「任务 k/18」
-        progressText = CreateText("Progress", panelRt, "", 19,
+        progressText = CreateText("Progress", panelRt, "", 21,
             new Color(0.82f, 0.86f, 0.90f, 1f), TextAnchor.MiddleRight);
         RectTransform pbRt = progressText.rectTransform;
         pbRt.anchorMin = new Vector2(1f, 1f);
         pbRt.anchorMax = new Vector2(1f, 1f);
         pbRt.pivot = new Vector2(1f, 1f);
-        pbRt.anchoredPosition = new Vector2(-24f, -14f);
-        pbRt.sizeDelta = new Vector2(160f, 28f);
+        pbRt.anchoredPosition = new Vector2(-24f, -12f);
+        pbRt.sizeDelta = new Vector2(220f, 30f);
 
-        // 进度小格（预建 MaxChips 个，按当前课程任务数动态排布 / 显隐）
+        // 进度小格（预建 MaxChips 个，按当前课程任务数动态排布 / 显隐；宽度在 LayoutChips 里按面板实际宽度计算）
         for (int i = 0; i < MaxChips; i++)
         {
             RectTransform chipRt = CreateRect("Chip" + (i + 1), panelRt, new Vector2(0f, 1f), Vector2.zero,
@@ -1668,7 +1737,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             chipBg.raycastTarget = false;
             chipBgs[i] = chipBg;
 
-            Text chipText = CreateText("ChipText" + (i + 1), chipRt, (i + 1).ToString(), 16,
+            Text chipText = CreateText("ChipText" + (i + 1), chipRt, (i + 1).ToString(), 17,
                 new Color(0.62f, 0.66f, 0.70f, 1f), TextAnchor.MiddleCenter);
             Stretch(chipText.rectTransform);
             chipText.raycastTarget = false;
@@ -1677,41 +1746,45 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             chipRt.gameObject.SetActive(false);
         }
 
-        // 任务名
-        taskNameText = CreateText("TaskName", panelRt, "", 23, Color.white, TextAnchor.MiddleLeft);
+        // 任务名（横向铺满，右侧留 24 内边距）
+        taskNameText = CreateText("TaskName", panelRt, "", 26, Color.white, TextAnchor.MiddleLeft);
         RectTransform tnRt = taskNameText.rectTransform;
         tnRt.anchorMin = new Vector2(0f, 1f);
-        tnRt.anchorMax = new Vector2(0f, 1f);
+        tnRt.anchorMax = new Vector2(1f, 1f);
         tnRt.pivot = new Vector2(0f, 1f);
-        tnRt.anchoredPosition = new Vector2(24f, -90f);
-        tnRt.sizeDelta = new Vector2(552f, 32f);
+        tnRt.anchoredPosition = new Vector2(24f, -88f);
+        tnRt.sizeDelta = new Vector2(-48f, 36f);
 
-        // 正文（写法 / 目标 / 提示 / 判定 + 完成条件）
-        bodyText = CreateText("Body", panelRt, "", 17,
+        // 正文（写法 / 目标 / 提示 / 判定 + 完成条件）：上下边距固定，正文区高度 = 面板高度 - 上下留白，
+        // 因此面板高度按正文实测高度反推（RefitPanelToContent），文案永不溢出黑框。
+        bodyText = CreateText("Body", panelRt, "", GuideBodyFontSize,
             new Color(0.86f, 0.89f, 0.92f, 1f), TextAnchor.UpperLeft);
         RectTransform bodyRt = bodyText.rectTransform;
         bodyRt.anchorMin = new Vector2(0f, 0f);
         bodyRt.anchorMax = new Vector2(1f, 1f);
         bodyRt.pivot = new Vector2(0.5f, 0.5f);
-        bodyRt.offsetMin = new Vector2(24f, 52f);
-        bodyRt.offsetMax = new Vector2(-24f, -130f);
+        bodyRt.offsetMin = new Vector2(24f, GuideBodyBottomInset);
+        bodyRt.offsetMax = new Vector2(-24f, -GuideBodyTopInset);
         bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
-        bodyText.verticalOverflow = VerticalWrapMode.Truncate;
-        bodyText.lineSpacing = 1.10f;
+        bodyText.verticalOverflow = VerticalWrapMode.Overflow; // 文案先完整排版，再由面板高度兜住
+        bodyText.lineSpacing = GuideBodyLineSpacing;
         bodyText.raycastTarget = false;
 
         // 「任务完成 ✔」提示
-        flashText = CreateText("Flash", panelRt, "", 18,
+        flashText = CreateText("Flash", panelRt, "", 20,
             new Color(0.42f, 0.92f, 0.60f, 1f), TextAnchor.MiddleLeft);
         RectTransform flRt = flashText.rectTransform;
         flRt.anchorMin = new Vector2(0f, 0f);
-        flRt.anchorMax = new Vector2(0f, 0f);
+        flRt.anchorMax = new Vector2(1f, 0f);
         flRt.pivot = new Vector2(0f, 0f);
-        flRt.anchoredPosition = new Vector2(24f, 16f);
-        flRt.sizeDelta = new Vector2(520f, 26f);
+        flRt.anchoredPosition = new Vector2(24f, 12f);
+        flRt.sizeDelta = new Vector2(-48f, 28f);
         flashText.raycastTarget = false;
 
         panelRt.gameObject.SetActive(false);
+
+        LayoutChips();
+        RefitPanelToContent();
     }
 
     /// <summary>按当前课程任务数重新排布进度格（18 项时格子变窄，13 项时放宽），并隐藏多余格子。</summary>
@@ -1721,9 +1794,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (n <= 0 || chipBgs == null)
             return;
 
-        const float area = 572f;
-        float gap = n > 12 ? 2f : 4f;
-        float w = Mathf.Floor((area - gap * (n - 1)) / n);
+        // 面板横向铺满全屏，格子宽度按面板实际宽度计算（屏宽变化时也能排满不断行）
+        float area = Mathf.Max(240f, PanelWidth() - 48f); // 面板内可用宽度（左右各 24 内边距）
+        float gap = n > 12 ? 3f : 6f;
+        float w = Mathf.Clamp(Mathf.Floor((area - gap * (n - 1)) / n), 18f, 110f);
         for (int i = 0; i < MaxChips; i++)
         {
             if (chipBgs[i] == null)
@@ -1737,16 +1811,83 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             rt.sizeDelta = new Vector2(w, 26f);
             rt.anchoredPosition = new Vector2(24f + i * (w + gap), -50f);
             if (chipTexts[i] != null)
-                chipTexts[i].fontSize = w >= 34f ? 16 : 13;
+                chipTexts[i].fontSize = w >= 34f ? 17 : (w >= 24f ? 15 : 13);
         }
+    }
+
+    // ================== 指导框高度自适应（避免文案溢出黑框） ==================
+
+    /// <summary>指导框横向铺满：返回当前面板实际宽度（首帧布局未完成时退回参考分辨率宽度）。</summary>
+    private float PanelWidth()
+    {
+        RectTransform panelRt = panelRoot != null ? panelRoot.transform as RectTransform : null;
+        if (panelRt != null && panelRt.rect.width > 1f)
+            return panelRt.rect.width;
+        return ReferenceWidth;
+    }
+
+    /// <summary>按正文实测排版高度反推指导框高度，并同步给编辑器做下边距 —— 文案永不溢出黑框。</summary>
+    private void RefitPanelToContent()
+    {
+        RectTransform panelRt = panelRoot != null ? panelRoot.transform as RectTransform : null;
+        if (panelRt == null)
+            return;
+
+        float bodyHeight = GuideBodyHeight(PanelWidth());
+        float height = Mathf.Clamp(bodyHeight + GuideBodyTopInset + GuideBodyBottomInset,
+            GuidePanelHeightMin, GuidePanelHeightMax);
+        if (Mathf.Abs(panelRt.sizeDelta.y - height) > 0.5f)
+            panelRt.sizeDelta = new Vector2(0f, height); // 横向靠 anchorMin.x=0 / anchorMax.x=1 铺满，只改高度
+
+        LayoutChips();
+
+        // 关键：指导框高度即编辑器的「底部预留高度」→ 代码编辑器下边缘与指导框上边缘严丝合缝，两者不重叠
+        if (editor != null && Active)
+            editor.SetBottomReservedHeight(height);
+    }
+
+    /// <summary>正文（写法 / 目标 / 提示 / 判定）在给定面板宽度下的实测高度；排版未完成时退回估算值。</summary>
+    private float GuideBodyHeight(float panelWidth)
+    {
+        if (bodyText == null)
+            return 0f;
+
+        float width = Mathf.Max(200f, panelWidth - 48f);
+        string content = bodyText.text == null ? "" : bodyText.text;
+
+        TextGenerationSettings settings = bodyText.GetGenerationSettings(new Vector2(width, 0f));
+        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        settings.lineSpacing = GuideBodyLineSpacing;
+        float preferred = bodyText.cachedTextGeneratorForLayout.GetPreferredHeight(content, settings);
+        float scale = bodyText.pixelsPerUnit > 0.01f ? bodyText.pixelsPerUnit : 1f;
+        float height = preferred / scale;
+
+        if (height <= 1f)
+        {
+            // 首帧 TextGenerator 尚未就绪：按每行字数估算行数（中文按 1 字宽、西文按 0.55 字宽）
+            int lines = 0;
+            string[] raw = content.Split('\n');
+            for (int i = 0; i < raw.Length; i++)
+            {
+                float estimated = Mathf.Max(1f, raw[i].Length);
+                lines += Mathf.Max(1, Mathf.CeilToInt(estimated / Mathf.Max(1f, width / GuideBodyFontSize)));
+            }
+            height = lines * GuideBodyFontSize * GuideBodyLineSpacing;
+        }
+
+        return Mathf.Max(height, GuideBodyFontSize * 1.2f);
     }
 
     private void BuildHintBar(Transform parent)
     {
-        // 编辑器关闭时的常驻提示条（不遮挡玩法，提示「按 Enter 打开编辑器继续」）
-        RectTransform hintRt = CreateRect("SyntaxHintBar", parent, new Vector2(0.5f, 0f), Vector2.zero, new Vector2(1360f, 64f), new Vector2(0.5f, 0f));
-        hintRt.anchoredPosition = new Vector2(0f, 40f);
+        // 编辑器关闭时的常驻提示条（不遮挡玩法，提示「按 Enter 打开编辑器继续」）。
+        // 文字按一行放宽排版；高度在 RefreshHint 中按实测高度自适应，长文案也不会被截断。
+        RectTransform hintRt = CreateRect("SyntaxHintBar", parent, new Vector2(0.5f, 0f), Vector2.zero,
+            new Vector2(HintBarMaxWidth, HintBarMinHeight), new Vector2(0.5f, 0f));
+        hintRt.anchoredPosition = new Vector2(0f, 24f);
         hintRoot = hintRt.gameObject;
+        hintRect = hintRt;
 
         Image bg = hintRoot.AddComponent<Image>();
         bg.sprite = WhiteSprite();
@@ -1755,10 +1896,37 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         hintText = CreateText("HintText", hintRt, "", 22, Color.white, TextAnchor.MiddleCenter);
         Stretch(hintText.rectTransform);
+        hintText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        hintText.verticalOverflow = VerticalWrapMode.Overflow;
         hintText.raycastTarget = false;
 
         hintRoot.SetActive(false);
     }
+
+    /// <summary>提示条高度 / 宽度自适应：按当前文案实测宽高，超出可用宽度时自动换行加高。</summary>
+    private void RefitHintBar()
+    {
+        if (hintRect == null || hintText == null)
+            return;
+
+        string content = hintText.text == null ? "" : hintText.text;
+        float maxWidth = Mathf.Min(HintBarMaxWidth, ReferenceWidth - 48f);
+
+        TextGenerationSettings settings = hintText.GetGenerationSettings(new Vector2(maxWidth, 0f));
+        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        TextGenerator generator = hintText.cachedTextGeneratorForLayout;
+        float scale = hintText.pixelsPerUnit > 0.01f ? hintText.pixelsPerUnit : 1f;
+
+        float preferredWidth = generator.GetPreferredWidth(content, settings) / scale;
+        float preferredHeight = generator.GetPreferredHeight(content, settings) / scale;
+
+        float width = Mathf.Clamp(preferredWidth + 72f, HintBarMinWidth, maxWidth);
+        float height = Mathf.Max(HintBarMinHeight, preferredHeight + 26f);
+        hintRect.sizeDelta = new Vector2(width, height);
+        hintRect.anchoredPosition = new Vector2(0f, 24f);
+    }
+
 
     // ================== UI 小工具（与 TutorialController 同风格） ==================
 

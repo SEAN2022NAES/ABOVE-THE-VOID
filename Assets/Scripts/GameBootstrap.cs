@@ -26,6 +26,8 @@ public class GameBootstrap : MonoBehaviour
     public bool createCodeTower = true;
     public bool createCodeEditor = true;
     public bool createScore = true;
+    public bool createLives = true;
+    public bool createEscapeRouter = true;
 
     private void Awake()
     {
@@ -144,6 +146,22 @@ public class GameBootstrap : MonoBehaviour
         {
             GameObject score = new GameObject("UI_Score");
             score.AddComponent<ScoreManager>();
+        }
+
+        // 15. 生命值系统（击毁蓝色 BOMB 块扣生命，初始 5 点，HUD 在 SCORE 下方，归 0 判负）
+        if (createLives && FindObjectOfType<LivesManager>() == null)
+        {
+            GameObject lives = new GameObject("UI_Lives");
+            lives.AddComponent<LivesManager>();
+        }
+
+        // 16. ESC 全局优先级分发器（全项目唯一 ESC 判定点）：
+        //     编辑器打开 → 关编辑器；指令框打开 → 关指令框；Game Over → 回主页；
+        //     主页可见 → 前台打开指令框（不暂停）；关卡内 → 开 / 关暂停面板
+        if (createEscapeRouter && FindObjectOfType<EscapeRouter>() == null)
+        {
+            GameObject router = new GameObject("EscapeRouter");
+            router.AddComponent<EscapeRouter>();
         }
     }
 }

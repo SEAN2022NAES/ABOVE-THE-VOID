@@ -183,13 +183,13 @@ public class ScoreManager : MonoBehaviour
         }
     }
 
-    // ---------------- HUD (top-left) ----------------
+    // ---------------- HUD (top-right) ----------------
 
     private void BuildUI()
     {
         Canvas canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        // 分数 HUD 需要始终压在主菜单 / 教程 / 代码编辑器等界面之上（左上角小块区域，不遮挡交互）
+        // 分数 HUD 需要始终压在主菜单 / 教程 / 代码编辑器等界面之上（右上角小块区域，不遮挡交互）
         canvas.sortingOrder = 100;
 
         CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
@@ -200,24 +200,25 @@ public class ScoreManager : MonoBehaviour
 
         gameObject.AddComponent<GraphicRaycaster>();
 
-        RectTransform root = CreateRect("ScoreRoot", canvas.transform, new Vector2(0f, 1f), new Vector2(24f, -24f), new Vector2(420f, 100f), new Vector2(0f, 1f));
+        // 右上角：左上角已被 F3 调试覆盖层占用，分数 HUD 让位到右上角避免内容重合
+        RectTransform root = CreateRect("ScoreRoot", canvas.transform, new Vector2(1f, 1f), new Vector2(-24f, -24f), new Vector2(420f, 100f), new Vector2(1f, 1f));
         hudRoot = root.gameObject; // HUD 显隐总开关（Level 1 教学关隐藏）
 
-        scoreText = CreateText("ScoreText", root, "SCORE 0", 40, Color.white, TextAnchor.UpperLeft);
+        scoreText = CreateText("ScoreText", root, "SCORE 0", 40, Color.white, TextAnchor.UpperRight);
         RectTransform scoreRt = scoreText.rectTransform;
-        scoreRt.anchorMin = new Vector2(0f, 1f);
-        scoreRt.anchorMax = new Vector2(0f, 1f);
-        scoreRt.pivot = new Vector2(0f, 1f);
+        scoreRt.anchorMin = new Vector2(1f, 1f);
+        scoreRt.anchorMax = new Vector2(1f, 1f);
+        scoreRt.pivot = new Vector2(1f, 1f);
         scoreRt.anchoredPosition = Vector2.zero;
         scoreRt.sizeDelta = new Vector2(420f, 56f);
         scoreText.fontStyle = FontStyle.Bold;
         scoreText.supportRichText = false;
 
-        deltaText = CreateText("ScoreDeltaText", root, "", 28, Color.white, TextAnchor.UpperLeft);
+        deltaText = CreateText("ScoreDeltaText", root, "", 28, Color.white, TextAnchor.UpperRight);
         RectTransform deltaRt = deltaText.rectTransform;
-        deltaRt.anchorMin = new Vector2(0f, 1f);
-        deltaRt.anchorMax = new Vector2(0f, 1f);
-        deltaRt.pivot = new Vector2(0f, 1f);
+        deltaRt.anchorMin = new Vector2(1f, 1f);
+        deltaRt.anchorMax = new Vector2(1f, 1f);
+        deltaRt.pivot = new Vector2(1f, 1f);
         deltaRt.anchoredPosition = new Vector2(0f, -52f);
         deltaRt.sizeDelta = new Vector2(420f, 40f);
         deltaText.supportRichText = false;

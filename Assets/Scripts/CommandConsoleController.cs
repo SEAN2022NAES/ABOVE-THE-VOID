@@ -7,6 +7,8 @@ using UnityEngine.EventSystems;
 /// <summary>
 /// 开发者指令框（Dev Console）：
 ///   - 按 `（BackQuote）键打开 / 再按 ` 关闭，ESC 关闭（输入框聚焦时 Enter 用于提交）；
+///     其中 ESC 的判定统一在 EscapeRouter。主页调出本指令框的唯一入口是 ` 键
+///     （主页按 ESC 完全无反应，既不暂停也不会打开本指令框）；
 ///   - 识别「开发者指令」：/level &lt;关卡&gt; &lt;部分&gt; 跳转关卡分区（当前已实现 level 1 - part 1），
 ///     help 查看可用指令；原 laser / tp / timescale 等玩家指令已全部移除；
 ///   - 打开时：Time.timeScale = 0、释放鼠标，并通过
@@ -29,8 +31,7 @@ public class CommandConsoleController : MonoBehaviour
     [Header("按键")]
     [Tooltip("打开 / 切换指令框（` 键）")]
     public KeyCode openKey = KeyCode.BackQuote;
-    [Tooltip("关闭指令框")]
-    public KeyCode closeKey = KeyCode.Escape;
+    // 关闭键固定为 ESC，且 ESC 的判定统一在 EscapeRouter（全项目唯一 ESC 入口），本组件不再自行监听
 
     [Header("UI")]
     [Tooltip("标题字号")]
@@ -86,6 +87,18 @@ public class CommandConsoleController : MonoBehaviour
     private bool wasPausedBeforeOpen;
     // 打开指令框前是否处于 E 键时间冻结（timeScale=0，关闭后需保持冻结，不让游戏继续）
     private bool wasFrozenBeforeOpen;
+    // 是否由「主页按 ESC」打开：关闭后必须完全回到主页状态（不解除相机输入占用、不锁鼠标、不改时间流速）
+    private bool openedFromMainMenu;
+    // 打开指令框前的 timeScale（主页打开时原样还原，保证「收起后状态与按 ESC 前一致」）
+    private float timeScaleBeforeOpen = 1f;
+    private MainMenuController mainMenu;
+
+    /// <summary>/lock 二次确认窗口时长（秒，真实时间）：窗口内再次输入 /lock 才真正清档。</summary>
+    private const float LockConfirmWindowSeconds = 15f;
+    /// <summary>/lock 是否已进入待确认状态（第一次输入 /lock 后置位的破坏性操作门闩）。</summary>
+    private bool lockConfirmPending;
+    /// <summary>/lock 待确认状态的到期时刻（Time.unscaledTime 时间轴）。</summary>
+    private float lockConfirmExpireAt;
 
     /// <summary>指令框当前是否打开。</summary>
     public bool IsOpen => consoleRoot != null && consoleRoot.activeSelf;
@@ -104,6 +117,7 @@ public class CommandConsoleController : MonoBehaviour
     private void Start()
     {
         playerController = FindObjectOfType<PlayerCameraController>();
+        mainMenu = FindObjectOfType<MainMenuController>();
     }
 
     private void Update()
@@ -125,8 +139,8 @@ public class CommandConsoleController : MonoBehaviour
             return;
         }
 
-        if (IsOpen && Input.GetKeyDown(closeKey))
-            Close();
+        // ESC 关闭指令框不在这里处理：统一由 EscapeRouter 做唯一优先级判定后调用 Close()，
+        // 避免指令框与暂停逻辑各自读取 ESC 造成一次按键触发两个行为。
 
         // 鼠标左键发射激光：指令框关闭、未被外部模态占用（如主页）、非暂停状态、
         // 且当前关卡允许手动激光（Level 3 完整玩法关闭，改由代码编辑器 / 炮台接管）时有效
@@ -145,10 +159,41 @@ public class CommandConsoleController : MonoBehaviour
     /// <summary>打开指令框：暂停时间、释放鼠标、占用视角输入。</summary>
     public void Open()
     {
+        OpenInternal(false);
+    }
+
+    /// <summary>
+    /// 在主页「前台」打开指令框（不暂停、不动 timeScale、不锁鼠标）。
+    /// 说明：主页调出指令框的常规入口已改为 ` 键（本组件的 openKey），EscapeRouter 不再调用本方法；
+    /// 保留该公开入口供外部/自动化脚本显式以「主页模式」打开时使用。
+    /// </summary>
+    public void OpenFromMainMenu()
+    {
+        OpenInternal(true);
+    }
+
+    private void OpenInternal(bool fromMainMenu)
+    {
+        if (IsOpen)
+            return;
+
+        if (mainMenu == null)
+            mainMenu = FindObjectOfType<MainMenuController>();
+        if (playerController == null)
+            playerController = FindObjectOfType<PlayerCameraController>();
+
+        // 只要主页仍在显示，就按「主页模式」打开（无论入口是 ESC 还是 `），避免收起后把主页变成暂停态
+        bool menuMode = fromMainMenu || (mainMenu != null && mainMenu.IsMenuVisible);
+
+        openedFromMainMenu = menuMode;
+        timeScaleBeforeOpen = Time.timeScale;
+
         if (playerController != null)
         {
             // 若暂停菜单正打开，先恢复，避免两个模态 UI 叠加；记录状态供关闭时还原
-            wasPausedBeforeOpen = (playerController.Mode == PlayerCameraController.GameMode.Paused);
+            // （主页模式不存在暂停概念，一律按「未暂停」记录，避免收起后又把主页变成暂停态）
+            wasPausedBeforeOpen = !menuMode &&
+                (playerController.Mode == PlayerCameraController.GameMode.Paused);
             // 记录打开前是否处于 E 键时间冻结（关闭后需保持冻结，不解除）
             wasFrozenBeforeOpen = playerController.IsTimeFrozen;
             if (wasPausedBeforeOpen)
@@ -160,18 +205,58 @@ public class CommandConsoleController : MonoBehaviour
         inputField.text = string.Empty;
         inputField.ActivateInputField();
         inputField.Select();
+        // 显式把 EventSystem 选中项指向输入框：InputField 只有作为 currentSelectedGameObject 才能收到键盘事件。
+        // （主页 MainMenuController.LateUpdate 只在「主页可见且指令框未打开」时清空选中项，这里再补一次显式选中，
+        //  保证从 ` 键 / EscapeRouter / 自动化脚本任何入口打开后都能直接打字、回车提交。）
+        EventSystem es = EventSystem.current;
+        if (es != null)
+            es.SetSelectedGameObject(inputField.gameObject);
 
-        Time.timeScale = 0f;
-        SetCursorLocked(false);
+        if (menuMode)
+        {
+            // 主页：不改时间流速（主页本来就不是靠 timeScale 冻结），鼠标保持可见可点
+            Time.timeScale = timeScaleBeforeOpen;
+            SetCursorLocked(false);
+        }
+        else
+        {
+            Time.timeScale = 0f;
+            SetCursorLocked(false);
+        }
 
         AppendOutput("开发者指令框已打开。输入 help 查看可用指令，Enter 提交，ESC 或 ` 关闭。");
-        Debug.Log("[CommandConsole] 指令框打开");
+        Debug.Log("[CommandConsole] 指令框打开" + (menuMode ? "（主页模式）" : string.Empty));
     }
 
-    /// <summary>关闭指令框：恢复时间流速、锁定鼠标、解除视角输入占用；若打开前处于暂停则还原暂停。</summary>
+    /// <summary>
+    /// 关闭指令框：恢复时间流速、锁定鼠标、解除视角输入占用；若打开前处于暂停则还原暂停。
+    /// 若本次是从主页按 ESC 打开的，则收起后完全回到主页接管状态（相机输入仍占用、鼠标仍可见、时间流速不变）。
+    /// </summary>
     public void Close()
     {
+        if (mainMenu == null)
+            mainMenu = FindObjectOfType<MainMenuController>();
+
+        // 判定「收起后是否要回到主页」：主页仍在显示（含从主页打开后又用 /exit 之类回到主页的场景）
+        bool backToMainMenu = openedFromMainMenu && (mainMenu == null || mainMenu.IsMenuVisible);
+
         consoleRoot.SetActive(false);
+        openedFromMainMenu = false;
+
+        if (backToMainMenu)
+        {
+            wasPausedBeforeOpen = false;
+            wasFrozenBeforeOpen = false;
+
+            Time.timeScale = timeScaleBeforeOpen;   // 状态与按 ESC 前一致，不改时间流速
+            if (playerController != null)
+                playerController.SetExternalBlock(true); // 主页继续占用相机输入，禁止游戏按键与暂停
+            SetCursorLocked(false);                 // 主页鼠标保持可见，关卡按钮仍可点击
+
+            Debug.Log("[CommandConsole] 指令框关闭（返回主页，状态与打开前一致）");
+            return;
+        }
+
         if (playerController != null)
             playerController.SetExternalBlock(false);
 
@@ -200,6 +285,12 @@ public class CommandConsoleController : MonoBehaviour
             playerController.SuppressPauseInput();
         else
             PlayerCameraController.SuppressPauseInputGlobal();
+
+        // 关闭时清掉 EventSystem 选中项：让主页立刻回到「Enter 完全无反应」的初始状态
+        // （指令框打开期间 MainMenuController.LateUpdate 不再清选中项，这里补一次收尾）
+        EventSystem es = EventSystem.current;
+        if (es != null)
+            es.SetSelectedGameObject(null);
 
         Debug.Log("[CommandConsole] 指令框关闭");
     }
@@ -235,6 +326,13 @@ public class CommandConsoleController : MonoBehaviour
     /// <summary>按 CommandType 分支分发到具体执行函数（新增指令在此补充分支）。</summary>
     private void Execute(CommandData cmd)
     {
+        // /lock 的待确认状态：一旦输入其它任何指令即失效（避免「警告后干了别的事，回头再 /lock 反而被当成确认」）
+        if (cmd.Type != CommandType.Lock && lockConfirmPending)
+        {
+            lockConfirmPending = false;
+            lockConfirmExpireAt = 0f;
+        }
+
         switch (cmd.Type)
         {
             case CommandType.Help:
@@ -242,6 +340,12 @@ public class CommandConsoleController : MonoBehaviour
                 break;
             case CommandType.Level:
                 ExecuteLevel(cmd);
+                break;
+            case CommandType.Unlock:
+                ExecuteUnlock();
+                break;
+            case CommandType.Lock:
+                ExecuteLock(cmd);
                 break;
             case CommandType.Exit:
                 ExecuteExit();
@@ -263,14 +367,127 @@ public class CommandConsoleController : MonoBehaviour
             "  /level <关卡> <部分> <章节> - 跳转并直接定位到该关第 n 个 part 章节（n 为整数，从 1 开始）\n" +
             "                              例：/level 1 2 3 跳到 Level 1 - Part 2 第 3 章；/level 2 1 5 跳到 Level 2 - Part 1 第 5 章\n" +
             "                              / jump to the n-th task/chapter of that level-part, e.g. /level 1 2 3\n" +
+            "  /unlock                    - 一键解锁全部关卡（中英别名：unlock / 解锁），通关进度仍会正常记录\n" +
+            "                              / unlock every level at once (aliases: unlock / 解锁)\n" +
+            "  /lock                      - 回厂重置（需二次确认）：首次输入只警告、不清档；15 秒内再次输入 /lock\n" +
+            "                              或 /lock confirm 才真正清空关卡进度、游玩进度与最高分、设置与编辑器代码（别名：lock / 锁定）\n" +
+            "                              / factory reset (2-step confirm): the first /lock only warns; type it again\n" +
+            "                              within 15s (or /lock confirm) to wipe level progress, play progress & best score, settings and editor code\n" +
             "  help / 帮助               - 显示帮助\n" +
             "                              / show this help");
+    }
+
+    /// <summary>
+    /// 开发者指令 /unlock（别名 解锁）：一键解锁全部关卡并写入 PlayerPrefs（跨重启保留），
+    /// 同时刷新主菜单关卡按钮（在主页上执行可立即看到按钮由锁定变为可点）。
+    /// </summary>
+    private void ExecuteUnlock()
+    {
+        bool changed = LevelProgress.UnlockAllLevels();
+
+        MainMenuController menu = FindObjectOfType<MainMenuController>();
+        if (menu != null)
+            menu.RefreshLevelLocks();
+
+        if (changed)
+            AppendOutput("[unlock] 已解锁全部关卡（1 / 2 / 3），进度已保存。/ unlock: all levels unlocked (saved).");
+        else
+            AppendOutput("[unlock] 全部关卡此前已解锁。/ unlock: all levels were already unlocked.");
+    }
+
+    /// <summary>
+    /// 开发者指令 /lock（别名 锁定）：回厂重置 —— 把本地存档全部清零，恢复到刚安装游戏的出厂状态。
+    ///   ① 关卡进度：LevelProgress.ResetProgress()（UnlockedLevel 回 1、CompletedLevel 回 0，并 PlayerPrefs.Save()）；
+    ///   ② 游玩进度：GameProgress.ClearAll() —— 续玩断点 ABOVETHEVOID.ResumeLevel / ResumePart / ResumeSection
+    ///      与全部关卡最高分 ABOVETHEVOID.HighScore.Level1~3 一次清空（并 PlayerPrefs.Save()）；
+    ///   ③ 设置：视场角 atv.settings.fov / 灵敏度 atv.settings.sensitivity / 帧率 atv.settings.fps
+    ///      三个存档键全部删除，滑块恢复出厂值（90° / 1.75 / 60）并立即应用到相机与 Application.targetFrameRate；
+    ///   ④ 编辑器代码：CodeEditorController.ResetCodeToDefault()（回到初始示例模板）；
+    ///   ⑤ 主页按钮：RefreshLevelLocks() 立即刷新为「只有关卡 1 可玩」（最高分行同时消失）；
+    ///   ⑥ 若当前在关卡内：关闭指令框并把玩家送回主页，避免关卡状态与清零后的存档不一致。
+    /// 输出走指令框自身的输出通道，与 /unlock 完全一致（中文全中文、英文全英文）。
+    ///
+    /// 双重确认门（v0.2.0 新增）：本函数是破坏性操作，必须先经过确认：
+    ///   · 第一次输入 /lock（或 /lock confirm、/锁定、lock）：不执行任何清档动作，只输出警告并进入待确认状态；
+    ///   · 待确认状态有效期 LockConfirmWindowSeconds（15 秒，用不受 timeScale 影响的 unscaledTime 计时，
+    ///     指令框打开时 timeScale=0 也能正常到期）；
+    ///   · 有效期内再次输入 /lock（或 /lock confirm）：真正执行回厂重置；
+    ///   · 输入其它任何指令、或超时：待确认状态自动失效，下次 /lock 重新从警告开始。
+    /// </summary>
+    /// <param name="cmd">解析后的指令（Args[0] 可为 confirm/确认，语义与再次输入 /lock 相同，仍需先进入待确认状态）。</param>
+    private void ExecuteLock(CommandData cmd)
+    {
+        float now = Time.unscaledTime;
+        bool hasPending = lockConfirmPending && now <= lockConfirmExpireAt;
+
+        if (!hasPending)
+        {
+            // 第一次输入：只警告，不动任何存档
+            lockConfirmPending = true;
+            lockConfirmExpireAt = now + LockConfirmWindowSeconds;
+            AppendOutput("[lock] 警告：此操作会清空全部存档（关卡进度、游玩进度与最高分、设置、编辑器代码），且无法撤销。\n" +
+                         "        请在 " + (int)LockConfirmWindowSeconds + " 秒内再次输入 /lock 确认（或输入 /lock confirm）。\n" +
+                         "        / WARNING: this wipes ALL local saves (level progress, play progress & best score, settings, editor code) and cannot be undone.\n" +
+                         "        / Type /lock again within " + (int)LockConfirmWindowSeconds + "s to confirm (or use /lock confirm).");
+            Debug.Log("[CommandConsole] /lock 首次调用：仅警告，等待二次确认。");
+            return;
+        }
+
+        // 已确认：关闭确认门并真正执行
+        lockConfirmPending = false;
+        lockConfirmExpireAt = 0f;
+
+        // ① 关卡进度清零：ABOVETHEVOID.UnlockedLevel = 1、ABOVETHEVOID.CompletedLevel = 0，并 PlayerPrefs.Save()
+        LevelProgress.ResetProgress();
+
+        // ② 游玩进度存档清零：续玩断点（ABOVETHEVOID.ResumeLevel / ResumePart / ResumeSection）
+        //    + 全部关卡最高分（ABOVETHEVOID.HighScore.Level1~3）一次清空，并把会话内的当前位置重置为「不在任何关卡内」。
+        //    必须早于后面的 menu.ShowMenu()：ShowMenu 会结算 Level 3 最高分，先清空才能保证一次 /lock 后主页无最高分残留。
+        GameProgress.ClearAll();
+
+        // ③ 设置恢复出厂默认：删除 atv.settings.fov / sensitivity / fps 存档，并把滑块、相机视场角与灵敏度、帧率立即改回默认值
+        SettingsPanelController settings = FindObjectOfType<SettingsPanelController>();
+        if (settings != null)
+            settings.ResetToFactoryDefaults();
+        else
+            SettingsPanelController.ClearSavedSettings(); // 设置面板未构建时至少清掉全部存档键
+
+        // ④ 编辑器代码清回初始模板（inputField.text = DEFAULT_CODE，并同步 lastCommittedText / defaultCodeFilled）
+        CodeEditorController editor = FindObjectOfType<CodeEditorController>();
+        if (editor != null)
+            editor.ResetCodeToDefault();
+
+        Debug.Log("[CommandConsole] /lock 回厂重置：关卡进度、游玩进度与最高分、设置、编辑器代码已清空。");
+
+        // ⑤ / ⑥ 刷新主页锁定状态；若当前在关卡内，先写入提示再关指令框并把玩家送回主页
+        MainMenuController menu = FindObjectOfType<MainMenuController>();
+        bool inLevel = menu != null && !menu.IsMenuVisible;
+
+        if (inLevel)
+        {
+            AppendOutput("[lock] 已恢复出厂设置：关卡进度、游玩进度与最高分、设置、编辑器代码已清空，正在返回主页。\n" +
+                         "        / lock: factory reset done — level progress, play progress & best score, settings and editor code wiped. Returning home.");
+            CloseAndForceResume();                    // 先收指令框（忽略打开前的暂停 / 冻结状态）
+            CodeEditorController.ForceCloseIfOpen();  // 关卡内若代码编辑器还开着，一并收起，避免残留在主页上
+            menu.ShowMenu();                          // 内部会调用 RefreshLevelLocks()，主页按钮立即只剩关卡 1 可玩
+        }
+        else
+        {
+            AppendOutput("[lock] 已恢复出厂设置：关卡进度、游玩进度与最高分、设置、编辑器代码已清空（当前只有关卡 1 可玩）。\n" +
+                         "        / lock: factory reset done — level progress, play progress & best score, settings and editor code wiped (only Level 1 is playable now).");
+            if (menu != null)
+                menu.RefreshLevelLocks();
+        }
     }
 
     /// <summary>
     /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt; [章节]：跳转到指定关卡的分区，
     /// 可选第三参数 n 表示该分区内的 part 章节序号（1 起，仅 Level 1 - Part 2 / Level 2 - Part 1 有章节拆分）。
     /// 参数非法（非整数 / 章节越界 / 关卡未开放）时只输出提示，不抛异常。
+    ///
+    /// 与断点续玩存档的优先级：本指令优先级最高。跳转成功时 LevelDirector.JumpTo 会把「本次跳关参数」写入续玩存档，
+    /// 无条件覆盖旧存档，跳关后的位置即成为新的续玩点；主页进关卡时读的就是这份被覆盖后的存档，
+    /// 因此不会出现「用 /level 跳到某处后，再从主页进关被旧存档拽回跳转之前的位置」。
     /// </summary>
     private void ExecuteLevel(CommandData cmd)
     {
@@ -541,6 +758,8 @@ public class CommandConsoleController : MonoBehaviour
     {
         canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        // 置顶：主页(100) / 代码编辑器(200) / Game Over(240) 之上，保证「主页按 ESC 调出」时在主页前台可见可输入
+        canvas.sortingOrder = 320;
 
         CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;

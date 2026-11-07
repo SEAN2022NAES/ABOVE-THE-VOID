@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
 /// 玩家视角主控（完整模式状态机）：
@@ -60,6 +61,18 @@ public class PlayerCameraController : MonoBehaviour
     [SerializeField] private KeyCode upKey = KeyCode.Space;
     [SerializeField] private KeyCode downKey = KeyCode.C;
 
+    [Header("V 键放大（视野收窄 / Zoom In）")]
+    [Tooltip("按住即放大（视野收窄、物体变大）的按键（松开平滑回落）")]
+    [SerializeField] private KeyCode zoomKey = KeyCode.V;
+    [Tooltip("放大（视野收窄）后的视场角（度）：比基准 FOV 小，按住按键时从基准 FOV 平滑插值到该值；基准 90° → 32°（约 2.8 倍放大）")]
+    [SerializeField] private float zoomFieldOfView = 32f;
+    [Tooltip("放大 / 回落的平滑过渡时长（秒，真实时间，建议 0.25~0.35）")]
+    [SerializeField] private float zoomTransitionSeconds = 0.3f;
+    [Tooltip("放大（视野收窄）期间按 tan 半角比值同步下调鼠标灵敏度，避免放大后转头过快")]
+    [SerializeField] private bool scaleSensitivityWithZoom = true;
+    [Tooltip("视场角超过该值时在屏幕上提示「画面可能扭曲」：放大（收窄）方向不会触发，仅当基准 FOV 被调大到阈值以上才提示")]
+    [SerializeField] private float fovWarnThreshold = 115f;
+
     /// <summary>当前游戏模式。</summary>
     public GameMode Mode { get; private set; } = GameMode.Normal;
 
@@ -94,6 +107,33 @@ public class PlayerCameraController : MonoBehaviour
 
     private SettingsPanelController settingsPanel;
     private System.Action<float> onSensitivityChangedHandler;
+    private System.Action<float> onFieldOfViewChangedHandler;
+
+    // ---- 视场角平滑放大（V 键）相关状态 ----
+    private float baseFieldOfView = 90f;     // 设置面板给出的基准 FOV（放大起止基准）
+    private float currentFieldOfView = 90f;  // 平滑后的实际 FOV（每帧写入相机）
+    private float zoomProgress;              // 0 = 基准，1 = 完全放大；按真实时间匀速推进，再经 SmoothStep 缓动
+    private bool zoomHeld;                   // 本帧是否按住放大键
+    private Canvas fovWarnCanvas;            // 「视场角过大」提示（常驻子 Canvas，默认关闭）
+
+    /// <summary>当前相机视场角（度，平滑后的实际值），供 UI 读写。</summary>
+    public float FieldOfView
+    {
+        get => currentFieldOfView > 0.01f ? currentFieldOfView : (playerCamera != null ? playerCamera.fieldOfView : 90f);
+        set
+        {
+            // 设置面板改动 = 改基准 FOV；未处于放大状态时立即生效，放大中则由平滑逻辑重新插值
+            baseFieldOfView = Mathf.Clamp(value, 1f, 179f);
+            if (!zoomHeld)
+            {
+                currentFieldOfView = baseFieldOfView;
+                ApplyFieldOfView();
+            }
+        }
+    }
+
+    /// <summary>当前是否处于 V 键放大状态（进度过半视为放大中）。</summary>
+    public bool IsZoomed => zoomProgress > 0.5f;
 
     private void Awake()
     {
@@ -101,19 +141,34 @@ public class PlayerCameraController : MonoBehaviour
             playerCamera = Camera.main;
         if (playerCamera == null)
             Debug.LogWarning("[PlayerCameraController] 未找到 Main Camera，请确保场景中存在带 MainCamera 标签的相机。");
+        else
+        {
+            baseFieldOfView = Mathf.Clamp(playerCamera.fieldOfView, 1f, 179f);
+            currentFieldOfView = baseFieldOfView;
+        }
+
+        BuildFovWarningUI();
     }
 
     private void Start()
     {
+        // ESC 统一由 EscapeRouter 分发；若场景中没有（未走 GameBootstrap）则在此兜底补建，
+        // 保证关卡内暂停键不会失效
+        EscapeRouter.EnsureExists();
+
         // 关联设置面板：灵敏度实时同步、暂停请求、返回主页
         settingsPanel = FindObjectOfType<SettingsPanelController>();
         if (settingsPanel != null)
         {
             onSensitivityChangedHandler = value => MouseSensitivity = value;
             settingsPanel.OnSensitivityChanged += onSensitivityChangedHandler;
+            onFieldOfViewChangedHandler = value => FieldOfView = value;
+            settingsPanel.OnFieldOfViewChanged += onFieldOfViewChangedHandler;
             settingsPanel.OnPauseRequested += TogglePause;
             settingsPanel.OnReturnHomeRequested += ReturnToHome;
-            settingsPanel.SetSensitivityWithoutNotify(mouseSensitivity);
+            MouseSensitivity = settingsPanel.Sensitivity; // 应用存档中的鼠标灵敏度（无存档即默认 1.75，setter 内 Clamp 兜底）
+            settingsPanel.SetSensitivityWithoutNotify(MouseSensitivity);
+            FieldOfView = settingsPanel.FieldOfView; // 应用存档中的视场角（默认 90°）
         }
 
         if (playerCamera != null)
@@ -132,6 +187,8 @@ public class PlayerCameraController : MonoBehaviour
         {
             if (onSensitivityChangedHandler != null)
                 settingsPanel.OnSensitivityChanged -= onSensitivityChangedHandler;
+            if (onFieldOfViewChangedHandler != null)
+                settingsPanel.OnFieldOfViewChanged -= onFieldOfViewChangedHandler;
             settingsPanel.OnPauseRequested -= TogglePause;
             settingsPanel.OnReturnHomeRequested -= ReturnToHome;
         }
@@ -139,22 +196,16 @@ public class PlayerCameraController : MonoBehaviour
 
     private void Update()
     {
+        // V 键放大视场角：输入采样 + 逐帧平滑过渡（放在最前，保证暂停 / 编辑器打开时也把动画走完，不会卡在半途）
+        UpdateZoomInput(!externalBlock && Mode != GameMode.Paused);
+        UpdateFieldOfViewSmoothing();
+
         // 外部模态占用（指令框等）：视角 / 移动 / 暂停键全部让渡给外部组件
         if (externalBlock)
             return;
 
-        // 暂停键在任何模式下都生效；
-        // 但「用 ESC 关闭代码编辑器 / 指令框」的那一次 ESC 不再触发暂停（仅退出模态，游戏保持继续运行）
-        if (Input.GetKeyDown(pauseKey))
-        {
-            if (Time.unscaledTime < pauseInputSuppressedUntil)
-            {
-                Debug.Log("[PlayerCameraController] ESC 用于关闭模态界面，本次不触发暂停。");
-                return;
-            }
-            TogglePause();
-            return;
-        }
+        // 暂停键（ESC）不在这里读取：统一由 EscapeRouter 做唯一优先级判定后再回调 HandleEscapePauseRequest()，
+        // 避免「主页 ESC 打开指令框」等场景被本组件当成暂停而一次按键触发两个行为。
 
         // 暂停态只处理暂停相关输入
         if (Mode == GameMode.Paused)
@@ -370,13 +421,121 @@ public class PlayerCameraController : MonoBehaviour
         playerCamera.transform.position = position;
     }
 
-    /// <summary>鼠标控制视角旋转（yaw / pitch）。</summary>
+    /// <summary>鼠标控制视角旋转（yaw / pitch）。灵敏度按当前 FOV 比例缩放：放大时自动变慢。</summary>
     private void ApplyMouseLook()
     {
-        yaw += Input.GetAxis("Mouse X") * mouseSensitivity;
-        pitch -= Input.GetAxis("Mouse Y") * mouseSensitivity;
+        float sensitivity = mouseSensitivity * (scaleSensitivityWithZoom ? CurrentZoomSensitivityScale() : 1f);
+        yaw += Input.GetAxis("Mouse X") * sensitivity;
+        pitch -= Input.GetAxis("Mouse Y") * sensitivity;
         pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
         playerCamera.transform.rotation = Quaternion.Euler(pitch, yaw, 0f);
+    }
+
+    // ---------------- V 键放大视场角 ----------------
+
+    /// <summary>采样放大键（按住放大、松开回落）；暂停 / 模态占用时强制视为松开。</summary>
+    private void UpdateZoomInput(bool allow)
+    {
+        zoomHeld = allow && Input.GetKey(zoomKey);
+    }
+
+    /// <summary>
+    /// 逐帧平滑推进 FOV：以真实时间（unscaledDeltaTime）按 1/zoomTransitionSeconds 的速度推进进度，
+    /// 再用 SmoothStep 缓动映射到 FOV，实现「约 0.3 秒、起止慢中间顺」的丝滑过渡，绝不跳变。
+    /// 放大 = 视野收窄：目标 FOV 取「放大 FOV 与基准 FOV 中较小者」，因此按住必然收窄视野、物体变大。
+    /// </summary>
+    private void UpdateFieldOfViewSmoothing()
+    {
+        if (playerCamera == null)
+            return;
+
+        float target = zoomHeld ? 1f : 0f;
+        float step = zoomTransitionSeconds <= 0.001f ? 1f : Time.unscaledDeltaTime / zoomTransitionSeconds;
+        zoomProgress = Mathf.MoveTowards(zoomProgress, target, step);
+
+        float eased = Mathf.SmoothStep(0f, 1f, zoomProgress);
+        // 取 Min：放大目标必须 ≤ 基准 FOV（55° < 90° → 视野收窄）；若配置值被误设得比基准大，则保持基准不变，不会反向变成缩小
+        float zoomFov = Mathf.Clamp(Mathf.Min(zoomFieldOfView, baseFieldOfView), 1f, 179f);
+        currentFieldOfView = Mathf.Lerp(baseFieldOfView, zoomFov, eased);
+
+        ApplyFieldOfView();
+        UpdateFovWarning();
+    }
+
+    /// <summary>把当前（平滑后的）FOV 写入相机。</summary>
+    private void ApplyFieldOfView()
+    {
+        if (playerCamera == null)
+            return;
+        playerCamera.fieldOfView = Mathf.Clamp(currentFieldOfView, 1f, 179f);
+    }
+
+    /// <summary>
+    /// 放大（视野收窄）期间的鼠标灵敏度缩放系数：按 tan(当前半角) / tan(基准半角) 计算，
+    /// 视野越窄系数越小（90° → 55° 时约为基准的 0.52 倍），使「每像素对应的角速度」同步下调，避免放大后转头过快。
+    /// 当前 FOV ≥ 基准时（未放大）系数被钳到 1，不放大灵敏度。
+    /// </summary>
+    private float CurrentZoomSensitivityScale()
+    {
+        float baseHalfTan = Mathf.Tan(0.5f * Mathf.Clamp(baseFieldOfView, 1f, 179f) * Mathf.Deg2Rad);
+        float curHalfTan = Mathf.Tan(0.5f * Mathf.Clamp(currentFieldOfView, 1f, 178f) * Mathf.Deg2Rad);
+        if (baseHalfTan <= 0.0001f || curHalfTan <= 0.0001f)
+            return 1f;
+        return Mathf.Clamp(curHalfTan / baseHalfTan, 0.05f, 1f);
+    }
+
+    /// <summary>FOV 超过阈值时显示「画面可能扭曲」提示，回落后自动消失（放大收窄方向不会触发）。</summary>
+    private void UpdateFovWarning()
+    {
+        if (fovWarnCanvas == null)
+            return;
+
+        bool show = currentFieldOfView >= fovWarnThreshold - 0.01f;
+        if (fovWarnCanvas.enabled != show)
+            fovWarnCanvas.enabled = show;
+    }
+
+    /// <summary>构建「视场角过大」提示（顶部居中、时间提示下方的小字，默认关闭）。</summary>
+    private void BuildFovWarningUI()
+    {
+        GameObject canvasGo = new GameObject("FovWarnCanvas");
+        canvasGo.transform.SetParent(transform, false);
+
+        Canvas canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 150; // HUD(100) 之上、代码编辑器(200) 之下
+
+        CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        scaler.matchWidthOrHeight = 0.5f;
+        canvasGo.AddComponent<UIFitScreen>();
+
+        GameObject textGo = new GameObject("FovWarnText", typeof(RectTransform));
+        RectTransform rt = textGo.GetComponent<RectTransform>();
+        rt.SetParent(canvasGo.transform, false);
+        rt.anchorMin = new Vector2(0.5f, 1f);
+        rt.anchorMax = new Vector2(0.5f, 1f);
+        rt.pivot = new Vector2(0.5f, 1f);
+        rt.anchoredPosition = new Vector2(0f, -112f); // 顶部时间提示（约 24~104）下方
+        rt.sizeDelta = new Vector2(1200f, 40f);
+
+        Text text = textGo.AddComponent<Text>();
+        text.text = Localization.Pick("视场角过大，画面边缘可能出现扭曲", "Field of view is very wide - the image may distort");
+        text.font = UIFontHelper.LoadForText(text.text, 22);
+        text.fontSize = 22;
+        text.color = new Color(1f, 0.78f, 0.32f, 0.95f);
+        text.alignment = TextAnchor.MiddleCenter;
+        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.verticalOverflow = VerticalWrapMode.Overflow;
+        text.raycastTarget = false;
+
+        Outline outline = textGo.AddComponent<Outline>();
+        outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        outline.effectDistance = new Vector2(2f, -2f);
+
+        fovWarnCanvas = canvas;
+        canvas.enabled = false;
     }
 
     // ---------------- 工具 ----------------
@@ -389,6 +548,9 @@ public class PlayerCameraController : MonoBehaviour
     {
         playerCamera = cam;
     }
+
+    /// <summary>暂停键（默认 ESC，可配置；EscapeRouter 读取此键做统一分发）。</summary>
+    public KeyCode PauseKey => pauseKey;
 
     /// <summary>是否被外部模态（如指令框）占用输入。</summary>
     public bool ExternalBlock => externalBlock;
@@ -415,6 +577,27 @@ public class PlayerCameraController : MonoBehaviour
     {
         if (Mode != GameMode.Paused)
             Pause();
+    }
+
+    /// <summary>
+    /// ESC 在关卡内的兜底分支（由 EscapeRouter 唯一判定后调用）：切换暂停 / 恢复。
+    /// 主页打开指令框、关闭模态 UI 等场景不会走到这里，因此不会误暂停。
+    /// </summary>
+    /// <returns>是否真正切换了暂停状态。</returns>
+    public bool HandleEscapePauseRequest()
+    {
+        if (externalBlock)
+            return false;
+
+        // 「用 ESC 关闭代码编辑器 / 指令框」的那一次 ESC 不再触发暂停（仅退出模态，游戏保持继续运行）
+        if (Time.unscaledTime < pauseInputSuppressedUntil)
+        {
+            Debug.Log("[PlayerCameraController] ESC 用于关闭模态界面，本次不触发暂停。");
+            return false;
+        }
+
+        TogglePause();
+        return true;
     }
 
     /// <summary>
@@ -457,6 +640,12 @@ public class PlayerCameraController : MonoBehaviour
         Time.timeScale = 1f;
         yaw = 0f;
         pitch = 0f;
+        // 视场角放大状态复位（避免跳关后仍停在放大值）
+        zoomHeld = false;
+        zoomProgress = 0f;
+        currentFieldOfView = baseFieldOfView;
+        ApplyFieldOfView();
+        UpdateFovWarning();
         if (playerCamera != null)
         {
             playerCamera.transform.position = origin;

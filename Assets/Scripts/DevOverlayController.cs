@@ -8,7 +8,7 @@ using UnityEngine.UI;
 ///   - 左上角信息面板显示玩家世界坐标 x / y / z（单位 = 坐标轴刻度单位长度，
 ///     直接取 Camera.main.transform.position 的实际分量，F2 精度）；
 ///   - 显示精确开始时间：本局运行起始时刻（DateTime，精确到毫秒）与
-///     运行时长（基于 Time.time，受 timeScale 影响，暂停时冻结）。
+///     运行时长（基于 unscaledDeltaTime 累计，暂停 / timeScale=0 时继续走动）。
 /// 纯代码构建 UI，挂到任意物体即可。
 /// </summary>
 public class DevOverlayController : MonoBehaviour
@@ -28,7 +28,7 @@ public class DevOverlayController : MonoBehaviour
     private Text overlayText;
 
     private DateTime startTime;   // 精确开始时间（墙钟，毫秒级）
-    private float startGameTime;  // 开始时刻的 Time.time（运行时长基准，暂停时冻结）
+    private float runtimeUnscaled; // 运行时长累计（unscaled 真实时间，暂停 / timeScale=0 时继续走动）
 
     private float fpsValue = 60f; // 平滑帧率（每 0.5s 采样一次）
     private float fpsAccumulator; // 帧率采样累计耗时（unscaled）
@@ -39,7 +39,7 @@ public class DevOverlayController : MonoBehaviour
     private void Awake()
     {
         startTime = DateTime.Now;
-        startGameTime = Time.time;
+        runtimeUnscaled = 0f;
 
         BuildUI();
         overlayRoot.SetActive(false); // 默认隐藏，按 F3 打开
@@ -53,6 +53,8 @@ public class DevOverlayController : MonoBehaviour
 
     private void LateUpdate()
     {
+        // 运行时长用 unscaledDeltaTime 累计：timeScale=0（暂停）时依旧继续走动
+        runtimeUnscaled += Time.unscaledDeltaTime;
         SampleFps(); // 每帧累计采样，0.5s 平滑一次帧率（面板隐藏时也持续采样，避免打开瞬间显示旧值）
         if (overlayRoot != null && overlayRoot.activeSelf)
             UpdateText();
@@ -101,7 +103,7 @@ public class DevOverlayController : MonoBehaviour
     {
         Camera cam = Camera.main;
         Vector3 pos = cam != null ? cam.transform.position : Vector3.zero;
-        TimeSpan elapsed = TimeSpan.FromSeconds(Mathf.Max(0f, Time.time - startGameTime));
+        TimeSpan elapsed = TimeSpan.FromSeconds(Mathf.Max(0f, runtimeUnscaled));
 
         overlayText.text =
             "ABOVE THE VOID - Dev Mode [F3]\n" +
@@ -128,7 +130,7 @@ public class DevOverlayController : MonoBehaviour
     public void ResetRuntime()
     {
         startTime = DateTime.Now;
-        startGameTime = Time.time;
+        runtimeUnscaled = 0f;
     }
 
     private static string FormatElapsed(TimeSpan elapsed)

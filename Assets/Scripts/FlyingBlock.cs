@@ -11,9 +11,10 @@ using UnityEngine;
 ///   - 高亮：准心指向时整体变亮、线框加粗，并在几何中心显示高亮原点标记；
 ///   - 行进面：长方体使用 6-submesh 单位立方体网格，行进方向对应的面渲染为白色；
 ///   - 中心标记：从白色面一侧查看时中心点渲染为黑色，其余角度为白色；
-///   - 受击阶段（HP）：每个块生成时 HP 随机为 1~6（等概率，恒 ≥ 1）。HP=1 表示首次被命中即碎掉（不产生残骸）；
-///     HP=N 表示沿攻击方向分 N 层厚度（每层 = 初始尺寸的 1/N），每次激光命中从入射侧吃掉一层，
-///     剩余部分保留为子块继续飞行，累计 N 次被吃光即死亡。受击阶段颜色逐档变暗。
+///   - 受击阶段（HP）：HP 由生成器按类型给定，恒 ≥ 1。蓝色（Bomb / 阻碍块）HP 恒定 1：首次命中即整块击毁，
+///     不切层、不产生残骸；红色（Attack）HP 随机为 1~6（等概率）。HP=N 表示沿攻击方向分 N 层厚度
+///     （每层 = 初始尺寸的 1/N），每次激光命中从入射侧吃掉一层，剩余部分保留为子块继续飞行，
+///     累计 N 次被吃光即死亡。受击阶段颜色按剩余血量比例逐档变暗。
 ///   - 类型规则：蓝色（Bomb）炸弹块可被激光正常击打并击毁，但击毁既不加分也不扣分（score-neutral）；
 ///     红色（Attack）方块抵达 0 平面基地时按剩余体积扣分，击毁红色方块按 初始体积 + 初始 HP 加分（详见 ScoreManager）。
 ///   - 超时清理：方块记录生成时刻，存活超过 expireAfterSeconds（默认 60s）或已抵达/越过 0 平面时静默清除，
@@ -98,7 +99,7 @@ public class FlyingBlock : MonoBehaviour
     private bool highlighted;
     private float spawnTime; // 生成时刻（以 Time.time 记录，用于"存活过久静默清除"判定；暂停时 Time.time 不增长故不会误清）
 
-    /// <summary>初始化（由生成器调用）。hp = 该块血量（受击层数），1~6，由生成器 Random.Range(1, 7) 随机给出。</summary>
+    /// <summary>初始化（由生成器调用）。hp = 该块血量（受击层数），恒 ≥ 1：蓝色 BOMB 由生成器固定传 1，红色 ATTACK 为 1~6 随机。</summary>
     public void Init(BlockType type, Vector3 blockSize, Vector3 position, float moveSpeed, int blockId, Vector3 dir, int hp)
     {
         Type = type;
@@ -180,6 +181,8 @@ public class FlyingBlock : MonoBehaviour
                 killerSpawner.RegisterPlayerKill(); // 玩家激光消灭计数（教学任务用）
             // 击毁奖励：按 初始体积 + 初始 HP 加分（分值规则见 ScoreManager.ApplyKill）
             ScoreManager.NotifyBlockDestroyed(Type, InitialVolume, maxHits);
+            // 生命值：击毁蓝色 BOMB 块扣生命（红色攻击块不扣血；教学关由 LevelPresentation 关闭生命系统）
+            LivesManager.NotifyBlockDestroyed(Type);
             DestroyBlock("hit_exhausted");
             return new List<FlyingBlock>();
         }

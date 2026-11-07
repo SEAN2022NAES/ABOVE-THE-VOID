@@ -41,6 +41,44 @@ public static class LevelPresentation
         Apply(true, true);
     }
 
+    /// <summary>
+    /// 主页（主菜单）表现：不显示 Score 分数 HUD（含增量提示与负分红字）、不显示 print 输出荧幕、
+    /// 不生成蓝色 BOMB 块，并隐藏整套三维坐标轴（半透明黑色遮罩后不再看到蓝色 X 轴）。
+    /// 进入关卡时由各自的 Apply 方法恢复。
+    /// </summary>
+    public static void ApplyMainMenu()
+    {
+        // 分数 HUD：主页不显示（计分逻辑照常，重新显示时数值正确）
+        ScoreManager.SetHudVisible(false);
+
+        // 生命值 HUD：主页不显示，且主页不属于任何关卡 → 生命系统关闭（不掉血、不判负）
+        LivesManager.SetEnabled(false);
+
+        // print 输出荧幕：主页不显示
+        CodeTower tower = UnityEngine.Object.FindObjectOfType<CodeTower>();
+        if (tower != null)
+            tower.SetPrintScreenVisible(false);
+
+        // 蓝色 BOMB 块：主页不出块
+        FlyingBlockSpawner spawner = FlyingBlockSpawner.Instance;
+        if (spawner == null)
+            spawner = UnityEngine.Object.FindObjectOfType<FlyingBlockSpawner>();
+        if (spawner != null)
+            spawner.bombEnabled = false;
+
+        // 三维坐标轴：主页隐藏（否则透过主页半透明遮罩仍能看到蓝色 X 轴），进入关卡时恢复
+        CoordinateAxesDrawer.SetAxesVisibleGlobal(false);
+
+        // 顶部倒计时 / 时间提示：主页一律隐藏（否则主页底部仍能看到 00:00 计时），Level 3 进入时再显式打开
+        TimeHintController.SetVisibleGlobal(false);
+    }
+
+    /// <summary>恢复三维坐标轴显示（进入任意关卡时调用，与 ApplyMainMenu 配对的显式恢复）。</summary>
+    public static void RestoreAxes()
+    {
+        CoordinateAxesDrawer.SetAxesVisibleGlobal(true);
+    }
+
     private static void Apply(bool hudVisible, bool printScreenVisible)
     {
         Apply(hudVisible, printScreenVisible, hudVisible);
@@ -48,8 +86,15 @@ public static class LevelPresentation
 
     private static void Apply(bool hudVisible, bool printScreenVisible, bool bombEnabled)
     {
+        // 进入任意关卡：先恢复三维坐标轴（与主页隐藏配对，保证从主页进入关卡后轴一定可见）
+        RestoreAxes();
+
         // 分数 HUD：教学关隐藏（计分逻辑照常，重新显示时数值正确）
         ScoreManager.SetHudVisible(hudVisible);
+
+        // 生命值：与分数 HUD 同开同关 —— 只有显示分数 HUD 的关卡（Level 3 完整玩法）才启用；
+        // Level 1 / Level 2 教学关不掉血、不判负，保持原有「击毁蓝块零分零罚」的精简规则
+        LivesManager.SetEnabled(hudVisible);
 
         // print 输出荧幕：Part 1 不显示；Part 2 / 完整玩法显示
         CodeTower tower = UnityEngine.Object.FindObjectOfType<CodeTower>();

@@ -36,11 +36,24 @@ public class MainMenuController : MonoBehaviour
     private Text level1Label;
     private Text level2Label;
     private Text level3Label;
+    // 逐级解锁：关卡按钮 / 底图 / 文本引用（下标 = 关卡序号 - 1），用于解锁后即时刷新灰显与锁定状态
+    private readonly Button[] levelButtons = new Button[3];
+    private readonly Image[] levelButtonImages = new Image[3];
+    private readonly Text[] levelButtonLabels = new Text[3];
     private Text langZhLabel;
     private Text langEnLabel;
     private FlyingBlockSpawner spawner;
     private PlayerCameraController playerController;
     private float pulseTime;
+
+    /// <summary>指令框引用（LateUpdate 判断「指令框打开时不要清 EventSystem 选中项」，惰性获取）。</summary>
+    private CommandConsoleController commandConsole;
+
+    /// <summary>
+    /// 主页是否正在显示（Home 面板可见）。
+    /// EscapeRouter 用它判断「主页状态按 ESC 直接忽略（无反应）」，以及指令框收起后是否回到主页。
+    /// </summary>
+    public bool IsMenuVisible => root != null && root.activeSelf;
 
     private void Start()
     {
@@ -55,6 +68,11 @@ public class MainMenuController : MonoBehaviour
 
         SetCursorLocked(false);
         BuildUI();
+
+        // 主页表现：不显示 Score 分数 HUD（含增量提示 / 负分红字）、不显示 print 荧幕、
+        // 不生成蓝块，并隐藏三维坐标轴（否则透过主页半透明遮罩仍能看到蓝色 X 轴）
+        LevelPresentation.ApplyMainMenu();
+
         Localization.OnLanguageChanged += RefreshLanguageTexts; // 主页语言切换即时刷新
     }
 
@@ -74,11 +92,58 @@ public class MainMenuController : MonoBehaviour
             c.a = a;
             titleText.color = c;
         }
+
+        // 主页屏蔽 Enter：清掉 EventSystem 的选中项，避免「点击过按钮后 Enter 被当成 Submit 二次触发主页按钮」
+        // （主页不提供键盘导航，选中项本身无展示作用；Enter 在主页应与 ESC 一样完全无反应）
+        //
+        // 关键修正：主页可见时 ` 键打开的指令框里的 InputField 需要长期保持 EventSystem 焦点。
+        // uGUI 的 InputField 只有作为 currentSelectedGameObject 时才会收到键盘事件（EventSystem 每帧派发
+        // UpdateSelectedEvent）；若这里无条件每帧 SetSelectedGameObject(null)，输入框会在每帧末被取消选中，
+        // 表现为「打开指令框后敲字没反应、回车也提交不了」。因此仅在「主页可见 且 指令框未打开」时才清空选中项。
+        if (!IsMenuVisible)
+            return; // 非主页（关卡内 / 代码编辑器 / 教学）一律不干预选中项
+
+        if (commandConsole == null)
+            commandConsole = FindObjectOfType<CommandConsoleController>();
+        if (commandConsole != null && commandConsole.IsOpen)
+            return; // 指令框打开：保留输入框焦点，保证能打字与回车提交
+
+        EventSystem es = EventSystem.current;
+        if (es != null && es.currentSelectedGameObject != null)
+            es.SetSelectedGameObject(null);
     }
 
     /// <summary>点击关卡入口：隐藏主页并启动对应关卡（关卡1引导教学、关卡2炮台API教学、关卡3完整玩法）。</summary>
     public void StartLevel(int levelIndex)
     {
+        // 逐级解锁：未解锁关卡不可进入（按钮本身已灰显 + 锁定，此处再兜底拦截一次）
+        if (!LevelProgress.IsLevelUnlocked(levelIndex))
+        {
+            Debug.Log("[MainMenu] 关卡 " + levelIndex + " 尚未解锁（当前最高可玩：关卡 " +
+                      LevelProgress.HighestUnlockedLevel + "）。");
+            return;
+        }
+
+        // 离开主页：恢复三维坐标轴显示（主页期间被 ApplyMainMenu 隐藏）
+        LevelPresentation.RestoreAxes();
+
+        // 断点续玩：主页点击某关时，若存在「属于该关」的合法存档，就从记录的 part / section 续玩，而不是从该关开头重来。
+        //   · 只有带章节拆分的分区（Level 1 - Part 2 语法课 / Level 2 - Part 1 API 课）才需要按章节定位，
+        //     这里统一交给 LevelDirector.JumpTo 路由，与 /level 走完全同一条路径，避免两套逻辑不一致；
+        //   · 优先级：/level 跳关成功后已用跳关参数覆盖存档，所以这里读到的必然是「最后一次到达的位置」，
+        //     存档不会把玩家拽回跳关之前的旧位置；
+        //   · 脏存档（越界 / 不存在的章节 / 非法分区）→ GameProgress.TryGetResume 返回 false，
+        //     直接落到下面的原有流程，从该关开头进入，绝不会因为坏存档进不去关；
+        //   · 启动后仍停在主页：本方法只在玩家主动点击关卡按钮时调用，不做任何自动跳关。
+        if (GameProgress.TryGetResume(levelIndex, out int resumePart, out int resumeSection) &&
+            GameProgress.GetSectionCount(levelIndex, resumePart) > 0)
+        {
+            string resumeMessage = LevelDirector.JumpTo(levelIndex, resumePart, resumeSection);
+            Debug.Log("[MainMenu] 断点续玩：Level " + levelIndex + " - Part " + resumePart +
+                      " 第 " + resumeSection + " 章 → " + resumeMessage);
+            return;
+        }
+
         // 关卡 2 - 1 炮台 API 教学：统一走 LevelDirector 路由，保证表现开关 / 生成控制 / 教学启动与指令框一致
         if (levelIndex == 2)
         {
@@ -89,6 +154,11 @@ public class MainMenuController : MonoBehaviour
 
         if (levelIndex != 1 && levelIndex != 3)
             return;
+
+        // 断点续玩：主页直接进入的两个分区（Level 1 - Part 1 引导教学、Level 3 - Part 1 完整玩法）没有章节拆分，
+        // 位置固定从该分区开头开始；这里把「关卡 + 分区」写入存档（section = 0），
+        // 既作为续玩点，也作为 /lock 清档范围与 Level 3 最高分结算所需的「当前关卡」会话标识。
+        GameProgress.SaveResume(levelIndex, 1, 0);
 
         if (root != null)
             root.SetActive(false);
@@ -108,6 +178,9 @@ public class MainMenuController : MonoBehaviour
 
         // 计分：进入关卡即重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
         ScoreManager.ResetAll();
+
+        // 生命值：进入关卡即重开一局生命（默认 5 点）
+        LivesManager.ResetAll();
 
         TutorialController tutorial = FindObjectOfType<TutorialController>();
         if (levelIndex == 1)
@@ -155,6 +228,7 @@ public class MainMenuController : MonoBehaviour
         if (playerController != null)
             playerController.SetExternalBlock(false);
         SetCursorLocked(true);
+        LevelPresentation.RestoreAxes(); // 离开主页：恢复三维坐标轴
         Debug.Log("[MainMenu] 主页已隐藏（开发者指令触发）。");
     }
 
@@ -194,6 +268,21 @@ public class MainMenuController : MonoBehaviour
 
         SetCursorLocked(false);
         root.SetActive(true);
+
+        // 主页表现：隐藏 Score 分数 HUD（含增量 / 负分红字）、print 荧幕、蓝块与三维坐标轴
+        LevelPresentation.ApplyMainMenu();
+
+        // 一局结束结算：从游戏内返回主页时，若本局处于 Level 3，把本局分数提交为该关最高分
+        //（只在分数更高时写入并 Save()，其它关卡 / 主页不产生任何写入）
+        GameProgress.CommitCurrentLevelHighScore(ScoreManager.Instance != null ? ScoreManager.Instance.Score : 0);
+
+        // 回到主页 = 不在任何关卡内：清掉会话位置（只清内存，不动存档），避免重复结算；
+        // 续玩断点本身保留不动，下次点击该关按钮时仍从记录的位置续玩。
+        GameProgress.ClearSessionPosition();
+
+        // 逐级解锁：回到主页时按最新进度刷新关卡按钮（刚通关的关卡解锁后立刻可见可点；最高分同步刷新）
+        RefreshLevelLocks();
+
         Debug.Log("[MainMenu] 返回主页。");
     }
 
@@ -259,9 +348,9 @@ public class MainMenuController : MonoBehaviour
         levelTitleText = CreateText("LevelTitle", root.transform, "", levelTitleFontSize, new Color(0.75f, 0.8f, 0.9f, 1f), TextAnchor.MiddleCenter, false);
         SetRect(levelTitleText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -304f), new Vector2(1200f, 44f));
 
-        CreateLevelButton("Level1", new Vector2(-280f, -382f), true, 1, out level1Label);
-        CreateLevelButton("Level2", new Vector2(0f, -382f), true, 2, out level2Label);
-        CreateLevelButton("Level3", new Vector2(280f, -382f), true, 3, out level3Label);
+        CreateLevelButton("Level1", new Vector2(-280f, -382f), 1, out level1Label);
+        CreateLevelButton("Level2", new Vector2(0f, -382f), 2, out level2Label);
+        CreateLevelButton("Level3", new Vector2(280f, -382f), 3, out level3Label);
 
         // ---- 底部说明 ----
         hintText = CreateText("Hint", root.transform, "", 20, new Color(0.6f, 0.65f, 0.75f, 0.9f), TextAnchor.MiddleCenter, false);
@@ -279,27 +368,115 @@ public class MainMenuController : MonoBehaviour
         AddOutline(t.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
     }
 
-    /// <summary>创建关卡按钮（interactable=false 时自动灰显；label 文本存引用供语言切换）。</summary>
-    private void CreateLevelButton(string name, Vector2 pos, bool interactable, int levelIndex, out Text labelText)
+    /// <summary>
+    /// 创建关卡按钮（按 LevelProgress 判断是否已解锁：未解锁自动灰显 + 不可点击，并在文本末尾标注「锁定」）。
+    /// 按钮 / 底图 / 文本的引用按下标（关卡序号 - 1）保存，供解锁后 RefreshLevelLocks 即时刷新。
+    /// </summary>
+    private void CreateLevelButton(string name, Vector2 pos, int levelIndex, out Text labelText)
     {
+        bool unlocked = LevelProgress.IsLevelUnlocked(levelIndex);
+
         RectTransform rt = CreateRect(name, root.transform, new Vector2(0.5f, 0.5f), pos, new Vector2(240f, 92f), new Vector2(0.5f, 0.5f));
         Image img = rt.gameObject.AddComponent<Image>();
-        img.color = interactable
+        img.color = unlocked
             ? new Color(0.20f, 0.62f, 0.72f, 0.55f)
             : new Color(0.16f, 0.18f, 0.24f, 0.60f);
 
         Button btn = rt.gameObject.AddComponent<Button>();
         btn.targetGraphic = img;
-        btn.interactable = interactable;
-        if (interactable)
+        btn.interactable = unlocked;
+        if (unlocked)
         {
             int captured = levelIndex;
             btn.onClick.AddListener(() => StartLevel(captured));
         }
 
-        labelText = CreateText("Label", rt, "", buttonFontSize, interactable ? Color.white : new Color(0.55f, 0.58f, 0.65f, 1f), TextAnchor.MiddleCenter, false);
+        labelText = CreateText("Label", rt, "", buttonFontSize, unlocked ? Color.white : new Color(0.55f, 0.58f, 0.65f, 1f), TextAnchor.MiddleCenter, false);
         Stretch(labelText.rectTransform);
         labelText.lineSpacing = 0.9f;
+
+        int index = levelIndex - 1;
+        if (index >= 0 && index < levelButtons.Length)
+        {
+            levelButtons[index] = btn;
+            levelButtonImages[index] = img;
+            levelButtonLabels[index] = labelText;
+        }
+    }
+
+    /// <summary>
+    /// 按当前解锁进度刷新关卡按钮：已解锁 → 青蓝底 + 白字 + 可点击；
+    /// 未解锁 → 灰暗底 + 灰字 + 「锁定 / LOCKED」标注 + 点击无效。
+    /// 通关解锁、/unlock 指令、返回主页、语言切换时都会调用（幂等）。
+    /// </summary>
+    public void RefreshLevelLocks()
+    {
+        for (int i = 0; i < levelButtons.Length; i++)
+        {
+            int levelIndex = i + 1;
+            bool unlocked = LevelProgress.IsLevelUnlocked(levelIndex);
+
+            Button btn = levelButtons[i];
+            if (btn != null)
+            {
+                btn.interactable = unlocked;
+                btn.onClick.RemoveAllListeners();
+                if (unlocked)
+                {
+                    int captured = levelIndex;
+                    btn.onClick.AddListener(() => StartLevel(captured));
+                }
+            }
+
+            Image img = levelButtonImages[i];
+            if (img != null)
+            {
+                img.color = unlocked
+                    ? new Color(0.20f, 0.62f, 0.72f, 0.55f)
+                    : new Color(0.16f, 0.18f, 0.24f, 0.60f);
+            }
+
+            Text label = levelButtonLabels[i];
+            if (label != null)
+            {
+                // Level 3 有最高分记录时按钮文案多一行（关卡 3 / 完整玩法 / 最高分 xxx），
+                // 三行放不进 240x92 的按钮，故仅该按钮把字号收一档，其余按钮保持 buttonFontSize 不变。
+                bool showBest = (levelIndex == 3 && unlocked && GameProgress.HasHighScore(levelIndex));
+                string text = LevelButtonText(levelIndex);
+                if (!unlocked)
+                    text += Localization.IsChinese ? "\n锁定" : "\nLOCKED";
+                label.fontSize = showBest ? Mathf.Max(16, buttonFontSize - 8) : buttonFontSize;
+                label.text = text;
+                label.color = unlocked ? Color.white : new Color(0.55f, 0.58f, 0.65f, 1f);
+                label.font = UIFontHelper.LoadForText(label.text, label.fontSize);
+            }
+        }
+    }
+
+    /// <summary>关卡按钮基础文案（不含锁定标注），随语言切换。</summary>
+    private static string LevelButtonText(int levelIndex)
+    {
+        bool zh = Localization.IsChinese;
+        switch (levelIndex)
+        {
+            case 1:
+                return zh ? "关卡 1" : "Level 1";
+            case 2:
+                return zh ? "关卡 2\nAPI 教学" : "Level 2\nAPI Tutorial";
+            case 3:
+                {
+                    string level3Text = zh ? "关卡 3\n完整玩法" : "Level 3\nFull Game";
+                    // 最高分：仅当该关已有记录时才追加第三行（中文「最高分 12345」/ 英文「BEST 12345」），
+                    // 无记录（HasHighScore = false）时不显示，保持与加持久化之前完全一致的两行文案。
+                    if (GameProgress.HasHighScore(3))
+                        level3Text += zh
+                            ? "\n最高分 " + GameProgress.GetHighScore(3)
+                            : "\nBEST " + GameProgress.GetHighScore(3);
+                    return level3Text;
+                }
+            default:
+                return zh ? "关卡 " + levelIndex : "Level " + levelIndex;
+        }
     }
 
     /// <summary>创建语言选择按钮（中文 / English）：点击切换全局语言，并高亮当前语言。</summary>
@@ -356,17 +533,13 @@ public class MainMenuController : MonoBehaviour
                 ? "选择关卡"
                 : "S E L E C T   L E V E L";
 
-        if (level1Label != null)
-            level1Label.text = zh ? "关卡 1" : "Level 1";
-        if (level2Label != null)
-            level2Label.text = zh ? "关卡 2\nAPI 教学" : "Level 2\nAPI Tutorial";
-        if (level3Label != null)
-            level3Label.text = zh ? "关卡 3\n完整玩法" : "Level 3\nFull Game";
+        // 关卡按钮文案 + 解锁/锁定状态一起刷新（未解锁附「锁定 / LOCKED」标注）
+        RefreshLevelLocks();
 
         if (hintText != null)
             hintText.text = zh
-                ? "进入关卡后：Q 自由视角 · WASD 横移 · Space/C 上下 · 左键激光 · E 冻结 · ESC 暂停"
-                : "In level: Q free view · WASD move · Space/C up/down · LMB laser · E freeze time · ESC pause";
+                ? "主页：` 打开/收起指令框（ESC 无反应）· 进入关卡后：Q 自由视角 · WASD 横移 · Space/C 上下 · E 冻结 · ESC 暂停"
+                : "Home: ` opens/closes the console (ESC does nothing) · In level: Q free view · WASD move · Space/C up/down · E freeze time · ESC pause";
 
         // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → 微软雅黑，英文/数字 → Consolas）
         RefreshTextFonts();

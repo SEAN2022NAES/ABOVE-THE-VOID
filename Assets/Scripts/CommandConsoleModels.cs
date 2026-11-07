@@ -12,6 +12,8 @@ public enum CommandType
     Unknown,     // 无法识别的指令
     Help,        // help / 帮助
     Level,       // /level <关卡> <部分>：跳转开发者关卡指令
+    Unlock,      // /unlock（别名 解锁）：一键解锁全部关卡
+    Lock,        // /lock（别名 锁定）：回厂重置（关卡进度 / 设置 / 编辑器代码全部清零）
     Exit         // /exit：关闭指令框并返回主页
 }
 
@@ -65,6 +67,18 @@ public static class CommandParser
             case "level":
             case "关卡":
                 type = CommandType.Level;
+                break;
+            case "/unlock":
+            case "unlock":
+            case "/解锁":
+            case "解锁":
+                type = CommandType.Unlock;
+                break;
+            case "/lock":
+            case "lock":
+            case "/锁定":
+            case "锁定":
+                type = CommandType.Lock;
                 break;
             case "/exit":
             case "exit":

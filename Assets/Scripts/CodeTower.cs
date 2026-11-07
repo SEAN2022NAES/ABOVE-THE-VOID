@@ -10,7 +10,7 @@ using UnityEngine.UI;
 ///     火力逻辑、代码编辑器、发射接口完全照常工作；
 ///   - 激光：从原点沿炮口当前朝向发射（射程 laserMaxLength=60、作用/视觉半径 laserRadius=0.02 超级小，
 ///     与鼠标左键触发的玩家激光等效的动画：双层圆柱 + 命中火花，淡出销毁），
-///     每个命中 FlyingBlock 只扣 1 层 HP（CutByLaser 吃一层厚度，累计吃满该块随机 HP 即死亡，HP 恒 ≥ 1、HP=1 一击即毁）；
+///     每个命中 FlyingBlock 只扣 1 层 HP（CutByLaser 吃一层厚度，累计吃满该块 HP 即死亡；红色块 HP 随机 1~6，蓝色 BOMB 块 HP 恒为 1 故一击即毁）；
 ///     蓝色炸弹块（Bomb）可被激光正常击打并击毁，但击毁既不加分也不扣分（与红块同等切割流程）；
 ///     并触发 CommandConsoleController.OnLaserFired 事件；
 ///   - 冷却：cooldownSeconds = 0.0285s（约 35 发/秒，为 0.03s 节奏留余量；即原 0.019s 的 1.5 倍），
@@ -282,7 +282,7 @@ public class CodeTower : MonoBehaviour
                 nearestT = hits[i].distance;
         }
 
-        // 逐个命中：每个块从入射侧吃掉一层厚度（血量随机 1~6，吃满即死亡；HP=1 一击即毁）
+        // 逐个命中：每个块从入射侧吃掉一层厚度（红块血量随机 1~6，蓝块血量恒 1；吃满即死亡）
         foreach (FlyingBlock block in hitBlocks)
         {
             block.CutByLaser(origin, dir, laserRadius);

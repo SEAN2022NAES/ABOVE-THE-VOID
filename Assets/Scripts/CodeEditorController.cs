@@ -84,6 +84,7 @@ public class CodeEditorController : MonoBehaviour
     private CommandConsoleController commandConsole;
     private SettingsPanelController settingsPanel;
     private CodeTower tower;
+    private MainMenuController mainMenu; // 主页引用（用于主页状态下屏蔽 Enter）
 
     // 开关状态
     private bool wasPausedBeforeOpen;
@@ -99,6 +100,17 @@ public class CodeEditorController : MonoBehaviour
 
     /// <summary>编辑器当前是否打开。</summary>
     public bool IsOpen => editorRoot != null && editorRoot.activeSelf;
+
+    /// <summary>
+    /// 主页是否正在显示（Home 面板可见）。主页状态下 Enter 一律屏蔽：不打开编辑器、不触发任何交互。
+    /// 主页引用按需缓存（主页对象常驻，只需查找一次）。
+    /// </summary>
+    private bool IsMainMenuBlocking()
+    {
+        if (mainMenu == null)
+            mainMenu = FindObjectOfType<MainMenuController>();
+        return mainMenu != null && mainMenu.IsMenuVisible;
+    }
 
     /// <summary>当前编辑器内的用户代码文本（编辑器未构建时返回空串）。代码语法教学（Level 1 - Part 2）据此判定任务。</summary>
     public string CurrentCode => inputField != null ? inputField.text : string.Empty;
@@ -125,6 +137,36 @@ public class CodeEditorController : MonoBehaviour
             ApplyScrollY(0f);
             UpdateScrollBars();
         }
+    }
+
+    /// <summary>
+    /// 回厂重置（/lock 指令调用）：把编辑器内容恢复为初始示例模板 DEFAULT_CODE，
+    /// 并同步 lastCommittedText / defaultCodeFilled（与首次打开编辑器时的状态一致），
+    /// 同时清空撤销 / 重做栈与光标记录。编辑器 UI 尚未构建时只复位 defaultCodeFilled，
+    /// 下次 Open() 会自动填入默认模板。
+    /// </summary>
+    public void ResetCodeToDefault()
+    {
+        if (inputField == null)
+        {
+            defaultCodeFilled = false; // UI 未构建：下次 Open() 时自动填入 DEFAULT_CODE
+            return;
+        }
+
+        inputField.text = DEFAULT_CODE;
+        defaultCodeFilled = true;              // 内容已等于默认模板，Open() 不再重复覆盖
+        lastCommittedText = inputField.text;   // 同步已提交文本，避免撤销 / 高亮错位
+        undoList.Clear();
+        redoList.Clear();
+        lastCaretPos = -1;
+        RefreshCodeView();
+        if (codeRt != null)
+        {
+            ApplyScrollY(0f);
+            UpdateScrollBars();
+        }
+
+        Debug.Log("[CodeEditor] 已恢复出厂设置：代码清回初始示例模板");
     }
 
     // ---------------- 高亮配色 ----------------
@@ -187,8 +229,17 @@ public class CodeEditorController : MonoBehaviour
         // Enter 开关：关闭时按 Enter 打开；打开时若输入框未聚焦则按 Enter 关闭（聚焦时 Enter 交给输入框换行，便于编写多行代码）
         if (!IsOpen)
         {
-            if (Input.GetKeyDown(openKey) || Input.GetKeyDown(openKeyAlt))
+            // 刚被强制关闭（进入 Level 3 完整玩法关 / 关卡切换）时，先等这次 Enter 抬起，避免指令框里确认命令的那一下把编辑器又弹出来
+            if (suppressOpenUntilRelease)
             {
+                if (!Input.GetKey(openKey) && !Input.GetKey(openKeyAlt))
+                    suppressOpenUntilRelease = false;
+            }
+            else if (Input.GetKeyDown(openKey) || Input.GetKeyDown(openKeyAlt))
+            {
+                // 主页（Home 面板可见）：Enter 完全无反应，既不打开编辑器也不做任何交互
+                if (IsMainMenuBlocking())
+                    return;
                 Open();
                 return;
             }
@@ -200,12 +251,7 @@ public class CodeEditorController : MonoBehaviour
                 Close();
                 return;
             }
-            // ESC 同样退出代码编辑模式（编辑器占用外部输入，不会误触发暂停）
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                CloseFromEscape();
-                return;
-            }
+            // ESC 退出代码编辑模式：统一由 EscapeRouter 判定后调用 CloseFromEscape()，本组件不再自行读取 ESC
             // F6：编译运行（与 Compile & Run 按钮同逻辑）
             if (Input.GetKeyDown(KeyCode.F6))
             {
@@ -310,10 +356,97 @@ public class CodeEditorController : MonoBehaviour
 
     // ---------------- 开关逻辑（与 PlayerCameraController 联动） ----------------
 
+    // 右侧为教学指导框预留的宽度（0 = 默认全宽代码区；当前上下分栏布局下恒为 0，保留接口兼容）
+    private float rightReservedWidth;
+
+    // 底部为教学指导框预留的高度（0 = 默认铺满全屏；Level 1-2 / Level 2-1 教学时设为指导框高度）
+    private float bottomReservedHeight;
+
+    // 编辑器整体根节点（用于上下分栏时收窄高度）
+    private RectTransform editorRootRt;
+
+    // 强制关闭后忽略一次「Enter 打开」输入：避免跳关指令框里那一下 Enter 又在同帧 / 下一帧把编辑器打开
+    private bool suppressOpenUntilRelease;
+
+    /// <summary>
+    /// 给底部教学指导框预留高度：编辑器整体上移收窄到上半区，指导框独占下半区，
+    /// 「上代码 / 下指导」上下排布互不重叠；代码过长时编辑器内部竖向滚动条照常可用。传 0 即恢复默认全屏。
+    /// </summary>
+    public void SetBottomReservedHeight(float reservedHeight)
+    {
+        bottomReservedHeight = Mathf.Max(0f, reservedHeight);
+        ApplyBottomReservedHeight();
+    }
+
+    /// <summary>按当前底部预留高度重排编辑器根节点（关闭时也保持，下次打开即为正确布局）。</summary>
+    private void ApplyBottomReservedHeight()
+    {
+        if (editorRootRt == null)
+            return;
+
+        editorRootRt.offsetMin = new Vector2(0f, bottomReservedHeight);
+        editorRootRt.offsetMax = Vector2.zero;
+
+        UpdateScrollBars(); // 视口高度变化后重算竖向滚动条的滑块长度与位置
+    }
+
+    /// <summary>
+    /// 强制关闭代码编辑器（任意关卡切换 / 进入 Level 3 完整玩法关时使用）：关闭界面、恢复 timeScale = 1、
+    /// 锁回鼠标、收起「按 Enter 输入代码」提示，并抑制紧随其后的同一次 Enter 再次打开编辑器。
+    /// </summary>
+    public static void ForceCloseIfOpen()
+    {
+        CodeEditorController editor = Object.FindObjectOfType<CodeEditorController>();
+        if (editor == null)
+            return;
+        editor.ForceCloseSelf();
+    }
+
+    /// <summary>实例级强制收尾（供静态入口 / 教学结束调用）。</summary>
+    public void ForceCloseSelf()
+    {
+        if (IsOpen)
+            CloseAndForceResume();
+        HideEnterPrompt();
+        // 指令框 / 其它界面里确认命令的那一次 Enter 会在同帧或下一帧被当成「打开编辑器」，这里先屏蔽到按键抬起
+        suppressOpenUntilRelease = true;
+    }
+
+    /// <summary>
+    /// 给右侧教学指导框预留宽度：代码区（含行号列右侧的正文、竖/横滚动条）整体左移收窄，
+    /// 使「左侧代码行、右侧指导框」互不重叠。传 0 即恢复默认全宽布局。
+    /// </summary>
+    public void SetRightReservedWidth(float reservedWidth)
+    {
+        rightReservedWidth = Mathf.Max(0f, reservedWidth);
+        ApplyRightReservedWidth();
+    }
+
+    /// <summary>按当前预留宽度重排代码区与滚动条（关闭时也保持，下次打开即为正确布局）。</summary>
+    private void ApplyRightReservedWidth()
+    {
+        if (codeViewportRt == null)
+            return;
+
+        float r = rightReservedWidth;
+        codeViewportRt.offsetMax = new Vector2(-r, codeViewportRt.offsetMax.y);
+        if (vScrollTrackRt != null)
+            vScrollTrackRt.offsetMax = new Vector2(-(r + 6f), vScrollTrackRt.offsetMax.y);
+        if (hScrollTrackRt != null)
+            hScrollTrackRt.offsetMax = new Vector2(-(r + 16f), hScrollTrackRt.offsetMax.y);
+
+        SyncContentWidth();  // 视口变窄后重算内容宽度（决定是否出现横向滚动）
+        UpdateScrollBars();  // 同步两个滚动条的滑块长度与位置
+    }
+
     /// <summary>打开编辑器：暂停时间、释放鼠标、占用视角输入；教学 / 指令框状态下忽略。</summary>
     public void Open()
     {
         if (IsOpen)
+            return;
+
+        // 限制：主页（Home 面板可见）状态下不打开（Enter 在主页完全无反应）
+        if (IsMainMenuBlocking())
             return;
 
         // 限制：教学进行中不弹
@@ -340,6 +473,8 @@ public class CodeEditorController : MonoBehaviour
         }
 
         editorRoot.SetActive(true);
+        ApplyRightReservedWidth(); // 打开时按当前预留宽度重排（上下分栏布局下恒为 0）
+        ApplyBottomReservedHeight(); // 打开时按当前底部指导框高度收窄整体高度（上代码 / 下指导，互不重叠）
         if (enterPromptRt != null)
             enterPromptRt.gameObject.SetActive(false); // 进场提示在打开编辑器后消失
         if (!defaultCodeFilled)
@@ -409,7 +544,7 @@ public class CodeEditorController : MonoBehaviour
     /// ESC 退出代码编辑模式：只关闭编辑器并让游戏继续运行（不还原「打开前的暂停状态」），
     /// 同时抑制本次 ESC 触发暂停，确保退出代码模式后游戏保持继续。
     /// </summary>
-    private void CloseFromEscape()
+    public void CloseFromEscape()
     {
         wasPausedBeforeOpen = false; // ESC 退出后一律继续运行，不恢复暂停
         Close();
@@ -428,6 +563,13 @@ public class CodeEditorController : MonoBehaviour
     {
         if (enterPromptRt != null)
             enterPromptRt.gameObject.SetActive(true);
+    }
+
+    /// <summary>隐藏进场「按 Enter 输入代码」提示（跳关 / 不需要该提示时调用，避免残留在屏幕上）。</summary>
+    public void HideEnterPrompt()
+    {
+        if (enterPromptRt != null)
+            enterPromptRt.gameObject.SetActive(false);
     }
 
     // ---------------- 编译运行 ----------------
@@ -1253,6 +1395,7 @@ public class CodeEditorController : MonoBehaviour
         rootRt.offsetMin = Vector2.zero;
         rootRt.offsetMax = Vector2.zero;
         editorRoot = rootRt.gameObject;
+        editorRootRt = rootRt; // 上下分栏时按底部指导框高度收窄编辑器整体高度
         Image bg = editorRoot.AddComponent<Image>();
         bg.color = bgColor;
 
@@ -1470,6 +1613,10 @@ public class CodeEditorController : MonoBehaviour
         //      渲染顺序压在行号列 / 代码视口 / 滚动条 / 底部错误区之上，避免顶部被下层元素覆盖 ----
         if (titleBarRt != null)
             titleBarRt.SetAsLastSibling();
+
+        // 构建完成即按当前预留宽度 / 高度排版（教学关进入时已设为底部留白，构建后立即生效）
+        ApplyRightReservedWidth();
+        ApplyBottomReservedHeight();
     }
 
     private RectTransform CreateRect(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot)

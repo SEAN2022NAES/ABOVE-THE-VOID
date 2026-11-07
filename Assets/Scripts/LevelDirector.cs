@@ -47,8 +47,15 @@ public static class LevelDirector
                        " 个 part 章节，章节参数 n 取值范围 1~" + chapterCount + "。";
         }
 
+        // 一局结束结算：若当前正处在 Level 3，先用本局分数结算最高分再跳走
+        //   （下面会 ScoreManager.ResetAll() 把分数清零，结算必须在清零之前；其它关卡 / 主页不产生写入）
+        GameProgress.CommitCurrentLevelHighScore(ScoreManager.Instance != null ? ScoreManager.Instance.Score : 0);
+
         // 先终止上一次可能仍在进行的开场停顿，避免它在本关结束后误显示炮台 / 误开启生成
         LevelOpeningGate.Cancel();
+
+        // 离开主页进入关卡：恢复三维坐标轴显示（主页期间被 LevelPresentation.ApplyMainMenu 隐藏）
+        LevelPresentation.RestoreAxes();
 
         // 先结束可能仍在进行的「代码编辑器 C# 语法教学」（跳进 part 2 时会在下方重新开始并重置进度）
         CodeSyntaxTutorialController.End();
@@ -135,25 +142,44 @@ public static class LevelDirector
         // 计分：每次跳转关卡都重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
         ScoreManager.ResetAll();
 
+        // 生命值：每次跳转关卡都重开一局生命（默认 5 点），并清掉上一局可能残留的 Game Over 面板
+        LivesManager.ResetAll();
+
         // 鼠标左键手动激光：只有 Level 1 - Part 1（引导教学关，教学 Step.FireLaser 需要左键开火）允许，
         // 其余所有关卡（Part 2 / API 关 / Level 3 完整玩法关）一律禁用。
         // 仅影响「左键 → FireLaser」手动链路，不影响 tower.FireAtPlane 等自动化调用。
         CommandConsoleController.SetManualLaserAllowed(level, part);
 
-        // Level 3 完整玩法关：进入即自动进入 E 键时间冻结状态，并提示按下 Enter 输入代码
+        // Level 3 完整玩法关：进场必须处于「正常时间流逝 + 无代码编辑器 + 无进场代码提示」状态。
+        // 旧实现会在这里主动冻结时间并弹「按 Enter 输入代码」提示，导致从其它关卡切进来时
+        // 像是直接进入了代码模式、关掉代码后仍停在暂停；现改为强制收尾：
+        //   1) 无条件强制关闭代码编辑器（含 Part 2 / API 教学留下的编辑器），并抑制紧随其后的同一次 Enter 再次打开；
+        //   2) 清掉可能残留的进场代码提示；
+        //   3) 解除残留的 E 键时间冻结并确保 timeScale = 1（正常计时、方块计时器正常走）。
+        CodeEditorController editor = Object.FindObjectOfType<CodeEditorController>();
+        if (editor != null)
+        {
+            editor.HideEnterPrompt();
+            if (level3)
+                editor.ForceCloseSelf(); // 静态入口 ForceCloseIfOpen() 会另找实例，这里直接对已取到的实例收尾
+        }
         if (level3)
         {
             if (player != null)
-                player.SetTimeFrozen(true);
-            CodeEditorController editor = Object.FindObjectOfType<CodeEditorController>();
-            if (editor != null)
-                editor.ShowEnterPrompt();
+                player.SetTimeFrozen(false);
+            Time.timeScale = 1f;
         }
 
         // Level 3 完整玩法关：进入后先停顿 5 秒（期间不显示炮台、不生成方块），
         // 停顿结束后再开始生成方块（修复从 Level 1 跳转时炮台立刻出现、方块瞬间生成的问题）
         if (level3)
             BeginFullLevelOpening();
+
+        // 断点续玩：位置成功应用后写入存档（关卡 + 分区 + 章节），并 PlayerPrefs.Save()
+        //   · /level 跳关优先级最高：这里用「本次跳关参数」无条件覆盖旧存档，跳关后的位置就是新的续玩点；
+        //   · 主页点击关卡进入时读的就是这份刚被覆盖的存档，因此绝不可能出现「跳关后又被旧存档拽回旧位置」；
+        //   · 无章节拆分的分区（Level 1 - Part 1、Level 3 - Part 1）section 存 0，表示从该分区开头进入。
+        GameProgress.SaveResume(level, part, useSection ? section : 0);
 
         Debug.Log("[LevelDirector] 已跳转 Level " + level + " - Part " + part +
                   (useSection ? "，第 " + section + " 章" : string.Empty));
