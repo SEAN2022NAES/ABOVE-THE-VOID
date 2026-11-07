@@ -538,8 +538,8 @@ public class MainMenuController : MonoBehaviour
 
         if (hintText != null)
             hintText.text = zh
-                ? "主页：` 打开/收起指令框（ESC 无反应）· 进入关卡后：Q 自由视角 · WASD 横移 · Space/C 上下 · E 冻结 · ESC 暂停"
-                : "Home: ` opens/closes the console (ESC does nothing) · In level: Q free view · WASD move · Space/C up/down · E freeze time · ESC pause";
+                ? "主页：` 打开指令框（打开后 ` 为输入字符，ESC 关闭；主页 ESC 无反应）· 进入关卡后：Q 自由视角 · WASD 横移 · Space/C 上下 · E 冻结 · ESC 暂停"
+                : "Home: ` opens the console (` types into the input while open, ESC closes; ESC does nothing on home) · In level: Q free view · WASD move · Space/C up/down · E freeze time · ESC pause";
 
         // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → 微软雅黑，英文/数字 → Consolas）
         RefreshTextFonts();

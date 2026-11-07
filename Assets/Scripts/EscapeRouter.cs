@@ -6,7 +6,8 @@ using UnityEngine;
 ///   2. 指令框打开            → 关闭指令框（按打开前的状态还原：主页打开的回到主页、游戏内打开的回到游戏）；
 ///   3. Game Over 面板显示    → 返回主菜单；
 ///   4. 主页可见              → 直接吞掉 ESC，完全无反应（不暂停、不开指令框、不弹 UI、不改 timeScale）；
-///                              主页调出指令框的唯一入口是 ` 键（BackQuote）；
+///                              主页调出指令框的唯一入口是 ` 键（BackQuote，仅用于打开；
+///                              指令框已打开时 ` 作为普通字符输入输入框，关闭只走 ESC）；
 ///   5. 其余（关卡内）        → 切换暂停面板（打开 / 收起，保持原有行为）。
 /// 其余组件（PlayerCameraController / CommandConsoleController / CodeEditorController / LivesManager）
 /// 不再各自读取 ESC，避免一次按键同时触发两个行为（例如「关掉指令框」又顺手把游戏暂停）。
@@ -127,7 +128,7 @@ public class EscapeRouter : MonoBehaviour
         }
 
         // 4) 主页：ESC 完全无反应（不暂停、不开指令框、不弹 UI、不改 timeScale），直接吞掉并终止派发
-        //    主页调出指令框的唯一入口是 `（BackQuote，由 CommandConsoleController.openKey 处理）
+        //    主页调出指令框的唯一入口是 `（BackQuote，由 CommandConsoleController.openKey 处理，且只在指令框关闭时打开）
         if (mainMenu != null && mainMenu.IsMenuVisible)
         {
             LastTarget = EscapeTarget.MainMenu;

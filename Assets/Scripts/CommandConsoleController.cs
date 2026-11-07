@@ -6,7 +6,8 @@ using UnityEngine.EventSystems;
 
 /// <summary>
 /// 开发者指令框（Dev Console）：
-///   - 按 `（BackQuote）键打开 / 再按 ` 关闭，ESC 关闭（输入框聚焦时 Enter 用于提交）；
+///   - 按 `（BackQuote）键打开；打开后 ` 不再用于关闭，而是作为普通字符输入到输入框；
+///     关闭只保留 ESC 一条路径（输入框聚焦时 Enter 用于提交）；
 ///     其中 ESC 的判定统一在 EscapeRouter。主页调出本指令框的唯一入口是 ` 键
 ///     （主页按 ESC 完全无反应，既不暂停也不会打开本指令框）；
 ///   - 识别「开发者指令」：/level &lt;关卡&gt; &lt;部分&gt; 跳转关卡分区（当前已实现 level 1 - part 1），
@@ -29,7 +30,7 @@ public class CommandConsoleController : MonoBehaviour
     }
 
     [Header("按键")]
-    [Tooltip("打开 / 切换指令框（` 键）")]
+    [Tooltip("打开指令框（` 键；仅在指令框关闭时生效，打开后 ` 作为普通字符输入，关闭只能用 ESC）")]
     public KeyCode openKey = KeyCode.BackQuote;
     // 关闭键固定为 ESC，且 ESC 的判定统一在 EscapeRouter（全项目唯一 ESC 入口），本组件不再自行监听
 
@@ -92,6 +93,8 @@ public class CommandConsoleController : MonoBehaviour
     // 打开指令框前的 timeScale（主页打开时原样还原，保证「收起后状态与按 ESC 前一致」）
     private float timeScaleBeforeOpen = 1f;
     private MainMenuController mainMenu;
+    // 打开指令框的那一帧号：该帧内 openKey 自身产生的字符不交给输入框，避免「开框瞬间自带一个 `」
+    private int suppressOpenKeyCharFrame = -1;
 
     /// <summary>/lock 二次确认窗口时长（秒，真实时间）：窗口内再次输入 /lock 才真正清档。</summary>
     private const float LockConfirmWindowSeconds = 15f;
@@ -122,25 +125,16 @@ public class CommandConsoleController : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(openKey))
+        // ` 键只在「指令框关闭」时用于打开：打开后不再监听该键，直接让 InputField 把它当普通字符插入，
+        // 关闭只保留 ESC 一条路径（统一由 EscapeRouter 做唯一优先级判定后调用 Close()），
+        // 避免同一次按键既被本组件当成开关、又被输入框当成字符（两处消费）。
+        if (!IsOpen && Input.GetKeyDown(openKey))
         {
-            if (IsOpen)
-            {
-                // 打开状态下按 ` 键直接关闭；若 InputField 已捕获到反引号字符则先剔除
-                if (IsInputFocused() && !string.IsNullOrEmpty(inputField.text) &&
-                    inputField.text.EndsWith("`", System.StringComparison.Ordinal))
-                    inputField.text = inputField.text.Substring(0, inputField.text.Length - 1);
-                Close();
-            }
-            else
-            {
-                Open();
-            }
+            // 开框这一帧的同一次按键不应该再被输入框吃成字符（否则开框瞬间输入框自带一个 `）
+            suppressOpenKeyCharFrame = Time.frameCount;
+            Open();
             return;
         }
-
-        // ESC 关闭指令框不在这里处理：统一由 EscapeRouter 做唯一优先级判定后调用 Close()，
-        // 避免指令框与暂停逻辑各自读取 ESC 造成一次按键触发两个行为。
 
         // 鼠标左键发射激光：指令框关闭、未被外部模态占用（如主页）、非暂停状态、
         // 且当前关卡允许手动激光（Level 3 完整玩法关闭，改由代码编辑器 / 炮台接管）时有效
@@ -224,7 +218,7 @@ public class CommandConsoleController : MonoBehaviour
             SetCursorLocked(false);
         }
 
-        AppendOutput("开发者指令框已打开。输入 help 查看可用指令，Enter 提交，ESC 或 ` 关闭。");
+        AppendOutput("开发者指令框已打开。输入 help 查看可用指令，Enter 提交，ESC 关闭。");
         Debug.Log("[CommandConsole] 指令框打开" + (menuMode ? "（主页模式）" : string.Empty));
     }
 
@@ -293,6 +287,21 @@ public class CommandConsoleController : MonoBehaviour
             es.SetSelectedGameObject(null);
 
         Debug.Log("[CommandConsole] 指令框关闭");
+    }
+
+    /// <summary>openKey 对应的可打印字符（仅用于「开框那一帧不重复输入」保护；非可打印键返回 '\0'）。</summary>
+    private char OpenKeyChar => openKey == KeyCode.BackQuote ? '`' : '\0';
+
+    /// <summary>
+    /// 输入框字符过滤（InputField.onValidateInput）：只做一件事 —— 拦掉「按下 openKey 打开指令框」那一帧
+    /// 由同一个按键产生的 ` / ~ 字符；其余字符（含指令框打开后正常按 ` 输入）一律放行。
+    /// </summary>
+    private char ValidateInputCharacter(string text, int charIndex, char addedChar)
+    {
+        if (suppressOpenKeyCharFrame == Time.frameCount && OpenKeyChar != '\0' &&
+            (addedChar == '`' || addedChar == '~'))
+            return '\0';
+        return addedChar;
     }
 
     private bool IsInputFocused()
@@ -776,7 +785,7 @@ public class CommandConsoleController : MonoBehaviour
         panelImg.color = panelColor;
 
         // ---- 标题 ----
-        Text title = CreateText("Title", panelRt, "开发者指令框 (Dev Console)  -  ` 开关 / Enter 提交 / ESC 关闭", titleFontSize, Color.white, TextAnchor.MiddleLeft);
+        Text title = CreateText("Title", panelRt, "开发者指令框 (Dev Console)  -  ESC 关闭 / Enter 提交", titleFontSize, Color.white, TextAnchor.MiddleLeft);
         RectTransform titleRt = title.rectTransform;
         titleRt.anchorMin = new Vector2(0f, 1f);
         titleRt.anchorMax = new Vector2(1f, 1f);
@@ -825,6 +834,8 @@ public class CommandConsoleController : MonoBehaviour
         input.placeholder = placeholder;
 
         input.lineType = InputField.LineType.SingleLine;
+        // 字符过滤只用于「开框那一帧不把 ` 吃成字符」，其余输入（含打开状态下按 ` ）全部放行
+        input.onValidateInput = ValidateInputCharacter;
         input.onSubmit.AddListener(OnCommandSubmitted);
         inputField = input;
     }

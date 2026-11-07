@@ -1,5 +1,5 @@
 %YAML 1.1
-%TAG !u! tag:yousandi.cn,2023:
+%TAG !u! tag:unity3d.com,2011:
 --- !u!30 &1
 GraphicsSettings:
   m_ObjectHideFlags: 0
@@ -72,7 +72,6 @@ GraphicsSettings:
   m_GenerateGeometryBuffer: 0
   m_UseGBufferCluster: 0
   m_EnableGDRP: 0
-  m_EnableTuanjieGI: 0
   m_VariableRateShadingMode: 0
   m_RelativeRateShadingLevel: 1
   m_MaxDistanceRatio: 500

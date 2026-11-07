@@ -1,5 +1,5 @@
 %YAML 1.1
-%TAG !u! tag:yousandi.cn,2023:
+%TAG !u! tag:unity3d.com,2011:
 --- !u!47 &1
 QualitySettings:
   m_ObjectHideFlags: 0
@@ -360,7 +360,6 @@ QualitySettings:
     LinuxHeadlessSimulation: 5
     Nintendo Switch: 5
     Nintendo Switch 2: 5
-    OpenHarmony: 2
     PS4: 5
     PS5: 5
     PlayableAds: 2

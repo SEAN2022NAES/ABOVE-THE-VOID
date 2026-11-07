@@ -74,6 +74,7 @@ public class CodeEditorController : MonoBehaviour
     private const int CodeFontSizeMax = 40;   // Ctrl+滚轮缩放的字体上限
     private float codeContentHeight;          // 代码区内容高度缓存（滚动范围计算不依赖 rect 滞后值）
     private float codeContentWidth;           // 代码区内容宽度缓存（横向滚动范围，长行不换行时大于视口宽）
+    private Vector2 lastViewportSize;         // 上次代码视口尺寸（窗口 / 编辑器尺寸变化时重算内容尺寸与滚动范围）
     private RectTransform enterPromptRt; // Level 3 进场「按 Enter 输入代码」提示
     private int lastCaretPos = -1;       // 上次光标位置（轮询检测移动 / 换行）
     // 拖拽选择越界抑制：指针仍在代码视口内时记录的最后一个合法选区位置
@@ -263,6 +264,7 @@ public class CodeEditorController : MonoBehaviour
         // 编辑器打开时：光标位置变化 → 刷新状态栏并自动滚动跟随；滚轮在代码视口内翻页
         if (IsOpen)
         {
+            RefreshContentOnViewportResize(); // 窗口 / 编辑器尺寸变化后先重算内容尺寸与滚动范围
             int cp = inputField.caretPosition;
             int prevCaret = lastCaretPos; // 上一帧光标（方向键横向浏览：行尾 / 行首判断基准）
             if (cp != lastCaretPos)
@@ -292,7 +294,7 @@ public class CodeEditorController : MonoBehaviour
             // Ctrl+Z / Ctrl+Y（撤销 / 重做）：自实现栈兜底，失焦屏蔽原生撤销防止双触发
             HandleUndoRedoShortcuts();
 
-            UpdateScrollBars(); // 滚动条滑块尺寸 / 位置随滚动状态每帧同步（内容不足时隐藏滑块）
+            UpdateScrollBars(); // 滑块常驻隐藏（防御性兜底：任何代码路径都不会让它重新显示）
         }
 
         // 用户代码每帧驱动炮台（编辑器关闭且游戏未暂停时）
@@ -750,16 +752,42 @@ public class CodeEditorController : MonoBehaviour
     }
 
     /// <summary>解析 netstandard.dll 编译引用路径：优先编辑器 Mono 运行时 Facades（与运行时同源同版本、类型转发不产生 CS0433），
-    /// 其次 NetStandard 参考程序集；全部不存在返回 null。</summary>
+    /// 其次 NetStandard 参考程序集；全部不存在返回 null。
+    /// 编辑器安装根目录经 EditorApplication.applicationContentsPath 动态取得（反射读取，避免运行时程序集依赖 UnityEditor）。</summary>
     private static string ResolveNetStandardPath()
     {
-        string[] candidates = new string[]
+        string editorContents = null;
+        try
         {
-            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\MonoBleedingEdge\lib\mono\unityjit-win32\Facades\netstandard.dll",
-            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\MonoBleedingEdge\lib\mono\net_4_x-win32\Facades\netstandard.dll",
-            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\MonoBleedingEdge\lib\mono\4.8-api\Facades\netstandard.dll",
-            @"D:\Download\Tuanjie Hub\2022.3.62t17\Editor\Data\NetStandard\ref\2.1.0\netstandard.dll",
-        };
+            System.Type editorApplicationType = System.Type.GetType("UnityEditor.EditorApplication, UnityEditor");
+            if (editorApplicationType != null)
+            {
+                System.Reflection.PropertyInfo contentsProperty = editorApplicationType.GetProperty("applicationContentsPath");
+                if (contentsProperty != null)
+                    editorContents = contentsProperty.GetValue(null, null) as string;
+            }
+        }
+        catch (System.Exception)
+        {
+            editorContents = null;
+        }
+
+        string[] candidates;
+        if (string.IsNullOrEmpty(editorContents))
+        {
+            candidates = new string[0];
+        }
+        else
+        {
+            string monoRoot = System.IO.Path.Combine(editorContents, "MonoBleedingEdge" + System.IO.Path.DirectorySeparatorChar + "lib" + System.IO.Path.DirectorySeparatorChar + "mono");
+            candidates = new string[]
+            {
+                System.IO.Path.Combine(monoRoot, "unityjit-win32" + System.IO.Path.DirectorySeparatorChar + "Facades" + System.IO.Path.DirectorySeparatorChar + "netstandard.dll"),
+                System.IO.Path.Combine(monoRoot, "net_4_x-win32" + System.IO.Path.DirectorySeparatorChar + "Facades" + System.IO.Path.DirectorySeparatorChar + "netstandard.dll"),
+                System.IO.Path.Combine(monoRoot, "4.8-api" + System.IO.Path.DirectorySeparatorChar + "Facades" + System.IO.Path.DirectorySeparatorChar + "netstandard.dll"),
+                System.IO.Path.Combine(editorContents, "NetStandard" + System.IO.Path.DirectorySeparatorChar + "ref" + System.IO.Path.DirectorySeparatorChar + "2.1.0" + System.IO.Path.DirectorySeparatorChar + "netstandard.dll"),
+            };
+        }
         for (int i = 0; i < candidates.Length; i++)
         {
             if (System.IO.File.Exists(candidates[i]))
@@ -990,46 +1018,19 @@ public class CodeEditorController : MonoBehaviour
         codeRt.sizeDelta = new Vector2(contentW, codeRt.sizeDelta.y);
     }
 
-    /// <summary>滚动条滑块尺寸与位置随滚动状态同步：滑块长度 ∝ 视口 / 内容；内容不溢出时隐藏滑块。</summary>
+    /// <summary>
+    /// 滚动滑块常驻隐藏：竖向 / 横向滑块在任何窗口尺寸、任何内容长度下都不显示（需求：永不出现滚动滑块）。
+    /// 滑块是叠加在视口上的绝对定位节点（无 LayoutGroup），隐藏后不占布局、不挤压视口宽度，也不留空白占位。
+    /// 滚动能力本身保留：滚轮翻页 HandleWheelScroll、Shift+滚轮横向、方向键横向浏览、透明轨道点击跳转，
+    /// 依靠 RectMask2D 裁剪的视口 + 内容偏移实现，不依赖滑块存在。
+    /// 用 activeSelf 判断后再 SetActive，避免每帧重复触发 Canvas 重建。
+    /// </summary>
     private void UpdateScrollBars()
     {
-        if (codeRt == null || codeViewportRt == null)
-            return;
-        if (vScrollTrackRt != null && vScrollHandleRt != null)
-        {
-            float trackH = vScrollTrackRt.rect.height;
-            float maxY = GetScrollMaxY();
-            if (maxY <= 0.01f || codeContentHeight <= codeViewportRt.rect.height + 0.01f)
-            {
-                vScrollHandleRt.gameObject.SetActive(false);
-            }
-            else
-            {
-                vScrollHandleRt.gameObject.SetActive(true);
-                float handleH = Mathf.Max(24f, trackH * codeViewportRt.rect.height / codeContentHeight);
-                vScrollHandleRt.sizeDelta = new Vector2(vScrollHandleRt.sizeDelta.x, handleH);
-                float usable = Mathf.Max(1f, trackH - handleH);
-                vScrollHandleRt.anchoredPosition = new Vector2(0f, -Mathf.Clamp01(codeRt.anchoredPosition.y / maxY) * usable);
-            }
-        }
-        if (hScrollTrackRt != null && hScrollHandleRt != null)
-        {
-            float trackW = hScrollTrackRt.rect.width;
-            float maxX = GetScrollMaxX();
-            if (maxX <= 0.01f || codeContentWidth <= codeViewportRt.rect.width + 0.01f)
-            {
-                hScrollHandleRt.gameObject.SetActive(false);
-            }
-            else
-            {
-                hScrollHandleRt.gameObject.SetActive(true);
-                float handleW = Mathf.Max(24f, trackW * codeViewportRt.rect.width / codeContentWidth);
-                hScrollHandleRt.sizeDelta = new Vector2(handleW, hScrollHandleRt.sizeDelta.y);
-                float usable = Mathf.Max(1f, trackW - handleW);
-                float scrollX = -codeRt.anchoredPosition.x;
-                hScrollHandleRt.anchoredPosition = new Vector2(Mathf.Clamp01(scrollX / maxX) * usable, 0f);
-            }
-        }
+        if (vScrollHandleRt != null && vScrollHandleRt.gameObject.activeSelf)
+            vScrollHandleRt.gameObject.SetActive(false);
+        if (hScrollHandleRt != null && hScrollHandleRt.gameObject.activeSelf)
+            hScrollHandleRt.gameObject.SetActive(false);
     }
 
     /// <summary>滚动条拖动 / 轨道点击回调：axis 0=竖 1=横；t 为归一化 0~1 滚动进度。</summary>
@@ -1081,6 +1082,23 @@ public class CodeEditorController : MonoBehaviour
         float scrollX = Mathf.Clamp(-codeRt.anchoredPosition.x, 0f, maxX);
         ApplyScrollX(scrollX);
         UpdateScrollBars();
+    }
+
+    /// <summary>
+    /// 代码视口尺寸变化（拖拽 Game 视图 / 窗口缩放 / 全屏切换 / 教学关上下分栏改变编辑器高度）时重算内容尺寸：
+    /// codeContentHeight 只在输入 / 滚轮等事件里同步，若不做尺寸检测，缩小窗口后该缓存仍是旧视口的大值，
+    /// 与新的更小视口相比得出「内容溢出」的假象——滚动范围被人为放大，滚动后只能看到空白区域。
+    /// 每帧仅比较两个 float，无分配、无重建。
+    /// </summary>
+    private void RefreshContentOnViewportResize()
+    {
+        if (codeViewportRt == null)
+            return;
+        Vector2 size = codeViewportRt.rect.size;
+        if (Mathf.Abs(size.x - lastViewportSize.x) < 0.5f && Mathf.Abs(size.y - lastViewportSize.y) < 0.5f)
+            return;
+        lastViewportSize = size;
+        SyncContentHeightAndScroll(); // 按新视口重算内容高宽，并把滚动偏移钳制回有效范围
     }
 
     /// <summary>滚轮翻页：鼠标在代码视口内时，按约 2 倍行高滚动；向上内容下移显示上方，向下内容上移显示下方。</summary>
@@ -1537,6 +1555,8 @@ public class CodeEditorController : MonoBehaviour
         Image vHandleImg = vScrollHandleRt.gameObject.AddComponent<Image>();
         vHandleImg.color = new Color(0.42f, 0.42f, 0.44f, 0.9f);
         vScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>().Setup(vScrollTrackRt, true, t => SetScrollFromBar(0, t));
+        // 滑块自建即隐藏（需求：任何窗口尺寸下都不显示滑块）；轨道本身透明且保留点击跳转能力
+        vScrollHandleRt.gameObject.SetActive(false);
 
         // 横条：贴底部错误区上缘（高 10，左 70 对齐代码视口左缘、右 16 留出竖条空间），轨道底色同样透明
         hScrollTrackRt = CreateRect("HScrollTrack", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(1834f, 10f), new Vector2(0f, 1f));
@@ -1559,6 +1579,7 @@ public class CodeEditorController : MonoBehaviour
         Image hHandleImg = hScrollHandleRt.gameObject.AddComponent<Image>();
         hHandleImg.color = new Color(0.42f, 0.42f, 0.44f, 0.9f);
         hScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>().Setup(hScrollTrackRt, false, t => SetScrollFromBar(1, t));
+        hScrollHandleRt.gameObject.SetActive(false); // 同上：横向滑块常驻隐藏
 
         // ---- 底部错误 / 状态区（高 160px） ----
         RectTransform bottomRt = CreateRect("ErrorZone", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 160f), new Vector2(0.5f, 0f));

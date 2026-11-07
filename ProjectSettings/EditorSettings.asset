@@ -1,5 +1,5 @@
 %YAML 1.1
-%TAG !u! tag:yousandi.cn,2023:
+%TAG !u! tag:unity3d.com,2011:
 --- !u!159 &1
 EditorSettings:
   m_ObjectHideFlags: 0
@@ -23,16 +23,12 @@ EditorSettings:
   m_EnableTextureStreamingInPlayMode: 1
   m_EnableEditorAsyncCPUTextureLoading: 0
   m_AsyncShaderCompilation: 1
-  m_DllEncryptionRootInEditor: 
-  m_EnableDllEncryptionInEditor: 0
   m_PrefabModeAllowAutoSave: 1
   m_EnterPlayModeOptionsEnabled: 0
   m_EnterPlayModeOptions: 3
   m_GameObjectNamingDigits: 1
   m_GameObjectNamingScheme: 0
   m_AssetNamingUsesSpace: 1
-  m_EnableStorageArtifactReferencesInDB: 0
-  m_EnableStorageNativeAssetDataInLibrary: 0
   m_InspectorUseIMGUIDefaultInspector: 0
   m_InstantAsset: 0
   m_PreloadObjectForAssetBundle: 0

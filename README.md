@@ -9,11 +9,29 @@ AIGC:
     ReservedCode2: t64hLD960epjqYxq13Ff3Z+90HlWeNxWGKKuulFbBBs8MiRMD4edW2bx/an2+vGkJFkRDVLaobX1srjx1iZzPJMxpx4pM7Jm0gciRAVFFDdHXMLoUxtckki8bTVTJAtilLDwRSuKcizKzhXlGtjRNIMwDHhiSImnlypP20seeB2Dv0XL6gdDASHgTsU=
 ---
 
-# ABOVE THE VOID - Tuanjie 3D Coordinate System Framework
+# ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.1.5**
+Current version: **v0.2.0**
 
-### v0.1.5
+### v0.2.0
+
+**Engine migration**
+
+- The project moved from Tuanjie `1.11.0` on `2022.3.62t17` to Unity `2022.3.62f3c1` (changeset `1623fc0bbb97`); `ProjectSettings/ProjectVersion.txt` now pins the Unity editor and the Tuanjie version key is gone.
+- Serialized YAML headers were rewritten from `tag:yousandi.cn,2023` to `tag:unity3d.com,2011`, and the asset `.meta` GUIDs were regenerated as unique 32-character hex values, so Unity imports the assets as native ones instead of re-importing them as foreign files.
+- Tuanjie-only project settings (`AutoStreamingSettings`, `TextureManagerSettings`, `ThreadInfoSettings`) were removed, together with the OpenHarmony platform fields, the editor encryption keys, and the WeChat mini-game slimming block.
+- `Packages/manifest.json` and `Packages/packages-lock.json` no longer reference `com.unity.modules.infinity`.
+- The code tower compiler toolchain is resolved at runtime from `EditorApplication.applicationContentsPath` instead of a hard-coded Tuanjie install path.
+
+**Code editor**
+
+- The hand-written scrollbars were rebuilt: both handles stay hidden and the content height is refreshed whenever the viewport resizes, so a paused editor (time scale 0) no longer shows a slider over empty space.
+
+**Developer console**
+
+- The backquote key now only opens the console: while the console is open the character is typed into the input field instead of closing it, and ESC remains the only way to close it.
+
+### v0.1.4
 
 **Lives and defeat**
 
@@ -58,7 +76,7 @@ Current version: **v0.1.5**
 - The code syntax tutorial moved to a top and bottom split: the editor takes the upper block and the guide panel spans the bottom of the screen, each sized to align with the other.
 - The developer overlay runtime now accumulates unscaled time, so it keeps running while the game is paused.
 
-### v0.1.4
+### v0.1.3
 
 - Fixed the level opening hold: entering Level 3 from another level with `/level` no longer spawns blocks immediately; the opening pause is now enforced by a hard timer on the spawner.
 - Added `LevelOpeningGate`, `LevelPresentation`, and `ScreenFade` for unified level openings, presentation state, and fade transitions.
@@ -72,7 +90,7 @@ Current version: **v0.1.5**
 - The `/level` developer command now accepts an optional third parameter to jump directly to a chapter.
 - Refined Level 1 tutorial hints and transitions.
 
-### v0.1.3
+### v0.1.2
 
 **Scoring**
 
@@ -97,7 +115,7 @@ Current version: **v0.1.5**
 - Added `GetAllObjects()` returning `TowerObjectInfo` records (index, type, HP, position, velocity, params, volume, initial volume, max layers, size) so user code can choose targets by value.
 - Exposed `FireAtPlane(A, B, C, D)` and `GetFireCooldown()` for scripted aiming and rate control.
 
-### v0.1.2
+### v0.1.1
 
 **Code editor**
 
@@ -121,7 +139,7 @@ Current version: **v0.1.5**
 - Public API for user code: `Position`, `AimDirection`, `CanFire`, `Cooldown01`, `CooldownLeft`, `NearestBlock`, `ActiveBlockCount`, `RandomRange`, `Log`, `DrawAimLine`, `SetVisualVisible`, `Aim`, and `FireLaser`.
 - Added `UIFitScreen` to keep the new editor and tower UI fitted to the screen; hit indicator, crosshair, overlay, spawner, and level UI were updated to coexist with the editor.
 
-### v0.1.1
+### v0.1.0
 
 **Menus and language**
 
@@ -143,7 +161,7 @@ Current version: **v0.1.5**
 - The top time hint is hidden in Level 1 - Part 1 and kept for later level parts.
 - Added `AutoLaserExample` as a sample automatic firing script and improved block hit feedback for it.
 
-### v0.0.3
+### v0.0.2
 
 **Blocks**
 
@@ -159,7 +177,7 @@ Current version: **v0.1.5**
 - Added the laser destruction hooks `ApplyLaserHit` and `DestroyBlock` with configurable damage and a destruction reason, so the console and future towers can destroy blocks.
 - Updated the coordinate axes drawer and camera controller so the new blocks and feedback render correctly in both flight modes.
 
-### v0.0.2
+### v0.0.1
 
 **Developer tools**
 
@@ -178,7 +196,7 @@ Current version: **v0.1.5**
 
 The core experience includes a 3D coordinate system, an origin camera, mouse look, settings, pause support, and two free-flight modes.
 
-### v0.0.1
+### v0.0.0
 
 **Foundation**
 
@@ -230,8 +248,8 @@ The core experience includes a 3D coordinate system, an origin camera, mouse loo
 
 ## 2. Requirements
 
-- Tuanjie **1.11.0**, based on the `2022.3.62t17` editor line.
-- Built-in Render Pipeline or URP as supported by the installed Tuanjie editor.
+- Unity **2022.3.62f3c1** (revision `1623fc0bbb97`).
+- Built-in Render Pipeline or URP as supported by the installed Unity editor.
 - The project uses the legacy Input Manager API (`Input.GetAxis`, `Input.GetKey`).
 - Set `Project Settings -> Player -> Active Input Handling` to **Both** or **Input Manager**.
 
@@ -269,12 +287,12 @@ ABOVE THE VOID/
 
 ## 4. Quick Start
 
-1. Open this folder with the Tuanjie editor or its project manager.
+1. Open this folder with Unity Hub or the Unity editor.
 2. The editor automatically creates and opens `Assets/Scenes/Main.unity` when the scene does not exist.
 3. Press Play to open the main menu.
 4. Choose a language and start Level 1. The tutorial controls the initial spawning sequence.
 
-If the scene is not generated automatically, use `ABOVE THE VOID -> Setup Game Scene` in the Tuanjie editor. The tool enables the required input handling, creates the scene, attaches `GameBootstrap`, and saves `Assets/Scenes/Main.unity`.
+If the scene is not generated automatically, use `ABOVE THE VOID -> Setup Game Scene` in the Unity editor. The tool enables the required input handling, creates the scene, attaches `GameBootstrap`, and saves `Assets/Scenes/Main.unity`.
 
 For a manual setup, create an empty scene, add an empty GameObject with `GameBootstrap.cs`, and press Play. The bootstrap creates or reuses the Main Camera, coordinate axes, player controller, UI, menu, tutorial, and block systems.
 
@@ -303,7 +321,7 @@ For a manual setup, create an empty scene, add an empty GameObject with `GameBoo
 | F1 | Enter or leave camera-relative free-flight mode. |
 | E | Freeze or resume time. |
 | ESC | Pause or resume gameplay. |
-| `~` | Open or close the developer console. |
+| `~` | Open the developer console (ESC closes it). |
 | Enter | Open or close the code editor. |
 | Settings button | Open the pause/settings panel. |
 
