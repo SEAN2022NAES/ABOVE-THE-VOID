@@ -32,7 +32,7 @@ public class MainMenuController : MonoBehaviour
     private Text bodyText;
     private Text authorText;
     private Text levelTitleText;
-    private Text hintText;
+
     private Text level1Label;
     private Text level2Label;
     private Text level3Label;
@@ -352,10 +352,6 @@ public class MainMenuController : MonoBehaviour
         CreateLevelButton("Level2", new Vector2(0f, -382f), 2, out level2Label);
         CreateLevelButton("Level3", new Vector2(280f, -382f), 3, out level3Label);
 
-        // ---- 底部说明 ----
-        hintText = CreateText("Hint", root.transform, "", 20, new Color(0.6f, 0.65f, 0.75f, 0.9f), TextAnchor.MiddleCenter, false);
-        SetRect(hintText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -480f), new Vector2(1800f, 40f));
-
         // 初始填充当前语言文案
         RefreshLanguageTexts();
     }
@@ -536,11 +532,6 @@ public class MainMenuController : MonoBehaviour
         // 关卡按钮文案 + 解锁/锁定状态一起刷新（未解锁附「锁定 / LOCKED」标注）
         RefreshLevelLocks();
 
-        if (hintText != null)
-            hintText.text = zh
-                ? "主页：` 打开指令框（打开后 ` 为输入字符，ESC 关闭；主页 ESC 无反应）· 进入关卡后：Q 自由视角 · WASD 横移 · Space/C 上下 · E 冻结 · ESC 暂停"
-                : "Home: ` opens the console (` types into the input while open, ESC closes; ESC does nothing on home) · In level: Q free view · WASD move · Space/C up/down · E freeze time · ESC pause";
-
         // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → 微软雅黑，英文/数字 → Consolas）
         RefreshTextFonts();
 
@@ -566,8 +557,6 @@ public class MainMenuController : MonoBehaviour
             level2Label.font = UIFontHelper.LoadForText(level2Label.text, level2Label.fontSize);
         if (level3Label != null)
             level3Label.font = UIFontHelper.LoadForText(level3Label.text, level3Label.fontSize);
-        if (hintText != null)
-            hintText.font = UIFontHelper.LoadForText(hintText.text, hintText.fontSize);
     }
 
     /// <summary>高亮当前语言按钮（选中项用强调色，未选中灰白）。</summary>

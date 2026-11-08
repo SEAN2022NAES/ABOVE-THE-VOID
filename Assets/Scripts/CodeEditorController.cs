@@ -367,6 +367,11 @@ public class CodeEditorController : MonoBehaviour
     // 编辑器整体根节点（用于上下分栏时收窄高度）
     private RectTransform editorRootRt;
 
+    // 底部错误 / 状态区底板（全屏时为深色分隔带；上下分栏教学时与代码区同色，避免两块之间浮出黑色横带）
+    private Image consoleBg;
+    private static readonly Color consoleBgFullColor = new Color(0.09f, 0.09f, 0.09f, 1f);
+    private static readonly Color consoleBgSplitColor = new Color(0.118f, 0.118f, 0.118f, 1f);
+
     // 强制关闭后忽略一次「Enter 打开」输入：避免跳关指令框里那一下 Enter 又在同帧 / 下一帧把编辑器打开
     private bool suppressOpenUntilRelease;
 
@@ -386,8 +391,14 @@ public class CodeEditorController : MonoBehaviour
         if (editorRootRt == null)
             return;
 
-        editorRootRt.offsetMin = new Vector2(0f, bottomReservedHeight);
+        // 上下分栏时下边缘向指导框方向多探 1px：即使浮点取整，两块之间也不会露出任何缝隙 / 黑边
+        float bottomInset = bottomReservedHeight > 0f ? bottomReservedHeight - 1f : 0f;
+        editorRootRt.offsetMin = new Vector2(0f, bottomInset);
         editorRootRt.offsetMax = Vector2.zero;
+
+        // 分栏模式：底部错误区底板改成与代码区同色，代码区与指导框之间不再出现一条深色「黑色横带」
+        if (consoleBg != null)
+            consoleBg.color = bottomReservedHeight > 0f ? consoleBgSplitColor : consoleBgFullColor;
 
         UpdateScrollBars(); // 视口高度变化后重算竖向滚动条的滑块长度与位置
     }
@@ -635,13 +646,17 @@ public class CodeEditorController : MonoBehaviour
                         if (e.IsWarning)
                             continue;
                         int userLine = e.Line - userCodeStartLine;
-                        Debug.LogError("[CodeEditor] 编译错误 模板行 " + e.Line + " / 用户代码第 " + userLine + " 行,第 " + e.Column + " 列：CS" + e.ErrorNumber + " " + e.ErrorText);
+                        // mcs/csc 的 ErrorNumber 自带 "CS" 前缀，这里统一掉，避免显示成 CSCS0103
+                        string errNo = e.ErrorNumber ?? string.Empty;
+                        if (errNo.StartsWith("CS", System.StringComparison.OrdinalIgnoreCase))
+                            errNo = errNo.Substring(2);
+                        Debug.LogError("[CodeEditor] 编译错误 模板行 " + e.Line + " / 用户代码第 " + userLine + " 行,第 " + e.Column + " 列：CS" + errNo + " " + e.ErrorText);
                         sb.Append(Localization.Pick("第 ", "L"))
                           .Append(userLine)
                           .Append(Localization.Pick(" 行,第 ", ", C"))
                           .Append(e.Column)
                           .Append(Localization.Pick(" 列：", ": "))
-                          .Append("CS").Append(e.ErrorNumber).Append(' ').Append(e.ErrorText)
+                          .Append("CS").Append(errNo).Append(' ').Append(e.ErrorText)
                           .Append('\n');
                         shown++;
                         if (shown >= 20)
@@ -1589,7 +1604,8 @@ public class CodeEditorController : MonoBehaviour
         bottomRt.anchoredPosition = Vector2.zero;
         bottomRt.sizeDelta = new Vector2(0f, 160f);
         Image bottomBg = bottomRt.gameObject.AddComponent<Image>();
-        bottomBg.color = new Color(0.09f, 0.09f, 0.09f, 1f);
+        bottomBg.color = consoleBgFullColor;
+        consoleBg = bottomBg;
 
         errorListText = CreateText("ErrorList", bottomRt, "", errorFontSize, errorColor, TextAnchor.UpperLeft);
         RectTransform errRt = errorListText.rectTransform;

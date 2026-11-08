@@ -11,7 +11,29 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.0**
+Current version: **v0.2.1**
+
+### v0.2.1
+
+**Syntax tutorial layout**
+
+- The tutorial split is now a fixed 50/50 split: the code editor always takes the top half of the workspace and the guide panel the bottom half, whatever the window size and whatever the task text length, and the guide body font shrinks step by step (`18` down to `13`) when the text does not fit instead of growing the panel.
+- A window resize recomputes the split, so the two halves stay exactly equal and the editor's bottom reserved height always matches the guide panel height.
+
+**Tutorial task navigation**
+
+- The progress chips in the code syntax tutorial are clickable: clicking a number switches to that task inside the same course, and hovering brightens the chip to show it responds. A jump only moves the current task pointer, so completed marks and level progress are left alone and no jump crosses into another course.
+- A jump clears the stale compile snapshot, re-evaluates both the syntax and the compile checks against the current editor content, and syncs the resume checkpoint.
+- The C# grammar course (Level 1 - Part 2) now opens with the comment task, so `// single line` and `/* multi line */` are introduced before any statement, and the API course (Level 2 - Part 1) runs `Print` then `PrintLine` then `ClearPrint` before the object-inspection and firing tasks.
+
+**Code editor**
+
+- The error and status strip at the bottom of the editor now uses the editor background colour while the split layout is active (it keeps the darker shade in the fullscreen editor), and the editor rect extends one pixel toward the guide panel, so no dark seam shows between the two halves.
+- Compile errors no longer print the `CS` prefix twice (`CSCS0103`): the error number is normalised before it is shown.
+
+**Main menu**
+
+- Removed the hint line at the bottom of the main menu; the key reference is no longer shown there.
 
 ### v0.2.0
 
@@ -281,6 +303,7 @@ ABOVE THE VOID/
 │       ├── GameProgress.cs                # Save data: resume point and high scores
 │       ├── EscapeRouter.cs                # Single ESC input router
 │       ├── CodeEditorController.cs        # In-game code editor and runner
+│       ├── CodeSyntaxTutorialController.cs  # Level 1 grammar and Level 2 API course panel
 │       ├── CodeTower.cs                   # Code-controlled tower interface
 │       ├── UIFitScreen.cs                 # Screen-fitting UI helper
 │       ├── PlayerCameraController.cs      # Camera and movement state machine

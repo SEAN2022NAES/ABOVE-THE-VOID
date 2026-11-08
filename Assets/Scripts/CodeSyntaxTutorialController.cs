@@ -5,12 +5,12 @@ using UnityEngine.UI;
 
 /// <summary>
 /// 代码编辑器内的顺序式 C# 教学（两门课程，均由 LevelDirector 调用 Begin(course) 进入）：
-///   - Course.Grammar（Level 1 - Part 2）：C# 基础语法全套 18 项 —— 变量声明与类型、const 常量、算术运算符、
-///     关系运算符、逻辑运算符、if、if-else、switch、for、while、do-while、一维数组、List 集合、
-///     方法定义与参数（局部函数）、方法返回值 return、字符串拼接、string.Format、注释；
-///   - Course.Api（Level 2 - Part 1）：炮台 API 调用全套 13 项 —— GetAllObjects、TowerObjectInfo.Index /
-///     Type / HP / Position / Velocity / Volume、GetFireCooldown、FireAtPlane、PrintLine、Print、ClearPrint、
-///     以及「遍历 + 条件 + 发射」实战组合；
+///   - Course.Grammar（Level 1 - Part 2）：C# 基础语法全套 18 项 —— 注释、变量声明与类型、const 常量、
+///     算术运算符、关系运算符、逻辑运算符、if、if-else、switch、for、while、do-while、一维数组、List 集合、
+///     方法定义与参数（局部函数）、方法返回值 return、字符串拼接、string.Format；
+///   - Course.Api（Level 2 - Part 1）：炮台 API 调用全套 13 项 —— Print、PrintLine、ClearPrint、
+///     GetAllObjects、TowerObjectInfo.Index / Type / HP / Position / Velocity / Volume、GetFireCooldown、
+///     FireAtPlane，以及「遍历 + 条件 + 发射」实战组合（收官项固定留在最后）；
 ///   - 每一项任务的完成条件都相同：① 编辑器里的代码命中该任务的语法 ② 本次任务期间点过【编译运行 (F6)】
 ///     并且**编译通过的那份代码本身**满足该语法（防止先写后编译 / 先编译后补写蒙混过关）；
 ///     任务卡常驻显示「① 语法 / ② 编译」两条勾选状态，未编译时明确提示「点标题栏【编译运行 (F6)】验证」；
@@ -69,16 +69,19 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     // 上下分栏布局：代码编辑器占上方整块，指导框（任务卡）横跨屏幕底部整条，
     // 其高度即编辑器底部预留高度（CodeEditorController.SetBottomReservedHeight），两者上下一一对齐、互不重叠。
     private const float ReferenceWidth = 1920f;          // CanvasScaler 参考分辨率宽（面板铺满宽度回退值）
-    private const float GuidePanelHeightMin = 300f;      // 指导框最小高度（文案短时）
-    private const float GuidePanelHeightMax = 560f;      // 指导框最大高度（保证上方代码区仍有足够可视行数）
+    private const float ReferenceHeight = 1080f;         // Canvas 参考分辨率高（取不到父级高度时的回退值）
+    private const float SplitRatio = 0.5f;               // 上下对半平分：上方代码区 50%、下方指导框 50%，固定不随窗口 / 文案变化
     private const float GuideBodyTopInset = 132f;        // 正文上边距（让开强调线 / 标题 / 进度格 / 任务名）
     private const float GuideBodyBottomInset = 46f;      // 正文下边距（让开「任务完成 ✔」提示）
-    private const int GuideBodyFontSize = 18;            // 正文号（宽度铺满后可略小，行数更紧凑）
+    private const int GuideBodyFontSizeMax = 18;         // 正文最大字号（文案短时用满）
+    private const int GuideBodyFontSizeMin = 13;         // 正文最小字号（文案长时自动缩到不溢出半屏）
+    private const int GuideBodyFontSize = 18;            // 正文初始字号（构建时使用，运行期由 FitBodyFontSize 调整）
     private const float GuideBodyLineSpacing = 1.05f;    // 正文行距
     private const float HintBarMaxWidth = 1400f;         // 提示条最大宽度
     private const float HintBarMinWidth = 420f;          // 提示条最小宽度
     private const float HintBarMinHeight = 64f;          // 提示条最小高度
     private GameObject panelRoot;      // 编辑器打开时显示的任务卡（底部指导框）
+    private float appliedSplitHeight = -1f; // 最近一次应用的对半分栏高度（用于窗口尺寸变化时重算）
     private RectTransform hintRect;    // 提示条矩形（按文案自适应宽高）
     private Text headlineText;         // 「关卡 1 · 第 2 部分 · C# 基础语法教学」
     private Text progressText;         // 「任务 2/18」
@@ -87,6 +90,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private Text flashText;            // 「任务完成 ✔」短暂提示
     private Text[] chipTexts;          // 进度格文字（索引 = 任务序号）
     private Image[] chipBgs;           // 进度格底色
+    private Color[] chipBaseColors;    // 进度格基准色（悬停高亮后据此还原）
     private GameObject hintRoot;       // 编辑器关闭时的常驻提示条
     private Text hintText;
 
@@ -285,6 +289,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         EnsureRefs();
 
+        // 窗口尺寸变化时工作区总高改变 → 重新按「一半」重算指导框高度并同步给编辑器（比例恒定，绝对高度跟着走）
+        if (Mathf.Abs(appliedSplitHeight - SplitHalfHeight()) > 0.5f)
+            ApplySplitLayout();
+
         // 自动打开编辑器：正常情况当帧即打开；若此时开发者指令框仍开着（/level 的同一帧），
         // 延后到下一帧（指令框关闭后）再重试，避免任务卡无编辑器可依附。
         if (autoOpenPending && editor != null)
@@ -378,9 +386,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (editor != null)
             editor.SetCodeForTutorial(string.Empty);
 
-        // 布局：上下分栏 —— 上方代码编辑器占满可用区域（代码过长时用编辑器内部竖向滚动条滚动查看），
-        // 下方指导框横向占满可用宽度、上边缘与代码编辑器下边缘平齐、下边缘贴屏幕底部，两者不重叠。
-        // 指导框高度随任务文案自适应（RefitPanelToContent），并同步给编辑器下边距，保证像素级对齐。
+        // 布局：上下对半平分 —— 上方代码编辑器占工作区上半（50%，代码过长时用编辑器内部竖向滚动条），
+        // 下方指导框横跨工作区下半（50%）、上边缘与代码编辑器下边缘严丝合缝、下边缘贴屏幕底部。
+        // 比例固定，不随窗口尺寸变化、也不随任务文案长短变化（ApplySplitLayout）。
         // 只在本教学（Level 1-Part 2 / Level 2-Part 1）生效，EndInternal 恢复默认全屏布局。
         if (editor != null)
             editor.SetRightReservedWidth(0f); // 上下分栏不再左右平分，右侧不再预留
@@ -389,7 +397,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         LayoutChips();
         RefreshText();
-        RefitPanelToContent(); // 按当前任务文案算出指导框高度，并把该高度作为编辑器底部预留
+        ApplySplitLayout(); // 指导框固定占工作区下半 50%，并把同一高度作为编辑器底部预留
 
         // 进入即打开代码编辑器 —— 教学发生在编辑器页面内
         autoOpenPending = true;
@@ -552,6 +560,59 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             RefreshText();
     }
 
+    /// <summary>
+    /// 点击进度格跳转：在同一关（同一门教学课）内切换到任意任务。
+    /// 只移动「当前任务」指针，已完成标记与关卡进度保持不变，也不会跳到别的关卡。
+    /// </summary>
+    private void JumpToTask(int index)
+    {
+        if (!Active || finished)
+            return;
+        if (editor == null || !editor.IsOpen)
+            return;
+        if (tasks == null || index < 0 || index >= TaskCount || index == CurrentIndex)
+            return;
+
+        CurrentIndex = index;
+
+        // 编译快照属于上一个任务，跳转后必须清零：否则新任务会被旧代码误判成「已编译通过」
+        compiledThisTask = false;
+        compiledRaw = string.Empty;
+        compiledSnapshot = string.Empty;
+        statusCache = -1;
+        hintCache = string.Empty;
+        flashTimer = 0f;
+        if (flashText != null)
+            flashText.text = string.Empty;
+
+        // 断点续玩同步：手动跳转也算章节位置变化
+        GameProgress.GetCourseLocation(CurrentCourse, out int jumpLevel, out int jumpPart);
+        GameProgress.SaveResume(jumpLevel, jumpPart, index + 1);
+
+        Debug.Log("[CodeSyntaxTutorial] 点击进度格跳转到任务 " + (index + 1) + "/" + TaskCount + "。");
+
+        // 新任务的语法 / 编译两条勾选都要重新判定，先按当前编辑器内容刷新一次
+        RefreshText();
+        EvaluateCurrentTask();
+    }
+
+    /// <summary>进度格悬停高亮：在基准色上提亮，提示这一格可以点击。</summary>
+    private void SetChipHover(int index, bool on)
+    {
+        if (chipBgs == null || chipBaseColors == null)
+            return;
+        if (index < 0 || index >= chipBgs.Length || chipBgs[index] == null)
+            return;
+
+        Color baseColor = chipBaseColors[index];
+        chipBgs[index].color = on
+            ? new Color(Mathf.Min(1f, baseColor.r * 1.5f + 0.10f),
+                        Mathf.Min(1f, baseColor.g * 1.5f + 0.10f),
+                        Mathf.Min(1f, baseColor.b * 1.5f + 0.10f),
+                        baseColor.a)
+            : baseColor;
+    }
+
     private void CompleteCurrentTask()
     {
         if (CurrentIndex < 0 || CurrentIndex >= TaskCount)
@@ -687,8 +748,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         RefreshTextCore();
         RefreshFonts();
-        // 文案变化后重算指导框高度：保证多样长度的任务文案始终完整落在黑框内
-        RefitPanelToContent();
+        // 文案变化后重新排版：面板高度仍是固定半屏（不随文案变），只按新文案重算正文自适应字号
+        ApplySplitLayout();
     }
 
     /// <summary>文本创建时是空串，字体按英文（Consolas）选的；写入中文后必须重选字体，否则中文缺字形。</summary>
@@ -765,11 +826,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
                 : (isCurrent ? new Color(0.06f, 0.10f, 0.16f, 1f) : new Color(0.62f, 0.66f, 0.70f, 1f));
             if (chipBgs[i] != null)
             {
-                chipBgs[i].color = isDone
+                Color chipColor = isDone
                     ? new Color(0.24f, 0.72f, 0.42f, 0.98f)   // 已完成：绿
                     : (isCurrent
                         ? new Color(0.26f, 0.55f, 0.86f, 0.96f) // 当前：蓝
                         : new Color(0.22f, 0.24f, 0.28f, 0.92f)); // 未开始：灰
+                chipBgs[i].color = chipColor;
+                if (chipBaseColors != null)
+                    chipBaseColors[i] = chipColor; // 供悬停高亮还原
             }
         }
 
@@ -953,8 +1017,31 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         TaskDef[] list = new TaskDef[18];
 
         list[0] = Def(
-            "任务 1：变量声明与类型",
-            "Task 1: Variables & Types",
+            "任务 1：注释",
+            "Task 1: Comments",
+            "写法：// 单行注释      /* 多行注释 */\n"
+            + "    // 计算剩余血量\n"
+            + "    int remainHp = 3;\n"
+            + "    /* 下面这行打印到荧幕\n"
+            + "       多行注释可以换行 */\n"
+            + "    tower.PrintLine(\"hp={0}\", remainHp);\n\n"
+            + "目标：给代码加至少 1 条注释。\n"
+            + "提示：注释不参与运行；养成在关键逻辑上方写一行说明的习惯。\n"
+            + "判定：代码里出现 // 或 /*（写在字符串里的不算）。",
+            "Syntax: // single line      /* multi line */\n"
+            + "    // remaining hp\n"
+            + "    int remainHp = 3;\n"
+            + "    /* this prints to the screen\n"
+            + "       multi-line comments can wrap */\n"
+            + "    tower.PrintLine(\"hp={0}\", remainHp);\n\n"
+            + "Goal: add at least one comment.\n"
+            + "Hint: comments never execute; document key logic above it.\n"
+            + "Check: // or /* appears in the code (not inside a string).",
+            (raw, code) => ReComment.IsMatch(raw ?? string.Empty));
+
+        list[1] = Def(
+            "任务 2：变量声明与类型",
+            "Task 2: Variables & Types",
             "写法：类型 变量名 = 初始值;\n"
             + "    int hp = 100;\n"
             + "    float speed = 1.5f;\n"
@@ -973,9 +1060,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \"type name = value;\" appears.",
             (raw, code) => ReVariable.IsMatch(code));
 
-        list[1] = Def(
-            "任务 2：常量 const",
-            "Task 2: const Constants",
+        list[2] = Def(
+            "任务 3：常量 const",
+            "Task 3: const Constants",
             "写法：const 类型 常量名 = 值;\n"
             + "    const int MaxBlocks = 400;\n"
             + "    const float Pi = 3.14f;\n\n"
@@ -990,9 +1077,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: a const declaration appears.",
             (raw, code) => ReConst.IsMatch(code));
 
-        list[2] = Def(
-            "任务 3：算术运算符与表达式",
-            "Task 3: Arithmetic Operators",
+        list[3] = Def(
+            "任务 4：算术运算符与表达式",
+            "Task 4: Arithmetic Operators",
             "写法：操作数 运算符 操作数，运算符可用 + - * / %\n"
             + "    int total = 2 + 3 * 4;\n"
             + "    float halfTotal = total / 2f;\n"
@@ -1009,9 +1096,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: an arithmetic expression appears.",
             (raw, code) => ReArithmetic.IsMatch(code));
 
-        list[3] = Def(
-            "任务 4：关系运算符",
-            "Task 4: Comparison Operators",
+        list[4] = Def(
+            "任务 5：关系运算符",
+            "Task 5: Comparison Operators",
             "写法：操作数 关系运算符 操作数（可用运算符：==  !=  >  <  >=  <=）\n"
             + "    int hpNow = 5;\n"
             + "    bool alive = hpNow > 0;\n"
@@ -1028,9 +1115,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: one of == != > < >= <= appears.",
             (raw, code) => ReRelational.IsMatch(code));
 
-        list[4] = Def(
-            "任务 5：逻辑运算符",
-            "Task 5: Logical Operators",
+        list[5] = Def(
+            "任务 6：逻辑运算符",
+            "Task 6: Logical Operators",
             "写法：条件 逻辑运算符 条件，运算符有 &&  ||  !\n"
             + "    bool weaponReady = true;\n"
             + "    int hpLeft = 5;\n"
@@ -1049,9 +1136,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: one of && || ! appears.",
             (raw, code) => ReLogical.IsMatch(code));
 
-        list[5] = Def(
-            "任务 6：if 条件判断",
-            "Task 6: if Statements",
+        list[6] = Def(
+            "任务 7：if 条件判断",
+            "Task 7: if Statements",
             "写法：if (条件) { 条件成立时执行的语句 }\n"
             + "    int blockCount = tower.GetAllObjects().Count;\n"
             + "    if (blockCount > 0)\n"
@@ -1072,9 +1159,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: an if ( ... ) structure appears.",
             (raw, code) => ReIf.IsMatch(code));
 
-        list[6] = Def(
-            "任务 7：if … else …",
-            "Task 7: if / else",
+        list[7] = Def(
+            "任务 8：if … else …",
+            "Task 8: if / else",
             "写法：if (条件) { … } else { … }\n"
             + "    float cd = tower.GetFireCooldown();\n"
             + "    if (cd <= 0f)\n"
@@ -1103,9 +1190,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: both if and else appear.",
             (raw, code) => ReIfElse.IsMatch(code));
 
-        list[7] = Def(
-            "任务 8：switch 多分支",
-            "Task 8: switch",
+        list[8] = Def(
+            "任务 9：switch 多分支",
+            "Task 9: switch",
             "写法：switch (表达式) { case 值: … break; default: … break; }\n"
             + "    int mode = 1;\n"
             + "    switch (mode)\n"
@@ -1130,9 +1217,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: switch ( ... ) { case appears.",
             (raw, code) => ReSwitch.IsMatch(code));
 
-        list[8] = Def(
-            "任务 9：for 循环",
-            "Task 9: for Loops",
+        list[9] = Def(
+            "任务 10：for 循环",
+            "Task 10: for Loops",
             "写法：for (初始化; 条件; 迭代)\n"
             + "    for (int i = 0; i < 3; i++)\n"
             + "    {\n"
@@ -1151,9 +1238,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: a for ( ... ; ... ; ) structure appears.",
             (raw, code) => ReFor.IsMatch(code));
 
-        list[9] = Def(
-            "任务 10：while 循环",
-            "Task 10: while Loops",
+        list[10] = Def(
+            "任务 11：while 循环",
+            "Task 11: while Loops",
             "写法：while (条件) { 循环体 }\n"
             + "    int wi = 0;\n"
             + "    while (wi < 3)\n"
@@ -1174,9 +1261,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: a while ( ... ) { structure appears.",
             (raw, code) => ReWhile.IsMatch(code));
 
-        list[10] = Def(
-            "任务 11：do … while 循环",
-            "Task 11: do / while Loops",
+        list[11] = Def(
+            "任务 12：do … while 循环",
+            "Task 12: do / while Loops",
             "写法：do { 循环体 } while (条件);\n"
             + "    int di = 0;\n"
             + "    do\n"
@@ -1197,9 +1284,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: a do { ... } while ( ... ); structure appears.",
             (raw, code) => ReDoWhile.IsMatch(code));
 
-        list[11] = Def(
-            "任务 12：一维数组",
-            "Task 12: Arrays",
+        list[12] = Def(
+            "任务 13：一维数组",
+            "Task 13: Arrays",
             "写法：类型[] 名字 = new 类型[长度];\n"
             + "    int[] hits = new int[3];\n"
             + "    hits[0] = 2;\n"
@@ -1216,9 +1303,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: new type[length] or name[index] appears.",
             (raw, code) => ReArray.IsMatch(code));
 
-        list[12] = Def(
-            "任务 13：List 集合",
-            "Task 13: List<T>",
+        list[13] = Def(
+            "任务 14：List 集合",
+            "Task 14: List<T>",
             "写法：List<类型> 名字 = new List<类型>();\n"
             + "    List<int> hpList = new List<int>();\n"
             + "    hpList.Add(3);\n"
@@ -1235,9 +1322,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: new List<...> and .Add( both appear.",
             (raw, code) => ReListNew.IsMatch(code) && ReListAdd.IsMatch(code));
 
-        list[13] = Def(
-            "任务 14：方法定义与参数",
-            "Task 14: Methods & Parameters",
+        list[14] = Def(
+            "任务 15：方法定义与参数",
+            "Task 15: Methods & Parameters",
             "写法：返回类型 方法名(参数类型 参数名, …) { 方法体 }\n"
             + "    void ShowHp(int hp)\n"
             + "    {\n"
@@ -1258,9 +1345,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \"type name(args...) {\" appears.",
             (raw, code) => ReMethodDef.IsMatch(code));
 
-        list[14] = Def(
-            "任务 15：方法返回值 return",
-            "Task 15: Return Values",
+        list[15] = Def(
+            "任务 16：方法返回值 return",
+            "Task 16: Return Values",
             "写法：return 表达式; 并用变量接收调用结果\n"
             + "    int Twice(int v)\n"
             + "    {\n"
@@ -1283,9 +1370,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: return ...; and \"var = method(\" both appear.",
             (raw, code) => ReReturn.IsMatch(code) && ReMethodCallAssign.IsMatch(code));
 
-        list[15] = Def(
-            "任务 16：字符串拼接",
-            "Task 16: String Concatenation",
+        list[16] = Def(
+            "任务 17：字符串拼接",
+            "Task 17: String Concatenation",
             "写法：用 + 拼接字符串与其他值\n"
             + "    int curHp = 3;\n"
             + "    string msg = \"hp=\" + curHp;\n"
@@ -1302,9 +1389,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \"string + value\" appears.",
             (raw, code) => ReConcat.IsMatch(code));
 
-        list[16] = Def(
-            "任务 17：string.Format 格式化",
-            "Task 17: string.Format",
+        list[17] = Def(
+            "任务 18：string.Format 格式化",
+            "Task 18: string.Format",
             "写法：string.Format(\"模板 {0} {1}\", 值1, 值2)\n"
             + "    int baseHp = 3;\n"
             + "    string msgFmt = string.Format(\"hp={0}, half={1:F1}\", baseHp, baseHp / 2f);\n"
@@ -1320,29 +1407,6 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Hint: {0} {1} are placeholders filled by the following arguments; {1:F1} keeps one decimal.\n"
             + "Check: string.Format( appears.",
             (raw, code) => ReStringFormat.IsMatch(code));
-
-        list[17] = Def(
-            "任务 18：注释",
-            "Task 18: Comments",
-            "写法：// 单行注释      /* 多行注释 */\n"
-            + "    // 计算剩余血量\n"
-            + "    int remainHp = 3;\n"
-            + "    /* 下面这行打印到荧幕\n"
-            + "       多行注释可以换行 */\n"
-            + "    tower.PrintLine(\"hp={0}\", remainHp);\n\n"
-            + "目标：给代码加至少 1 条注释。\n"
-            + "提示：注释不参与运行；养成在关键逻辑上方写一行说明的习惯。\n"
-            + "判定：代码里出现 // 或 /*（写在字符串里的不算）。",
-            "Syntax: // single line      /* multi line */\n"
-            + "    // remaining hp\n"
-            + "    int remainHp = 3;\n"
-            + "    /* this prints to the screen\n"
-            + "       multi-line comments can wrap */\n"
-            + "    tower.PrintLine(\"hp={0}\", remainHp);\n\n"
-            + "Goal: add at least one comment.\n"
-            + "Hint: comments never execute; document key logic above it.\n"
-            + "Check: // or /* appears in the code (not inside a string).",
-            (raw, code) => ReComment.IsMatch(raw ?? string.Empty));
 
         return list;
     }
@@ -1366,8 +1430,61 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         TaskDef[] list = new TaskDef[13];
 
         list[0] = Def(
-            "任务 1：GetAllObjects 取对象列表",
-            "Task 1: GetAllObjects",
+            "任务 1：Print 打印不换行",
+            "Task 1: Print",
+            "签名：void Print(string format, params object[] args);\n"
+            + "说明：输出到荧幕但不换行，适合在同一行拼多段内容。\n"
+            + "    tower.Print(\"hp={0} \", 7);\n"
+            + "    tower.Print(\"count={0}\", 42);\n\n"
+            + "目标：用 Print 输出一段不换行的文字（两句会拼在同一行）。\n"
+            + "提示：Print 与 PrintLine 的区别只有是否换行，下一项就学 PrintLine。\n"
+            + "判定：出现「tower.Print(」（PrintLine 不算）。",
+            "Signature: void Print(string format, params object[] args);\n"
+            + "Note: prints without a trailing newline - handy for building one line piecewise.\n"
+            + "    tower.Print(\"hp={0} \", 7);\n"
+            + "    tower.Print(\"count={0}\", 42);\n\n"
+            + "Goal: use Print for a non-newline output (both calls land on the same line).\n"
+            + "Hint: Print vs PrintLine differs only in the trailing newline; PrintLine comes next.\n"
+            + "Check: \"tower.Print(\" appears (PrintLine does not count).",
+            (raw, code) => RePrintOnly.IsMatch(code));
+
+        list[1] = Def(
+            "任务 2：PrintLine 打印换行",
+            "Task 2: PrintLine",
+            "签名：void PrintLine(string format, params object[] args);\n"
+            + "说明：输出到 +X 前方荧幕并换行，占位符同 string.Format。\n"
+            + "    tower.PrintLine(\"hp={0}\", 7);\n\n"
+            + "目标：用 PrintLine 输出一行文字（每次调用自动换行）。\n"
+            + "提示：荧幕最多保留 24 行，超出会自动丢弃最旧的；调试循环里别每帧狂打印。\n"
+            + "判定：出现「tower.PrintLine(」。",
+            "Signature: void PrintLine(string format, params object[] args);\n"
+            + "Note: prints one line to the +X screen; same placeholders as string.Format.\n"
+            + "    tower.PrintLine(\"hp={0}\", 7);\n\n"
+            + "Goal: print one line with PrintLine (each call ends the line).\n"
+            + "Hint: the screen keeps 24 lines; avoid printing every frame in a loop.\n"
+            + "Check: \"tower.PrintLine(\" appears.",
+            (raw, code) => RePrintLine.IsMatch(code));
+
+        list[2] = Def(
+            "任务 3：ClearPrint 清空荧幕",
+            "Task 3: ClearPrint",
+            "签名：void ClearPrint();   // 清空荧幕全部内容\n"
+            + "    tower.ClearPrint();\n"
+            + "    tower.PrintLine(\"screen cleared\");\n\n"
+            + "目标：调用 ClearPrint 清空一次荧幕。\n"
+            + "提示：Run 每帧都会执行，无条件 ClearPrint 会导致荧幕始终只有一行；配合计数条件使用。\n"
+            + "判定：出现「tower.ClearPrint(」。",
+            "Signature: void ClearPrint();   // clears the whole screen\n"
+            + "    tower.ClearPrint();\n"
+            + "    tower.PrintLine(\"screen cleared\");\n\n"
+            + "Goal: call ClearPrint once.\n"
+            + "Hint: Run executes every frame, so an unconditional ClearPrint keeps the screen at one line.\n"
+            + "Check: \"tower.ClearPrint(\" appears.",
+            (raw, code) => ReClearPrint.IsMatch(code));
+
+        list[3] = Def(
+            "任务 4：GetAllObjects 取对象列表",
+            "Task 4: GetAllObjects",
             "签名：List<TowerObjectInfo> GetAllObjects();\n"
             + "返回：场上所有飞行方块的列表（可能为空）。\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
@@ -1388,9 +1505,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: both foreach and tower.GetAllObjects( appear.",
             (raw, code) => ReForeach.IsMatch(code) && ReGetAllObjects.IsMatch(code));
 
-        list[1] = Def(
-            "任务 2：读取 Index 编号",
-            "Task 2: Read Index",
+        list[4] = Def(
+            "任务 5：读取 Index 编号",
+            "Task 5: Read Index",
             "字段：int Index;   // 方块生成编号（全局递增，非数组下标）\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
@@ -1409,9 +1526,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \".Index\" appears.",
             (raw, code) => ReFieldIndex.IsMatch(code));
 
-        list[2] = Def(
-            "任务 3：读取 Type 类型",
-            "Task 3: Read Type",
+        list[5] = Def(
+            "任务 6：读取 Type 类型",
+            "Task 6: Read Type",
             "字段：string Type;   // \"ATTACK\" 红块 / \"BOMB\" 蓝块\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
@@ -1432,9 +1549,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \".Type\" appears.",
             (raw, code) => ReFieldType.IsMatch(code));
 
-        list[3] = Def(
-            "任务 4：读取 HP 剩余血量",
-            "Task 4: Read HP",
+        list[6] = Def(
+            "任务 7：读取 HP 剩余血量",
+            "Task 7: Read HP",
             "字段：int HP;   // 剩余受击层数（各块不同，最多 6 层；吃光即被击毁）\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
@@ -1455,9 +1572,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \".HP\" appears.",
             (raw, code) => ReFieldHp.IsMatch(code));
 
-        list[4] = Def(
-            "任务 5：读取 Position 位置",
-            "Task 5: Read Position",
+        list[7] = Def(
+            "任务 8：读取 Position 位置",
+            "Task 8: Read Position",
             "字段：Vector3 Position;   // 几何中心的世界坐标\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
@@ -1478,9 +1595,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \".Position\" appears.",
             (raw, code) => ReFieldPosition.IsMatch(code));
 
-        list[5] = Def(
-            "任务 6：读取 Velocity 速度",
-            "Task 6: Read Velocity",
+        list[8] = Def(
+            "任务 9：读取 Velocity 速度",
+            "Task 9: Read Velocity",
             "字段：Vector3 Velocity;   // 速度向量（方向 × 速度，单位/秒）\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
@@ -1501,9 +1618,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \".Velocity\" appears.",
             (raw, code) => ReFieldVelocity.IsMatch(code));
 
-        list[6] = Def(
-            "任务 7：读取 Volume 体积",
-            "Task 7: Read Volume",
+        list[9] = Def(
+            "任务 10：读取 Volume 体积",
+            "Task 10: Read Volume",
             "字段：float Volume;   // 当前剩余体积（越打越小）；float InitialVolume;   // 初始体积（切割后不变）\n"
             + "int MaxHits;   // 初始受击层数；Vector3 Size;   // 当前三边尺寸\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
@@ -1521,9 +1638,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \".Volume\" appears.",
             (raw, code) => ReFieldVolume.IsMatch(code));
 
-        list[7] = Def(
-            "任务 8：GetFireCooldown 冷却查询",
-            "Task 8: GetFireCooldown",
+        list[10] = Def(
+            "任务 11：GetFireCooldown 冷却查询",
+            "Task 11: GetFireCooldown",
             "签名：float GetFireCooldown();   // 距下一发可发射的剩余秒数，0 = 已就绪\n"
             + "    float cd = tower.GetFireCooldown();\n"
             + "    if (cd <= 0f)\n"
@@ -1540,9 +1657,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: \"tower.GetFireCooldown(\" appears.",
             (raw, code) => ReGetFireCooldown.IsMatch(code));
 
-        list[8] = Def(
-            "任务 9：FireAtPlane 发射",
-            "Task 9: FireAtPlane",
+        list[11] = Def(
+            "任务 12：FireAtPlane 发射",
+            "Task 12: FireAtPlane",
             "签名：bool FireAtPlane(float A, float B, float C);\n"
             + "说明：沿过原点平面 A*x+B*y+C*z=0 的法线方向 (A,B,C) 发射；冷却中返回 false。\n"
             + "约束：平面必过原点（炮台就在原点），所以只需 A、B、C 三个参数，没有 D。\n"
@@ -1560,61 +1677,6 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Hint: (A,B,C) is the normal and must not be zero; to aim at a target just pass its position.\n"
             + "Check: \"tower.FireAtPlane(\" appears.",
             (raw, code) => ReFireAtPlane.IsMatch(code));
-
-        list[9] = Def(
-            "任务 10：PrintLine 打印换行",
-            "Task 10: PrintLine",
-            "签名：void PrintLine(string format, params object[] args);\n"
-            + "说明：输出到 +X 前方荧幕并换行，占位符同 string.Format。\n"
-            + "    tower.PrintLine(\"count={0}\", tower.GetAllObjects().Count);\n\n"
-            + "目标：用 PrintLine 输出一行文字。\n"
-            + "提示：荧幕最多保留 24 行，超出会自动丢弃最旧的；调试循环里别每帧狂打印。\n"
-            + "判定：出现「tower.PrintLine(」。",
-            "Signature: void PrintLine(string format, params object[] args);\n"
-            + "Note: prints one line to the +X screen; same placeholders as string.Format.\n"
-            + "    tower.PrintLine(\"count={0}\", tower.GetAllObjects().Count);\n\n"
-            + "Goal: print one line with PrintLine.\n"
-            + "Hint: the screen keeps 24 lines; avoid printing every frame in a loop.\n"
-            + "Check: \"tower.PrintLine(\" appears.",
-            (raw, code) => RePrintLine.IsMatch(code));
-
-        list[10] = Def(
-            "任务 11：Print 打印不换行",
-            "Task 11: Print",
-            "签名：void Print(string format, params object[] args);\n"
-            + "说明：输出到荧幕但不换行，适合在同一行拼多段内容。\n"
-            + "    tower.ClearPrint();\n"
-            + "    tower.Print(\"count={0} \", tower.GetAllObjects().Count);\n"
-            + "    tower.PrintLine(\"done\");\n\n"
-            + "目标：用 Print 输出一段不换行的文字。\n"
-            + "提示：Print 与 PrintLine 的区别只有是否换行；同一行拼内容常用「Print + PrintLine 收尾」。\n"
-            + "判定：出现「tower.Print(」（PrintLine 不算）。",
-            "Signature: void Print(string format, params object[] args);\n"
-            + "Note: prints without a trailing newline - handy for building one line piecewise.\n"
-            + "    tower.ClearPrint();\n"
-            + "    tower.Print(\"count={0} \", tower.GetAllObjects().Count);\n"
-            + "    tower.PrintLine(\"done\");\n\n"
-            + "Goal: use Print for a non-newline output.\n"
-            + "Hint: Print vs PrintLine differs only in the trailing newline.\n"
-            + "Check: \"tower.Print(\" appears (PrintLine does not count).",
-            (raw, code) => RePrintOnly.IsMatch(code));
-
-        list[11] = Def(
-            "任务 12：ClearPrint 清空荧幕",
-            "Task 12: ClearPrint",
-            "签名：void ClearPrint();   // 清空荧幕全部内容\n"
-            + "    tower.ClearPrint();\n"
-            + "    tower.PrintLine(\"screen cleared\");\n\n"
-            + "目标：调用 ClearPrint 清空一次荧幕。\n"
-            + "提示：Run 每帧都会执行，无条件 ClearPrint 会导致荧幕始终只有一行；配合计数条件使用。\n"
-            + "判定：出现「tower.ClearPrint(」。",
-            "Signature: void ClearPrint();   // clears the whole screen\n"
-            + "    tower.ClearPrint();\n"
-            + "    tower.PrintLine(\"screen cleared\");\n\n"
-            + "Goal: call ClearPrint once.\n"
-            + "Hint: Run executes every frame, so an unconditional ClearPrint keeps the screen at one line.\n"
-            + "Check: \"tower.ClearPrint(\" appears.",
-            (raw, code) => ReClearPrint.IsMatch(code));
 
         list[12] = Def(
             "任务 13：实战组合（遍历 + 判断 + 发射）",
@@ -1663,8 +1725,20 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
         gameObject.AddComponent<UIFitScreen>();
 
+        // 点击进度格跳转任务需要射线检测器：本 Canvas 独立于代码编辑器 Canvas，必须自带一个
+        gameObject.AddComponent<GraphicRaycaster>();
+
+        // 保险：没有 EventSystem 时补一个（正常情况下代码编辑器已创建）
+        if (FindObjectOfType<UnityEngine.EventSystems.EventSystem>() == null)
+        {
+            GameObject esGo = new GameObject("EventSystem");
+            esGo.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            esGo.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+        }
+
         chipTexts = new Text[MaxChips];
         chipBgs = new Image[MaxChips];
+        chipBaseColors = new Color[MaxChips];
 
         BuildTaskPanel(canvas.transform);
         BuildHintBar(canvas.transform);
@@ -1676,15 +1750,15 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         //   · 上边缘与代码编辑器（TowerCodeEditor）下边缘严丝合缝：面板高度会同步给
         //     CodeEditorController.SetBottomReservedHeight，编辑器整体上移收窄到上半区，两者不重叠；
         //   · 下边缘贴屏幕底部（anchoredPosition = 0），左右铺满整个可用宽度（anchorMin.x = 0 / anchorMax.x = 1）；
-        //   · 高度按当前任务文案自适应（RefitPanelToContent），保证写法 / 示例 / 目标 / 提示 / 判定等文案
-        //     完整落在黑框内，不再出现文字超出黑框的情况。
+        //   · 高度固定为工作区高度的一半（ApplySplitLayout），与上方代码区严格对半平分，不随窗口 / 文案变化；
+        //     文案在半屏内排不下时自动缩小正文字号（FitBodyFontSize），而不是撑大面板。
         RectTransform panelRt = CreateRect("SyntaxTaskPanel", parent, new Vector2(0f, 0f), Vector2.zero,
-            new Vector2(0f, GuidePanelHeightMin), new Vector2(0.5f, 0f));
+            new Vector2(0f, ReferenceHeight * SplitRatio), new Vector2(0.5f, 0f));
         panelRt.anchorMin = new Vector2(0f, 0f);
         panelRt.anchorMax = new Vector2(1f, 0f);
         panelRt.pivot = new Vector2(0.5f, 0f);
         panelRt.anchoredPosition = Vector2.zero;
-        panelRt.sizeDelta = new Vector2(0f, GuidePanelHeightMin);
+        panelRt.sizeDelta = new Vector2(0f, ReferenceHeight * SplitRatio);
         panelRoot = panelRt.gameObject;
 
         Image bg = panelRoot.AddComponent<Image>();
@@ -1734,14 +1808,34 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             Image chipBg = chipRt.gameObject.AddComponent<Image>();
             chipBg.sprite = WhiteSprite();
             chipBg.color = new Color(0.22f, 0.24f, 0.28f, 0.92f);
-            chipBg.raycastTarget = false;
+            chipBg.raycastTarget = true; // 进度格可点击（点数字直接跳到该任务）
             chipBgs[i] = chipBg;
+            chipBaseColors[i] = chipBg.color;
 
             Text chipText = CreateText("ChipText" + (i + 1), chipRt, (i + 1).ToString(), 17,
                 new Color(0.62f, 0.66f, 0.70f, 1f), TextAnchor.MiddleCenter);
             Stretch(chipText.rectTransform);
             chipText.raycastTarget = false;
             chipTexts[i] = chipText;
+
+            // 点击跳转：在本关（同一门教学课）内任意任务之间互跳；不改已完成标记，也不跨关卡
+            int chipIndex = i;
+            Button chipBtn = chipRt.gameObject.AddComponent<Button>();
+            chipBtn.targetGraphic = chipBg;
+            chipBtn.transition = Selectable.Transition.None; // 颜色由代码统一控制，避免 ColorTint 覆盖
+            chipBtn.onClick.AddListener(delegate { JumpToTask(chipIndex); });
+
+            // 悬停变亮：给出「这个数字能点」的视觉反馈
+            UnityEngine.EventSystems.EventTrigger hover = chipRt.gameObject
+                .AddComponent<UnityEngine.EventSystems.EventTrigger>();
+            UnityEngine.EventSystems.EventTrigger.Entry enter = new UnityEngine.EventSystems.EventTrigger.Entry();
+            enter.eventID = UnityEngine.EventSystems.EventTriggerType.PointerEnter;
+            enter.callback.AddListener(delegate { SetChipHover(chipIndex, true); });
+            hover.triggers.Add(enter);
+            UnityEngine.EventSystems.EventTrigger.Entry exit = new UnityEngine.EventSystems.EventTrigger.Entry();
+            exit.eventID = UnityEngine.EventSystems.EventTriggerType.PointerExit;
+            exit.callback.AddListener(delegate { SetChipHover(chipIndex, false); });
+            hover.triggers.Add(exit);
 
             chipRt.gameObject.SetActive(false);
         }
@@ -1755,8 +1849,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         tnRt.anchoredPosition = new Vector2(24f, -88f);
         tnRt.sizeDelta = new Vector2(-48f, 36f);
 
-        // 正文（写法 / 目标 / 提示 / 判定 + 完成条件）：上下边距固定，正文区高度 = 面板高度 - 上下留白，
-        // 因此面板高度按正文实测高度反推（RefitPanelToContent），文案永不溢出黑框。
+        // 正文（写法 / 目标 / 提示 / 判定 + 完成条件）：上下边距固定，正文区高度 = 半屏高度 - 上下留白；
+        // 面板高度不因文案变化（ApplySplitLayout），字号由 FitBodyFontSize 自适应，文案永不溢出。
         bodyText = CreateText("Body", panelRt, "", GuideBodyFontSize,
             new Color(0.86f, 0.89f, 0.92f, 1f), TextAnchor.UpperLeft);
         RectTransform bodyRt = bodyText.rectTransform;
@@ -1784,7 +1878,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         panelRt.gameObject.SetActive(false);
 
         LayoutChips();
-        RefitPanelToContent();
+        ApplySplitLayout();
     }
 
     /// <summary>按当前课程任务数重新排布进度格（18 项时格子变窄，13 项时放宽），并隐藏多余格子。</summary>
@@ -1826,24 +1920,64 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         return ReferenceWidth;
     }
 
-    /// <summary>按正文实测排版高度反推指导框高度，并同步给编辑器做下边距 —— 文案永不溢出黑框。</summary>
-    private void RefitPanelToContent()
+    /// <summary>指导框（下方指引区）在对半平分下应有的高度：恒等于工作区高度的一半，与文案长度无关。</summary>
+    private float SplitHalfHeight()
+    {
+        RectTransform panelRt = panelRoot != null ? panelRoot.transform as RectTransform : null;
+        RectTransform parentRt = panelRt != null ? panelRt.parent as RectTransform : null;
+        float total = (parentRt != null && parentRt.rect.height > 1f) ? parentRt.rect.height : ReferenceHeight;
+        return Mathf.Max(120f, total * SplitRatio);
+    }
+
+    /// <summary>
+    /// 应用「上下各占一半」的固定分栏：指导框高度 = 工作区高度 × 50%，代码编辑器的底部预留高度同步为该值，
+    /// 于是上方代码区与下方指引区永远对半平分、严丝合缝，不随窗口尺寸 / 文案长度漂移；
+    /// 文案若在半屏内排不下，则自动缩小正文字号（FitBodyFontSize），而不是撑大面板。
+    /// </summary>
+    private void ApplySplitLayout()
     {
         RectTransform panelRt = panelRoot != null ? panelRoot.transform as RectTransform : null;
         if (panelRt == null)
             return;
 
-        float bodyHeight = GuideBodyHeight(PanelWidth());
-        float height = Mathf.Clamp(bodyHeight + GuideBodyTopInset + GuideBodyBottomInset,
-            GuidePanelHeightMin, GuidePanelHeightMax);
+        float height = SplitHalfHeight();
         if (Mathf.Abs(panelRt.sizeDelta.y - height) > 0.5f)
             panelRt.sizeDelta = new Vector2(0f, height); // 横向靠 anchorMin.x=0 / anchorMax.x=1 铺满，只改高度
 
+        appliedSplitHeight = height;
+
+        FitBodyFontSize(height);
         LayoutChips();
 
-        // 关键：指导框高度即编辑器的「底部预留高度」→ 代码编辑器下边缘与指导框上边缘严丝合缝，两者不重叠
+        // 关键：指导框高度即编辑器的「底部预留高度」→ 上方代码区与下方指导框各占一半，两者不重叠、中间不留缝
         if (editor != null && Active)
             editor.SetBottomReservedHeight(height);
+    }
+
+    /// <summary>固定半屏高度下的正文自适应字号：从最大号逐级缩小，直到正文实测高度落进可用高度（不低于最小号）。</summary>
+    private void FitBodyFontSize(float panelHeight)
+    {
+        if (bodyText == null)
+            return;
+
+        float available = Mathf.Max(80f, panelHeight - GuideBodyTopInset - GuideBodyBottomInset);
+        float width = PanelWidth();
+
+        int before = bodyText.fontSize;
+        int picked = GuideBodyFontSizeMin;
+        for (int size = GuideBodyFontSizeMax; size >= GuideBodyFontSizeMin; size--)
+        {
+            picked = size;
+            bodyText.fontSize = size;
+            if (GuideBodyHeight(width) <= available)
+                break;
+        }
+
+        bodyText.fontSize = picked;
+        bodyText.lineSpacing = GuideBodyLineSpacing;
+
+        if (before != picked)
+            ReloadFont(bodyText); // 字号变化后按新字号重选字体（中文微软雅黑 / 英文 Consolas），避免中文缺字形
     }
 
     /// <summary>正文（写法 / 目标 / 提示 / 判定）在给定面板宽度下的实测高度；排版未完成时退回估算值。</summary>
