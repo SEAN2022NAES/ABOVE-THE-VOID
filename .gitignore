@@ -21,6 +21,9 @@
 *.VC.db
 *.pidb.meta
 /.vs/
+# 修复备份文件（不纳入版本控制）
+*.bak_*
+*.bak_*.meta
 # 临时探针产物（不纳入版本控制）
 /_probe_result.txt
 _RichTextProbe_*

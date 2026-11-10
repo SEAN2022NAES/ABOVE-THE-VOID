@@ -47,7 +47,7 @@ public class GameBootstrap : MonoBehaviour
             cam.transform.rotation = Quaternion.identity;
             cam.nearClipPlane = 0.01f;
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color(0.07f, 0.07f, 0.11f);
+            cam.backgroundColor = UITheme.Void;
         }
         else
         {

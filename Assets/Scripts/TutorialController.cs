@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
@@ -19,9 +19,9 @@ public class TutorialController : MonoBehaviour
     [Header("UI")]
     public int titleFontSize = 32;
     public int bodyFontSize = 30; // 指导框字号放大，远距离也能看清
-    public Color panelColor = new Color(0.04f, 0.05f, 0.09f, 0f); // v0.2.1：完全透明背景（无底色、不遮挡 3D 场景）
-    public Color titleColor = new Color(0.55f, 0.75f, 0.9f, 1f);
-    public Color bodyColor = Color.white;
+    public Color panelColor = UITheme.WithAlpha(UITheme.Void, 0f); // v0.2.1：完全透明背景（无底色、不遮挡 3D 场景）
+    public Color titleColor = UITheme.Accent;
+    public Color bodyColor = UITheme.TextPrimary;
 
     [Header("教学参数")]
     [Tooltip("判定学会移动：相机离开原点的距离阈值")]
@@ -296,8 +296,8 @@ public class TutorialController : MonoBehaviour
         if (keyFill == null)
             return;
 
-        Color chargeColor = new Color(0.35f, 0.90f, 0.50f, 1f);   // 充能中：绿色从左往右填充
-        Color doneColor = new Color(0.45f, 1f, 0.60f, 1f);         // 完成：亮绿
+        Color chargeColor = UITheme.Value;   // 充能中：绿色从左往右填充
+        Color doneColor = UITheme.ValueBright;         // 完成：亮绿
 
         for (int i = 0; i < MoveKeyOrder.Length; i++)
         {
@@ -307,28 +307,28 @@ public class TutorialController : MonoBehaviour
             // 蓝色底层每帧自愈：强制满条蓝色并重建网格，确保 Blue 层必然可见
             if (keyBlue != null && keyBlue[i] != null)
             {
-                keyBlue[i].color = new Color(0.30f, 0.55f, 1f, 0.95f);
+                keyBlue[i].color = UITheme.WithAlpha(UITheme.Accent, 0.90f);
                 keyBlue[i].SetVerticesDirty();
             }
             if (keyDone[i])
             {
                 keyFill[i].color = doneColor;
-                keyBg[i].color = new Color(0.25f, 0.78f, 0.40f, 0.30f); // v0.1.1：完成态键格亮绿低透明底（更亮）
+                keyBg[i].color = UITheme.ValueDim; // v0.1.1：完成态键格亮绿低透明底（更亮）
                 Outline outline = keyBg[i].GetComponent<Outline>();
                 if (outline != null)
-                    outline.effectColor = new Color(0.45f, 1f, 0.60f, 0.55f); // v0.1.1：完成态描边转亮绿
+                    outline.effectColor = UITheme.WithAlpha(UITheme.ValueBright, 0.55f); // v0.1.1：完成态描边转亮绿
                 keyLabel[i].text = KeyLabel(i) + " [OK]";
                 keyLabel[i].color = doneColor;
             }
             else
             {
                 keyFill[i].color = chargeColor;
-                keyBg[i].color = new Color(1f, 1f, 1f, 0.06f);
+                keyBg[i].color = UITheme.WithAlpha(UITheme.Accent, 0.06f);
                 Outline outline = keyBg[i].GetComponent<Outline>();
                 if (outline != null)
-                    outline.effectColor = new Color(1f, 1f, 1f, 0.28f);
+                    outline.effectColor = UITheme.Hairline;
                 keyLabel[i].text = KeyLabel(i);
-                keyLabel[i].color = new Color(0.85f, 0.9f, 1f, 1f);
+                keyLabel[i].color = UITheme.TextSub;
             }
         }
     }
@@ -426,8 +426,8 @@ public class TutorialController : MonoBehaviour
                 break;
             case Step.FireLaser:
                 bodyText.text = zh
-                    ? "鼠标左键发射激光！\n\n激光每命中一次，吃掉长方体 1 层的厚度；\n每个方块的层数 = 它自己的最大 HP（1~6 层不等，最多 6 层），\n累计吃满它的 HP 层，方块就被消灭。\n\n屏幕底部「HP: 剩余HP/最大HP」实时显示剩余血量（如 6/6 → 5/6 → … → 1/6）。\n\n先开一枪感受一下（暂未生成方块，空射即可）。"
-                    : "Left-click to fire your laser!\n\nEach hit eats 1 layer of a block's thickness;\nlayer count = that block's own max HP (1~6 layers, max 6),\nso a block dies after its own max HP hits.\n\nThe bottom HUD shows remaining HP as \"HP: current / max HP\" (e.g. 6/6 -> 5/6 -> ... -> 1/6).\n\nTry firing once (no blocks yet, dry fire is fine).";
+                    ? "鼠标左键发射激光！\n\n每命中一次吃掉方块 1 层厚度；层数 = 它自身最大 HP（1~6 层）。\n累计吃满自身 HP 层，方块即消灭。\n\n屏幕底部「HP: 剩余/最大」实时显示（6/6 → 5/6 → … → 1/6）。\n\n先空射一枪感受一下（暂未生成方块）。"
+                    : "Left-click to fire your laser!\n\nEach hit eats 1 layer; layers = that block's own max HP (1~6).\nA block dies once its own HP is fully eaten.\n\nBottom HUD shows remaining HP (6/6 -> 5/6 -> ... -> 1/6).\n\nFire once to feel it (no blocks yet, dry fire is fine).";
                 break;
             case Step.PlaneKill:
                 RefreshPlaneKillProgress();
@@ -560,12 +560,12 @@ public class TutorialController : MonoBehaviour
             Image bg = bgRt.gameObject.AddComponent<Image>();
             bg.sprite = WhiteSprite();                      // 显式 sprite：无 sprite 的 Image 渲染行为不可靠
             bg.type = Image.Type.Simple;
-            bg.color = new Color(1f, 1f, 1f, 0.06f);
+            bg.color = UITheme.WithAlpha(UITheme.Accent, 0.06f);
             keyBg[i] = bg;
 
             // v0.1.1：键格细描边（未完成 = 半透明白，完成 = 亮绿，由 RefreshKeyChargeUI 更新）
             Outline bgOutline = bgRt.gameObject.AddComponent<Outline>();
-            bgOutline.effectColor = new Color(1f, 1f, 1f, 0.28f);
+            bgOutline.effectColor = UITheme.Hairline;
             bgOutline.effectDistance = new Vector2(1.5f, -1.5f);
 
             // 充能条底层：蓝色满条（Simple 满矩形，无 sprite 依赖也必然渲染；固定尺寸，非 stretch）
@@ -573,7 +573,7 @@ public class TutorialController : MonoBehaviour
             Image blue = blueRt.gameObject.AddComponent<Image>();
             blue.sprite = WhiteSprite();
             blue.type = Image.Type.Simple;                   // 满条蓝底无需 Filled，Simple 是最可靠的渲染路径
-            blue.color = new Color(0.30f, 0.55f, 1f, 0.95f); // 蓝色
+            blue.color = UITheme.WithAlpha(UITheme.Accent, 0.90f); // 蓝色
             blue.raycastTarget = false;
             keyBlue[i] = blue;
 
@@ -585,12 +585,12 @@ public class TutorialController : MonoBehaviour
             fill.fillMethod = Image.FillMethod.Horizontal;
             fill.fillOrigin = 0;
             fill.fillAmount = 0f;
-            fill.color = new Color(0.35f, 0.90f, 0.50f, 1f); // 绿色覆盖层
+            fill.color = UITheme.Value; // 绿色覆盖层
             fill.raycastTarget = false;
             keyFill[i] = fill;
 
             // 键名
-            Text label = CreateText("Key_" + i, bgRt, KeyLabel(i), 24, new Color(0.85f, 0.9f, 1f, 1f), TextAnchor.MiddleCenter);
+            Text label = CreateText("Key_" + i, bgRt, KeyLabel(i), 24, UITheme.TextSub, TextAnchor.MiddleCenter);
             label.fontStyle = FontStyle.Bold;
             RectTransform labelRt = label.rectTransform;
             labelRt.anchorMin = Vector2.zero;

@@ -397,7 +397,7 @@ public class CodeTower : MonoBehaviour
         GameObject bgGo = new GameObject("PrintScreen_Bg");
         bgGo.transform.SetParent(canvasGo.transform, false);
         Image bg = bgGo.AddComponent<Image>();
-        bg.color = new Color(0f, 0f, 0f, 0.22f);
+        bg.color = UITheme.WithAlpha(UITheme.Void, 0.22f);
         RectTransform bgRt = bgGo.GetComponent<RectTransform>();
         bgRt.anchorMin = Vector2.zero;
         bgRt.anchorMax = Vector2.one;
@@ -410,7 +410,7 @@ public class CodeTower : MonoBehaviour
         printText = textGo.AddComponent<Text>();
         printText.font = UIFontHelper.LoadForText("print screen", PrintFontSize);
         printText.fontSize = PrintFontSize;
-        printText.color = new Color(0.3f, 1f, 1f, 1f);
+        printText.color = UITheme.Accent;
         printText.alignment = TextAnchor.UpperLeft;
         printText.horizontalOverflow = HorizontalWrapMode.Wrap;
         printText.verticalOverflow = VerticalWrapMode.Overflow;

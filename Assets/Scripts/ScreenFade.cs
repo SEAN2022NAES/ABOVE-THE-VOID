@@ -67,7 +67,7 @@ public class ScreenFade : MonoBehaviour
         timer = 0f;
         phase = 1;
         overlay.gameObject.SetActive(true);
-        overlay.color = new Color(0f, 0f, 0f, 0f);
+        overlay.color = UITheme.WithAlpha(UITheme.Void, 0f);
     }
 
     private void Update()
@@ -76,7 +76,7 @@ public class ScreenFade : MonoBehaviour
         {
             timer += Time.unscaledDeltaTime;
             float t = fadeOutSeconds <= 0.0001f ? 1f : Mathf.Clamp01(timer / fadeOutSeconds);
-            overlay.color = new Color(0f, 0f, 0f, t);
+            overlay.color = UITheme.WithAlpha(UITheme.Void, t);
             if (t >= 1f)
             {
                 // 全黑瞬间：执行关卡跳转等切换动作，随后开始淡入
@@ -92,11 +92,11 @@ public class ScreenFade : MonoBehaviour
         {
             timer += Time.unscaledDeltaTime;
             float t = fadeInSeconds <= 0.0001f ? 1f : Mathf.Clamp01(timer / fadeInSeconds);
-            overlay.color = new Color(0f, 0f, 0f, 1f - t);
+            overlay.color = UITheme.WithAlpha(UITheme.Void, 1f - t);
             if (t >= 1f)
             {
                 phase = 0;
-                overlay.color = new Color(0f, 0f, 0f, 0f);
+                overlay.color = UITheme.WithAlpha(UITheme.Void, 0f);
                 overlay.gameObject.SetActive(false);
             }
         }
@@ -124,7 +124,7 @@ public class ScreenFade : MonoBehaviour
         rt.offsetMax = Vector2.zero;
 
         overlay = go.AddComponent<Image>();
-        overlay.color = new Color(0f, 0f, 0f, 0f);
+        overlay.color = UITheme.WithAlpha(UITheme.Void, 0f);
         overlay.raycastTarget = false; // 过渡期间不拦截点击 / 输入
         overlay.gameObject.SetActive(false);
     }

@@ -17,7 +17,7 @@ public class TimeHintController : MonoBehaviour
     [Tooltip("时间文字大小")]
     public int fontSize = 40;
     [Tooltip("时间文字颜色")]
-    public Color textColor = Color.white;
+    public Color textColor = UITheme.TextPrimary;
     [Tooltip("距屏幕上边缘距离（像素）")]
     public float topOffset = 24f;
 

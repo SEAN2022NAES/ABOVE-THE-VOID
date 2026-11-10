@@ -38,8 +38,8 @@ public class SettingsPanelController : MonoBehaviour
     public float defaultFov = 90f;
 
     [Header("UI 颜色")]
-    public Color panelBackgroundColor = new Color(0.06f, 0.06f, 0.10f, 0.85f);
-    public Color accentColor = new Color(0.20f, 0.45f, 1.00f);
+    public Color panelBackgroundColor = UITheme.PanelDeep;
+    public Color accentColor = UITheme.Accent;
 
     // 本地存档键（PlayerPrefs）：每个可调项一个键，改一次即保存，下次启动自动恢复
     private const string FovPrefsKey = "atv.settings.fov";                 // 视场角（度）
@@ -133,7 +133,7 @@ public class SettingsPanelController : MonoBehaviour
         RectTransform overlayRt = pausePanel.GetComponent<RectTransform>();
         Stretch(overlayRt);
         Image overlayImg = pausePanel.AddComponent<Image>();
-        overlayImg.color = new Color(0f, 0f, 0f, 0.55f);
+        overlayImg.color = UITheme.ScrimSoft;
 
         RectTransform card = CreateRect("Card", pausePanel.transform);
         card.anchorMin = new Vector2(0.5f, 0.5f);
@@ -145,7 +145,7 @@ public class SettingsPanelController : MonoBehaviour
         cardImg.color = panelBackgroundColor;
 
         // 标题
-        titleText = CreateText("Title", card, Localization.Pick("游戏暂停", "Paused"), 34, Color.white);
+        titleText = CreateText("Title", card, Localization.Pick("游戏暂停", "Paused"), 34, UITheme.TextPrimary);
         RectTransform titleRt = titleText.rectTransform;
         titleRt.anchorMin = new Vector2(0.5f, 1f);
         titleRt.anchorMax = new Vector2(0.5f, 1f);
@@ -154,7 +154,7 @@ public class SettingsPanelController : MonoBehaviour
         titleRt.sizeDelta = new Vector2(560f, 50f);
 
         // 灵敏度行（标签 + 滑块 + 数值）
-        Text sensLabel = CreateText("SensLabel", card, Localization.Pick("鼠标灵敏度", "Mouse sensitivity"), 22, Color.white);
+        Text sensLabel = CreateText("SensLabel", card, Localization.Pick("鼠标灵敏度", "Mouse sensitivity"), 22, UITheme.TextSub);
         sensLabelText = sensLabel;
         sensLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         sensLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -185,7 +185,7 @@ public class SettingsPanelController : MonoBehaviour
         sensitivitySlider = slider;
 
         // 帧率行（标签 + 滑块 + 数值）
-        Text fpsLabel = CreateText("FpsLabel", card, Localization.Pick("帧率 / FPS", "Frame rate / FPS"), 22, Color.white);
+        Text fpsLabel = CreateText("FpsLabel", card, Localization.Pick("帧率 / FPS", "Frame rate / FPS"), 22, UITheme.TextSub);
         fpsLabelText = fpsLabel;
         fpsLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         fpsLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -216,7 +216,7 @@ public class SettingsPanelController : MonoBehaviour
         ApplyTargetFrameRate(defaultFps); // 初始化即应用存档帧率（拖动滑杆后再按滑杆值调整）
 
         // 视场角行（标签 + 滑块 + 数值）：实时作用到第一人称相机，并写入 PlayerPrefs 持久化
-        Text fovLabel = CreateText("FovLabel", card, Localization.Pick("视场角 / FOV", "Field of view / FOV"), 22, Color.white);
+        Text fovLabel = CreateText("FovLabel", card, Localization.Pick("视场角 / FOV", "Field of view / FOV"), 22, UITheme.TextSub);
         fovLabelText = fovLabel;
         fovLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         fovLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -246,7 +246,7 @@ public class SettingsPanelController : MonoBehaviour
         fovSlider.onValueChanged.AddListener(OnFovSliderChanged);
 
         // 键位说明（随语言切换刷新）
-        helpText = CreateText("HelpText", card, GetHelpText(), 18, new Color(0.85f, 0.85f, 0.85f, 1f));
+        helpText = CreateText("HelpText", card, GetHelpText(), 18, UITheme.TextMuted);
         helpText.rectTransform.anchorMin = new Vector2(0f, 1f);
         helpText.rectTransform.anchorMax = new Vector2(1f, 1f);
         helpText.rectTransform.pivot = new Vector2(0.5f, 1f);
@@ -486,7 +486,7 @@ public class SettingsPanelController : MonoBehaviour
         RectTransform bg = CreateRect("Background", rt);
         Stretch(bg);
         Image bgImg = bg.gameObject.AddComponent<Image>();
-        bgImg.color = new Color(1f, 1f, 1f, 0.18f);
+        bgImg.color = UITheme.WithAlpha(UITheme.Accent, 0.16f);
 
         // 拖动区域 + 手柄
         RectTransform area = CreateRect("Handle Slide Area", rt);
@@ -523,7 +523,8 @@ public class SettingsPanelController : MonoBehaviour
         Button btn = rt.gameObject.AddComponent<Button>();
         btn.targetGraphic = img;
 
-        Text t = CreateText("Text", rt, label, fontSize, Color.white);
+        // 按钮底色为亮青 Accent，文字必须用深色（OnAccent）才能看清
+        Text t = CreateText("Text", rt, label, fontSize, UITheme.OnAccent);
         Stretch(t.rectTransform);
         return btn;
     }

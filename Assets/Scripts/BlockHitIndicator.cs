@@ -19,7 +19,7 @@ public class BlockHitIndicator : MonoBehaviour
     [Tooltip("HUD 字体大小")]
     public int fontSize = 36;
     [Tooltip("文本颜色")]
-    public Color textColor = Color.white;
+    public Color textColor = UITheme.TextPrimary;
 
     private Canvas canvas;
     private Text infoText;
@@ -196,7 +196,7 @@ public class BlockHitIndicator : MonoBehaviour
 
         // 黑色描边增强对比：深色/浅色背景上均清晰可读（等效反色效果）
         Outline outline = go.AddComponent<Outline>();
-        outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        outline.effectColor = UITheme.WithAlpha(UITheme.Void, 0.9f);
         outline.effectDistance = new Vector2(3f, -3f);
 
         // 相机处于长方体内部时的提示（屏幕中上方，英文警示，亮黄描边）
@@ -212,7 +212,7 @@ public class BlockHitIndicator : MonoBehaviour
         insideText = insideGo.AddComponent<Text>();
         insideText.font = UIFontHelper.LoadMono();
         insideText.fontSize = 30;
-        insideText.color = new Color(1f, 0.85f, 0.2f);
+        insideText.color = UITheme.Value;
         insideText.alignment = TextAnchor.MiddleCenter;
         insideText.supportRichText = false;
         insideText.raycastTarget = false;
@@ -221,7 +221,7 @@ public class BlockHitIndicator : MonoBehaviour
         insideText.verticalOverflow = VerticalWrapMode.Overflow;
 
         Outline insideOutline = insideGo.AddComponent<Outline>();
-        insideOutline.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        insideOutline.effectColor = UITheme.WithAlpha(UITheme.Void, 0.9f);
         insideOutline.effectDistance = new Vector2(3f, -3f);
     }
 }

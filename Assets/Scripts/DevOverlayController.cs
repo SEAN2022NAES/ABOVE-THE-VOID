@@ -21,7 +21,7 @@ public class DevOverlayController : MonoBehaviour
     [Tooltip("面板文字大小")]
     public int fontSize = 18;
     [Tooltip("面板文字颜色")]
-    public Color textColor = new Color(0.85f, 0.95f, 1f, 1f);
+    public Color textColor = UITheme.TextSub;
 
     private Canvas canvas;
     private GameObject overlayRoot;

@@ -162,19 +162,19 @@ public class ScoreManager : MonoBehaviour
         if (scoreText == null)
             return;
         scoreText.text = "SCORE " + Score.ToString();
-        scoreText.color = Score < 0 ? new Color(1f, 0.35f, 0.35f, 1f) : Color.white;
+        scoreText.color = Score < 0 ? UITheme.Alert : UITheme.TextPrimary;
 
         if (deltaText != null)
         {
             if (shownDelta > 0)
             {
                 deltaText.text = "+" + shownDelta;
-                deltaText.color = new Color(0.35f, 1f, 0.6f, 1f);
+                deltaText.color = UITheme.Value;
             }
             else if (shownDelta < 0)
             {
                 deltaText.text = shownDelta.ToString();
-                deltaText.color = new Color(1f, 0.35f, 0.35f, 1f);
+                deltaText.color = UITheme.Alert;
             }
             else
             {
@@ -204,7 +204,7 @@ public class ScoreManager : MonoBehaviour
         RectTransform root = CreateRect("ScoreRoot", canvas.transform, new Vector2(1f, 1f), new Vector2(-24f, -24f), new Vector2(420f, 100f), new Vector2(1f, 1f));
         hudRoot = root.gameObject; // HUD 显隐总开关（Level 1 教学关隐藏）
 
-        scoreText = CreateText("ScoreText", root, "SCORE 0", 40, Color.white, TextAnchor.UpperRight);
+        scoreText = CreateText("ScoreText", root, "SCORE 0", 40, UITheme.TextPrimary, TextAnchor.UpperRight);
         RectTransform scoreRt = scoreText.rectTransform;
         scoreRt.anchorMin = new Vector2(1f, 1f);
         scoreRt.anchorMax = new Vector2(1f, 1f);
@@ -214,7 +214,7 @@ public class ScoreManager : MonoBehaviour
         scoreText.fontStyle = FontStyle.Bold;
         scoreText.supportRichText = false;
 
-        deltaText = CreateText("ScoreDeltaText", root, "", 28, Color.white, TextAnchor.UpperRight);
+        deltaText = CreateText("ScoreDeltaText", root, "", 28, UITheme.TextPrimary, TextAnchor.UpperRight);
         RectTransform deltaRt = deltaText.rectTransform;
         deltaRt.anchorMin = new Vector2(1f, 1f);
         deltaRt.anchorMax = new Vector2(1f, 1f);

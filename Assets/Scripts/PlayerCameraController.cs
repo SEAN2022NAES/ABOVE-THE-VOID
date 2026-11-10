@@ -524,14 +524,14 @@ public class PlayerCameraController : MonoBehaviour
         text.text = Localization.Pick("视场角过大，画面边缘可能出现扭曲", "Field of view is very wide - the image may distort");
         text.font = UIFontHelper.LoadForText(text.text, 22);
         text.fontSize = 22;
-        text.color = new Color(1f, 0.78f, 0.32f, 0.95f);
+        text.color = UITheme.WithAlpha(UITheme.Alert, 0.95f);
         text.alignment = TextAnchor.MiddleCenter;
         text.horizontalOverflow = HorizontalWrapMode.Overflow;
         text.verticalOverflow = VerticalWrapMode.Overflow;
         text.raycastTarget = false;
 
         Outline outline = textGo.AddComponent<Outline>();
-        outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        outline.effectColor = UITheme.WithAlpha(UITheme.Void, 0.9f);
         outline.effectDistance = new Vector2(2f, -2f);
 
         fovWarnCanvas = canvas;

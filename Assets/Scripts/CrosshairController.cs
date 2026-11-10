@@ -83,17 +83,17 @@ public class CrosshairController : MonoBehaviour
         {
             // 反色材质：白色像素输出 = 屏幕背景的反色
             img.material = invertMat;
-            img.color = Color.white;
+            img.color = UITheme.TextPrimary;
         }
         else
         {
             // 回退：黑描边（底层稍大）+ 白芯（上层）
             RectTransform borderRt = CreateRect(name + "_Border", parent, new Vector2(0.5f, 0.5f), pos, size + new Vector2(2f, 2f));
             Image borderImg = borderRt.gameObject.AddComponent<Image>();
-            borderImg.color = new Color(0f, 0f, 0f, 0.9f);
+            borderImg.color = UITheme.WithAlpha(UITheme.Void, 0.9f);
             borderImg.raycastTarget = false;
 
-            img.color = Color.white;
+            img.color = UITheme.TextPrimary;
         }
     }
 

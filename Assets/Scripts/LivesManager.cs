@@ -31,13 +31,13 @@ public class LivesManager : MonoBehaviour
 
     [Header("HUD 样式")]
     [Tooltip("剩余生命的方块颜色")]
-    public Color lifeColor = new Color(1f, 0.30f, 0.34f, 1f);
+    public Color lifeColor = UITheme.Alert;
 
     [Tooltip("已失去生命的方块颜色（灰暗）")]
-    public Color lifeEmptyColor = new Color(0.28f, 0.30f, 0.36f, 0.50f);
+    public Color lifeEmptyColor = UITheme.WithAlpha(UITheme.TextDim, 0.50f);
 
     [Tooltip("生命值 ≤1（濒死）时文本颜色")]
-    public Color lifeDangerColor = new Color(1f, 0.32f, 0.32f, 1f);
+    public Color lifeDangerColor = UITheme.AlertBright;
 
     /// <summary>当前剩余生命值。</summary>
     public int CurrentLives { get; private set; }
@@ -309,7 +309,7 @@ public class LivesManager : MonoBehaviour
         if (livesText != null)
         {
             livesText.text = "LIFE " + CurrentLives + "/" + Mathf.Max(1, maxLives);
-            livesText.color = CurrentLives <= 1 ? lifeDangerColor : Color.white;
+            livesText.color = CurrentLives <= 1 ? lifeDangerColor : UITheme.TextPrimary;
         }
 
         for (int i = 0; i < lifeMarks.Count; i++)
@@ -344,10 +344,10 @@ public class LivesManager : MonoBehaviour
                                        new Vector2(-24f, -124f), new Vector2(420f, 124f));
         hudRoot = root.gameObject;
 
-        livesText = CreateText("LivesText", root, "LIFE 5/5", 40, Color.white, TextAnchor.UpperRight, true);
+        livesText = CreateText("LivesText", root, "LIFE 5/5", 40, UITheme.TextPrimary, TextAnchor.UpperRight, true);
         livesText.fontStyle = FontStyle.Bold;
         SetRect(livesText.rectTransform, new Vector2(1f, 1f), Vector2.zero, new Vector2(420f, 56f));
-        AddOutline(livesText.gameObject, new Color(0f, 0f, 0f, 0.85f), new Vector2(2f, -2f));
+        AddOutline(livesText.gameObject, UITheme.WithAlpha(UITheme.Void, 0.85f), new Vector2(2f, -2f));
 
         // 生命方块行：右对齐，从左到右依次点亮（1 个方块 = 1 点生命）
         int count = Mathf.Max(1, maxLives);
@@ -370,7 +370,7 @@ public class LivesManager : MonoBehaviour
         // 减血提示：与 SCORE 的增量提示同风格（-1 红字，1.2 秒后消失）
         deltaText = CreateText("LivesDelta", root, string.Empty, 28, lifeDangerColor, TextAnchor.UpperRight, true);
         SetRect(deltaText.rectTransform, new Vector2(1f, 1f), new Vector2(0f, -82f), new Vector2(420f, 34f));
-        AddOutline(deltaText.gameObject, new Color(0f, 0f, 0f, 0.85f), new Vector2(2f, -2f));
+        AddOutline(deltaText.gameObject, UITheme.WithAlpha(UITheme.Void, 0.85f), new Vector2(2f, -2f));
     }
 
     // ================= Game Over 面板 =================
@@ -397,7 +397,7 @@ public class LivesManager : MonoBehaviour
                                        new Vector2(1920f, 1080f));
         Stretch(dim);
         Image dimImg = dim.gameObject.AddComponent<Image>();
-        dimImg.color = new Color(0.02f, 0.02f, 0.04f, 0.86f);
+        dimImg.color = UITheme.WithAlpha(UITheme.Void, 0.86f);
         dimImg.raycastTarget = true;
 
         gameOverRoot = dim.gameObject;
@@ -406,21 +406,21 @@ public class LivesManager : MonoBehaviour
         RectTransform panel = CreateRect("GameOverPanel", dim, new Vector2(0.5f, 0.5f), Vector2.zero,
                                          new Vector2(900f, 440f));
         Image panelImg = panel.gameObject.AddComponent<Image>();
-        panelImg.color = new Color(0.06f, 0.07f, 0.11f, 0.97f);
+        panelImg.color = UITheme.PanelDeep;
 
-        gameOverTitle = CreateText("GameOverTitle", panel, "GAME OVER", 84, new Color(1f, 0.28f, 0.32f, 1f),
+        gameOverTitle = CreateText("GameOverTitle", panel, "GAME OVER", 84, UITheme.Alert,
                                    TextAnchor.MiddleCenter, true);
         gameOverTitle.fontStyle = FontStyle.Bold;
         SetRect(gameOverTitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 130f), new Vector2(860f, 110f));
-        AddOutline(gameOverTitle.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(3f, -3f));
+        AddOutline(gameOverTitle.gameObject, UITheme.WithAlpha(UITheme.Void, 0.9f), new Vector2(3f, -3f));
 
         gameOverSubtitle = CreateText("GameOverSubtitle", panel, string.Empty, 30,
-                                      new Color(0.95f, 0.95f, 1f, 1f), TextAnchor.MiddleCenter, false);
+                                      UITheme.TextPrimary, TextAnchor.MiddleCenter, false);
         SetRect(gameOverSubtitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 36f), new Vector2(860f, 120f));
         gameOverSubtitle.lineSpacing = 1.15f;
 
         restartLabel = CreateButton("RestartButton", panel, new Vector2(-170f, -110f), new Vector2(300f, 72f),
-                                    new Color(0.20f, 0.62f, 0.72f, 0.95f));
+                                    UITheme.WithAlpha(UITheme.Accent, 0.85f));
         if (restartLabel != null)
         {
             Button btn = restartLabel.transform.parent.GetComponent<Button>();
@@ -429,7 +429,7 @@ public class LivesManager : MonoBehaviour
         }
 
         homeLabel = CreateButton("HomeButton", panel, new Vector2(170f, -110f), new Vector2(300f, 72f),
-                                 new Color(0.30f, 0.34f, 0.44f, 0.95f));
+                                 UITheme.PanelSunk);
         if (homeLabel != null)
         {
             Button btn = homeLabel.transform.parent.GetComponent<Button>();
@@ -438,7 +438,7 @@ public class LivesManager : MonoBehaviour
         }
 
         gameOverHint = CreateText("GameOverHint", panel, string.Empty, 22,
-                                  new Color(0.70f, 0.75f, 0.85f, 1f), TextAnchor.MiddleCenter, false);
+                                  UITheme.TextMuted, TextAnchor.MiddleCenter, false);
         SetRect(gameOverHint.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -180f), new Vector2(860f, 36f));
 
         gameOverRoot.SetActive(false);
@@ -559,7 +559,7 @@ public class LivesManager : MonoBehaviour
         Button btn = rt.gameObject.AddComponent<Button>();
         btn.targetGraphic = img;
 
-        Text label = CreateText("Label", rt, string.Empty, 30, Color.white, TextAnchor.MiddleCenter, false);
+        Text label = CreateText("Label", rt, string.Empty, 30, UITheme.TextPrimary, TextAnchor.MiddleCenter, false);
         Stretch(label.rectTransform);
         return label;
     }

@@ -42,11 +42,11 @@ public class CommandConsoleController : MonoBehaviour
     [Tooltip("输出区字号")]
     public int outputFontSize = 16;
     [Tooltip("面板底色")]
-    public Color panelColor = new Color(0.05f, 0.06f, 0.10f, 0.92f);
+    public Color panelColor = UITheme.Panel;
     [Tooltip("输入框底色")]
-    public Color inputBgColor = new Color(0f, 0f, 0f, 0.5f);
+    public Color inputBgColor = UITheme.CodeInputBg;
     [Tooltip("输出文字颜色")]
-    public Color outputColor = new Color(0.85f, 0.95f, 1f, 1f);
+    public Color outputColor = UITheme.TextBody;
 
     [Header("激光")]
     [Tooltip("激光半径（粗细），代码/指令参数可控制")]
@@ -77,7 +77,7 @@ public class CommandConsoleController : MonoBehaviour
     [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）")]
     public float laserVisualDuration = 0.9f;
     [Tooltip("激光视觉颜色")]
-    public Color laserColor = new Color(0.3f, 1f, 1f, 0.9f);
+    public Color laserColor = UITheme.WithAlpha(UITheme.Accent, 0.9f);
 
     private Canvas canvas;
     private GameObject consoleRoot;
@@ -667,7 +667,7 @@ public class CommandConsoleController : MonoBehaviour
             impactGo.transform.position = end;
             impactGo.transform.localScale = Vector3.one * radius * 3f;
             DisableLaserCollider(impactGo);
-            impactMat = CreateLaserMaterial(new Color(1f, 0.85f, 0.35f, 0.95f));
+            impactMat = CreateLaserMaterial(UITheme.WithAlpha(UITheme.Alert, 0.95f));
             impactGo.GetComponent<MeshRenderer>().sharedMaterial = impactMat;
         }
 
@@ -785,7 +785,7 @@ public class CommandConsoleController : MonoBehaviour
         panelImg.color = panelColor;
 
         // ---- 标题 ----
-        Text title = CreateText("Title", panelRt, "开发者指令框 (Dev Console)  -  ESC 关闭 / Enter 提交", titleFontSize, Color.white, TextAnchor.MiddleLeft);
+        Text title = CreateText("Title", panelRt, "开发者指令框 (Dev Console)  -  ESC 关闭 / Enter 提交", titleFontSize, UITheme.TextPrimary, TextAnchor.MiddleLeft);
         RectTransform titleRt = title.rectTransform;
         titleRt.anchorMin = new Vector2(0f, 1f);
         titleRt.anchorMax = new Vector2(1f, 1f);
@@ -821,13 +821,13 @@ public class CommandConsoleController : MonoBehaviour
         InputField input = inputGo.GetComponent<InputField>();
         input.targetGraphic = inputBg;
 
-        Text inputText = CreateText("Text", inputRt, "", inputFontSize, Color.white, TextAnchor.MiddleLeft);
+        Text inputText = CreateText("Text", inputRt, "", inputFontSize, UITheme.TextPrimary, TextAnchor.MiddleLeft);
         Stretch(inputText.rectTransform);
         inputText.supportRichText = false;
         inputText.font = UIFontHelper.LoadForText(inputText.text, inputText.fontSize); // v0.1.1：输入英文指令 → Consolas
         input.textComponent = inputText;
 
-        Text placeholder = CreateText("Placeholder", inputRt, "输入开发者指令，如 /level 1 1 / help", inputFontSize, new Color(0.6f, 0.6f, 0.6f, 1f), TextAnchor.MiddleLeft);
+        Text placeholder = CreateText("Placeholder", inputRt, "输入开发者指令，如 /level 1 1 / help", inputFontSize, UITheme.TextMuted, TextAnchor.MiddleLeft);
         Stretch(placeholder.rectTransform);
         placeholder.supportRichText = false;
         placeholder.font = UIFontHelper.LoadForText(placeholder.text, placeholder.fontSize); // v0.1.1：占位含中文 → 微软雅黑

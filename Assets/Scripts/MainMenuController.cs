@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
@@ -14,9 +14,9 @@ public class MainMenuController : MonoBehaviour
 {
     [Header("配色")]
     [Tooltip("主页背景色（半透明，露出后方坐标系作为主题背景）")]
-    public Color bgColor = new Color(0.04f, 0.05f, 0.09f, 0.88f);
+    public Color bgColor = UITheme.PanelDeep;
     [Tooltip("强调色（标题 / 副标题 / 关卡按钮）")]
-    public Color accentColor = new Color(0.30f, 1f, 1f, 1f);
+    public Color accentColor = UITheme.Accent;
 
     [Header("字号")]
     public int titleFontSize = 100;
@@ -313,39 +313,39 @@ public class MainMenuController : MonoBehaviour
         root = bg.gameObject;
 
         // ---- 标题 ----
-        titleText = CreateText("Title", root.transform, "ABOVE THE VOID", titleFontSize, Color.white, TextAnchor.MiddleCenter, true);
+        titleText = CreateText("Title", root.transform, "ABOVE THE VOID", titleFontSize, UITheme.TextPrimary, TextAnchor.MiddleCenter, true);
         titleText.fontStyle = FontStyle.Bold; // v0.1.1：标题加粗微调
         SetRect(titleText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 330f), new Vector2(1600f, 120f));
-        AddOutline(titleText.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(4f, -4f));
+        AddOutline(titleText.gameObject, UITheme.WithAlpha(UITheme.Void, 0.9f), new Vector2(4f, -4f));
 
         // ---- 副标题（主题展示）----
         subtitleText = CreateText("Subtitle", root.transform, "", subtitleFontSize, accentColor, TextAnchor.MiddleCenter, false);
         SetRect(subtitleText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 230f), new Vector2(1700f, 60f));
 
         // ---- 三坐标轴色彩点缀：X 蓝 / Y 红 / Z 绿 ----
-        CreateAxisBadge("AxisX", new Vector2(0f, 168f), -150f, "X", new Color(0.30f, 0.55f, 1f));
-        CreateAxisBadge("AxisY", new Vector2(0f, 168f), 0f, "Y", new Color(1f, 0.35f, 0.30f));
-        CreateAxisBadge("AxisZ", new Vector2(0f, 168f), 150f, "Z", new Color(0.30f, 1f, 0.40f));
+        CreateAxisBadge("AxisX", new Vector2(0f, 168f), -150f, "X", UITheme.AxisX);
+        CreateAxisBadge("AxisY", new Vector2(0f, 168f), 0f, "Y", UITheme.AxisY);
+        CreateAxisBadge("AxisZ", new Vector2(0f, 168f), 150f, "Z", UITheme.AxisZ);
 
         // ---- 分隔线 ----
         RectTransform divider = CreateRect("Divider", root.transform, new Vector2(0.5f, 0.5f), new Vector2(0f, 120f), new Vector2(900f, 2f), new Vector2(0.5f, 0.5f));
         Image dividerImg = divider.gameObject.AddComponent<Image>();
-        dividerImg.color = new Color(1f, 1f, 1f, 0.35f);
+        dividerImg.color = UITheme.Hairline;
 
         // ---- 项目目的（扩写：编程兴趣 + 数学思维；语言切换后刷新）----
-        bodyText = CreateText("Goal", root.transform, "", bodyFontSize, new Color(0.92f, 0.94f, 0.98f, 1f), TextAnchor.MiddleCenter, false);
+        bodyText = CreateText("Goal", root.transform, "", bodyFontSize, UITheme.TextBody, TextAnchor.MiddleCenter, false);
         SetRect(bodyText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -20f), new Vector2(1550f, 360f));
         bodyText.lineSpacing = 1.25f;
 
         // ---- 作者 ----
-        authorText = CreateText("Author", root.transform, "", authorFontSize, new Color(1f, 0.85f, 0.35f, 1f), TextAnchor.MiddleCenter, false);
+        authorText = CreateText("Author", root.transform, "", authorFontSize, UITheme.Value, TextAnchor.MiddleCenter, false);
         SetRect(authorText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -235f), new Vector2(1200f, 48f));
 
         // ---- 语言选择：中文 / English ----
         CreateLanguageSelector();
 
         // ---- 关卡区 ----
-        levelTitleText = CreateText("LevelTitle", root.transform, "", levelTitleFontSize, new Color(0.75f, 0.8f, 0.9f, 1f), TextAnchor.MiddleCenter, false);
+        levelTitleText = CreateText("LevelTitle", root.transform, "", levelTitleFontSize, UITheme.TextSub, TextAnchor.MiddleCenter, false);
         SetRect(levelTitleText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -304f), new Vector2(1200f, 44f));
 
         CreateLevelButton("Level1", new Vector2(-280f, -382f), 1, out level1Label);
@@ -361,7 +361,7 @@ public class MainMenuController : MonoBehaviour
     {
         Text t = CreateText(name, root.transform, label, 44, color, TextAnchor.MiddleCenter, true);
         SetRect(t.rectTransform, new Vector2(0.5f, 0.5f), center + new Vector2(offsetX, 0f), new Vector2(80f, 70f));
-        AddOutline(t.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
+        AddOutline(t.gameObject, UITheme.WithAlpha(UITheme.Void, 0.9f), new Vector2(2f, -2f));
     }
 
     /// <summary>
@@ -375,8 +375,8 @@ public class MainMenuController : MonoBehaviour
         RectTransform rt = CreateRect(name, root.transform, new Vector2(0.5f, 0.5f), pos, new Vector2(240f, 92f), new Vector2(0.5f, 0.5f));
         Image img = rt.gameObject.AddComponent<Image>();
         img.color = unlocked
-            ? new Color(0.20f, 0.62f, 0.72f, 0.55f)
-            : new Color(0.16f, 0.18f, 0.24f, 0.60f);
+            ? UITheme.WithAlpha(UITheme.Accent, 0.18f)
+            : UITheme.PanelSunk;
 
         Button btn = rt.gameObject.AddComponent<Button>();
         btn.targetGraphic = img;
@@ -387,7 +387,7 @@ public class MainMenuController : MonoBehaviour
             btn.onClick.AddListener(() => StartLevel(captured));
         }
 
-        labelText = CreateText("Label", rt, "", buttonFontSize, unlocked ? Color.white : new Color(0.55f, 0.58f, 0.65f, 1f), TextAnchor.MiddleCenter, false);
+        labelText = CreateText("Label", rt, "", buttonFontSize, unlocked ? UITheme.TextPrimary : UITheme.TextDim, TextAnchor.MiddleCenter, false);
         Stretch(labelText.rectTransform);
         labelText.lineSpacing = 0.9f;
 
@@ -428,8 +428,8 @@ public class MainMenuController : MonoBehaviour
             if (img != null)
             {
                 img.color = unlocked
-                    ? new Color(0.20f, 0.62f, 0.72f, 0.55f)
-                    : new Color(0.16f, 0.18f, 0.24f, 0.60f);
+                    ? UITheme.WithAlpha(UITheme.Accent, 0.18f)
+                    : UITheme.PanelSunk;
             }
 
             Text label = levelButtonLabels[i];
@@ -443,7 +443,7 @@ public class MainMenuController : MonoBehaviour
                     text += Localization.IsChinese ? "\n锁定" : "\nLOCKED";
                 label.fontSize = showBest ? Mathf.Max(16, buttonFontSize - 8) : buttonFontSize;
                 label.text = text;
-                label.color = unlocked ? Color.white : new Color(0.55f, 0.58f, 0.65f, 1f);
+                label.color = unlocked ? UITheme.TextPrimary : UITheme.TextDim;
                 label.font = UIFontHelper.LoadForText(label.text, label.fontSize);
             }
         }
@@ -487,13 +487,13 @@ public class MainMenuController : MonoBehaviour
     {
         RectTransform rt = CreateRect(name, root.transform, new Vector2(0.5f, 0.5f), pos, new Vector2(150f, 48f), new Vector2(0.5f, 0.5f));
         Image img = rt.gameObject.AddComponent<Image>();
-        img.color = new Color(0.16f, 0.22f, 0.30f, 0.60f);
+        img.color = UITheme.PanelSunk;
 
         Button btn = rt.gameObject.AddComponent<Button>();
         btn.targetGraphic = img;
         btn.onClick.AddListener(() => Localization.SetLanguage(isChinese ? GameLanguage.Chinese : GameLanguage.English));
 
-        Text t = CreateText("Label", rt, label, 24, new Color(0.85f, 0.92f, 1f, 1f), TextAnchor.MiddleCenter, false);
+        Text t = CreateText("Label", rt, label, 24, UITheme.TextPrimary, TextAnchor.MiddleCenter, false);
         Stretch(t.rectTransform);
         return t;
     }
@@ -564,9 +564,9 @@ public class MainMenuController : MonoBehaviour
     {
         bool zh = Localization.IsChinese;
         if (langZhLabel != null)
-            langZhLabel.color = zh ? accentColor : new Color(0.75f, 0.8f, 0.85f, 1f);
+            langZhLabel.color = zh ? accentColor : UITheme.TextMuted;
         if (langEnLabel != null)
-            langEnLabel.color = !zh ? accentColor : new Color(0.75f, 0.8f, 0.85f, 1f);
+            langEnLabel.color = !zh ? accentColor : UITheme.TextMuted;
     }
 
     // ---------------- 基础 UI 辅助 ----------------

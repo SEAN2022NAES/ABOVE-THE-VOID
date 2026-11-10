@@ -73,10 +73,16 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private const float SplitRatio = 0.5f;               // 上下对半平分：上方代码区 50%、下方指导框 50%，固定不随窗口 / 文案变化
     private const float GuideBodyTopInset = 132f;        // 正文上边距（让开强调线 / 标题 / 进度格 / 任务名）
     private const float GuideBodyBottomInset = 46f;      // 正文下边距（让开「任务完成 ✔」提示）
-    private const int GuideBodyFontSizeMax = 18;         // 正文最大字号（文案短时用满）
-    private const int GuideBodyFontSizeMin = 13;         // 正文最小字号（文案长时自动缩到不溢出半屏）
-    private const int GuideBodyFontSize = 18;            // 正文初始字号（构建时使用，运行期由 FitBodyFontSize 调整）
+    private const int GuideBodyFontSizeMax = 24;         // 左栏（目标 / 提示 / 判定）最大字号：文字少，尽量放大
+    private const int GuideBodyFontSizeMin = 16;         // 左栏最小字号（文案长时自动缩到不溢出半屏）
+    private const int GuideBodyFontSize = 22;            // 左栏初始字号（构建时使用，运行期由 FitColumnFontSize 调整）
+    private const int SampleFontSizeMax = 20;            // 右栏（写法 / 示例代码）最大字号
+    private const int SampleFontSizeMin = 13;            // 右栏最小字号
+    private const int SampleFontSize = 18;               // 右栏初始字号
     private const float GuideBodyLineSpacing = 1.05f;    // 正文行距
+    private const float ColumnSplitRatio = 0.5f;         // 左（引导）/ 右（示例代码）分栏界线位置（0.5 = 对半）
+    private const float ColumnGap = 28f;                 // 分栏内边距：文字与竖分隔线之间的间距
+    private const float DividerWidth = 2f;               // 分栏竖分隔线宽度
     private const float HintBarMaxWidth = 1400f;         // 提示条最大宽度
     private const float HintBarMinWidth = 420f;          // 提示条最小宽度
     private const float HintBarMinHeight = 64f;          // 提示条最小高度
@@ -86,7 +92,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private Text headlineText;         // 「关卡 1 · 第 2 部分 · C# 基础语法教学」
     private Text progressText;         // 「任务 2/18」
     private Text taskNameText;         // 当前任务名
-    private Text bodyText;             // 写法 / 目标 / 提示 / 判定 + 完成条件状态
+    private Text bodyText;             // 左栏：目标 / 提示 / 判定 + 完成条件状态
+    private Text sampleText;           // 右栏：写法 / 示例代码（无写法段时隐藏，左栏自动通栏）
+    private Image columnDivider;       // 左 / 右分栏之间的竖分隔线
+    private bool columnHasSample;      // 当前任务是否有右侧示例代码（决定是否分栏）
     private Text flashText;            // 「任务完成 ✔」短暂提示
     private Text[] chipTexts;          // 进度格文字（索引 = 任务序号）
     private Image[] chipBgs;           // 进度格底色
@@ -759,6 +768,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         ReloadFont(progressText);
         ReloadFont(taskNameText);
         ReloadFont(bodyText);
+        ReloadFont(sampleText);
         ReloadFont(flashText);
         ReloadFont(hintText);
         if (chipTexts != null)
@@ -822,15 +832,15 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             bool isCurrent = !finished && i == CurrentIndex;
             chipTexts[i].text = (i + 1).ToString();
             chipTexts[i].color = isDone
-                ? new Color(0.06f, 0.12f, 0.09f, 1f)
-                : (isCurrent ? new Color(0.06f, 0.10f, 0.16f, 1f) : new Color(0.62f, 0.66f, 0.70f, 1f));
+                ? UITheme.ValueBright
+                : (isCurrent ? UITheme.TextPrimary : UITheme.TextMuted);
             if (chipBgs[i] != null)
             {
                 Color chipColor = isDone
-                    ? new Color(0.24f, 0.72f, 0.42f, 0.98f)   // 已完成：绿
+                    ? UITheme.WithAlpha(UITheme.Value, 0.22f)   // 已完成：绿
                     : (isCurrent
-                        ? new Color(0.26f, 0.55f, 0.86f, 0.96f) // 当前：蓝
-                        : new Color(0.22f, 0.24f, 0.28f, 0.92f)); // 未开始：灰
+                        ? UITheme.WithAlpha(UITheme.Accent, 0.20f) // 当前：蓝
+                        : UITheme.PanelSunk); // 未开始：灰
                 chipBgs[i].color = chipColor;
                 if (chipBaseColors != null)
                     chipBaseColors[i] = chipColor; // 供悬停高亮还原
@@ -874,6 +884,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
                           + "Press Enter to reopen the editor and F6 to recompile.\n"
                           + "For the tower API tutorial type /level 2 1; to restart this one type /level 1 2.");
             }
+            if (sampleText != null)
+                sampleText.text = string.Empty;
+            LayoutGuideColumns();
             return;
         }
 
@@ -882,14 +895,46 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         {
             taskNameText.text = zh ? tasks[index].TitleZh : tasks[index].TitleEn;
             if (bodyText != null)
-                bodyText.text = BuildBody(index, zh);
+            {
+                string guidePart, samplePart;
+                SplitTaskBody(zh ? tasks[index].BodyZh : tasks[index].BodyEn, out guidePart, out samplePart);
+                bodyText.text = BuildGuideBody(index, zh, guidePart);
+                if (sampleText != null)
+                    sampleText.text = samplePart;
+                LayoutGuideColumns();
+            }
         }
     }
 
-    /// <summary>任务正文 = 写法 / 目标 / 提示 / 判定 + 本任务完成条件（语法 & 编译两条状态）。</summary>
-    private string BuildBody(int index, bool zh)
+    /// <summary>
+    /// 把任务正文按第一个空行拆成两段：首段 = 写法 / 签名 / 示例代码（放右栏），其余 = 目标 / 提示 / 判定（放左栏）。
+    /// 首段本身就是引导（「目标：」/「Goal:」开头）或全文没有空行时，整段留左栏通栏显示。
+    /// </summary>
+    private static void SplitTaskBody(string main, out string guide, out string sample)
     {
-        string main = zh ? tasks[index].BodyZh : tasks[index].BodyEn;
+        guide = main ?? string.Empty;
+        sample = string.Empty;
+        if (string.IsNullOrEmpty(main))
+            return;
+
+        int cut = main.IndexOf("\n\n", System.StringComparison.Ordinal);
+        if (cut <= 0)
+            return;
+
+        string head = main.Substring(0, cut);
+        bool headIsGuide = head.StartsWith("目标", System.StringComparison.Ordinal)
+            || head.StartsWith("Goal", System.StringComparison.Ordinal);
+        if (headIsGuide)
+            return;
+
+        sample = head;
+        guide = main.Substring(cut + 2).TrimStart('\n');
+    }
+
+    /// <summary>左栏正文 = 目标 / 提示 / 判定 + 本任务完成条件（语法 & 编译两条状态）。</summary>
+    private string BuildGuideBody(int index, bool zh, string guide)
+    {
+        string main = guide ?? string.Empty;
 
         bool hit = false;
         bool compiledHit = false;
@@ -918,13 +963,13 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         else
         {
             compileState = zh
-                ? "⏳ 等待编译 —— 写出上面的语法后，点标题栏【编译运行 (F6)】验证"
-                : "⏳ Not compiled yet — write the syntax, then click [Compile & Run (F6)]";
+                ? "⏳ 等待编译 —— 写出右侧的语法后，点标题栏【编译运行 (F6)】验证"
+                : "⏳ Not compiled yet — write the syntax on the right, then click [Compile & Run (F6)]";
         }
 
         string syntaxState = hit
             ? (zh ? "✔ 已命中" : "✔ Found")
-            : (zh ? "✘ 未命中 —— 请按上面的写法补全" : "✘ Missing — add it as shown above");
+            : (zh ? "✘ 未命中 —— 请按右侧的写法补全" : "✘ Missing — add it as shown on the right");
 
         StringBuilder sb = new StringBuilder(main.Length + 160);
         sb.Append(main);
@@ -1763,7 +1808,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         Image bg = panelRoot.AddComponent<Image>();
         bg.sprite = WhiteSprite();
-        bg.color = new Color(0.055f, 0.075f, 0.105f, 0.93f);
+        bg.color = UITheme.Panel;
         bg.raycastTarget = false; // 不挡编辑器输入：点击穿透到代码区
 
         // 顶部强调线（横向铺满）
@@ -1775,12 +1820,12 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         accentRt.sizeDelta = new Vector2(0f, 3f);
         Image accent = accentRt.gameObject.AddComponent<Image>();
         accent.sprite = WhiteSprite();
-        accent.color = new Color(0.26f, 0.62f, 0.92f, 0.95f);
+        accent.color = UITheme.WithAlpha(UITheme.Accent, 0.95f);
         accent.raycastTarget = false;
 
         // 标题
         headlineText = CreateText("Headline", panelRt, "", 24,
-            new Color(0.55f, 0.78f, 0.96f, 1f), TextAnchor.MiddleLeft);
+            UITheme.Accent, TextAnchor.MiddleLeft);
         RectTransform hlRt = headlineText.rectTransform;
         hlRt.anchorMin = new Vector2(0f, 1f);
         hlRt.anchorMax = new Vector2(0f, 1f);
@@ -1790,7 +1835,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         // 进度「任务 k/18」
         progressText = CreateText("Progress", panelRt, "", 21,
-            new Color(0.82f, 0.86f, 0.90f, 1f), TextAnchor.MiddleRight);
+            UITheme.TextBody, TextAnchor.MiddleRight);
         RectTransform pbRt = progressText.rectTransform;
         pbRt.anchorMin = new Vector2(1f, 1f);
         pbRt.anchorMax = new Vector2(1f, 1f);
@@ -1807,13 +1852,13 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
             Image chipBg = chipRt.gameObject.AddComponent<Image>();
             chipBg.sprite = WhiteSprite();
-            chipBg.color = new Color(0.22f, 0.24f, 0.28f, 0.92f);
+            chipBg.color = UITheme.PanelSunk;
             chipBg.raycastTarget = true; // 进度格可点击（点数字直接跳到该任务）
             chipBgs[i] = chipBg;
             chipBaseColors[i] = chipBg.color;
 
             Text chipText = CreateText("ChipText" + (i + 1), chipRt, (i + 1).ToString(), 17,
-                new Color(0.62f, 0.66f, 0.70f, 1f), TextAnchor.MiddleCenter);
+                UITheme.TextMuted, TextAnchor.MiddleCenter);
             Stretch(chipText.rectTransform);
             chipText.raycastTarget = false;
             chipTexts[i] = chipText;
@@ -1841,7 +1886,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         }
 
         // 任务名（横向铺满，右侧留 24 内边距）
-        taskNameText = CreateText("TaskName", panelRt, "", 26, Color.white, TextAnchor.MiddleLeft);
+        taskNameText = CreateText("TaskName", panelRt, "", 26, UITheme.TextPrimary, TextAnchor.MiddleLeft);
         RectTransform tnRt = taskNameText.rectTransform;
         tnRt.anchorMin = new Vector2(0f, 1f);
         tnRt.anchorMax = new Vector2(1f, 1f);
@@ -1849,24 +1894,55 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         tnRt.anchoredPosition = new Vector2(24f, -88f);
         tnRt.sizeDelta = new Vector2(-48f, 36f);
 
-        // 正文（写法 / 目标 / 提示 / 判定 + 完成条件）：上下边距固定，正文区高度 = 半屏高度 - 上下留白；
-        // 面板高度不因文案变化（ApplySplitLayout），字号由 FitBodyFontSize 自适应，文案永不溢出。
+        // 正文分左右两栏：左 = 目标 / 提示 / 判定 + 完成条件，右 = 写法 / 示例代码，中间一条竖分隔线；
+        // 这样左右两半都用起来，字号可以放大而不溢出（左右共用同一段正文区高度）。
+        // 上下边距固定，正文区高度 = 半屏高度 - 上下留白；面板高度不因文案变化（ApplySplitLayout），
+        // 字号由 FitBodyFontSize 按各自栏宽自适应。
         bodyText = CreateText("Body", panelRt, "", GuideBodyFontSize,
-            new Color(0.86f, 0.89f, 0.92f, 1f), TextAnchor.UpperLeft);
+            UITheme.TextBody, TextAnchor.UpperLeft);
         RectTransform bodyRt = bodyText.rectTransform;
         bodyRt.anchorMin = new Vector2(0f, 0f);
-        bodyRt.anchorMax = new Vector2(1f, 1f);
+        bodyRt.anchorMax = new Vector2(ColumnSplitRatio, 1f);
         bodyRt.pivot = new Vector2(0.5f, 0.5f);
         bodyRt.offsetMin = new Vector2(24f, GuideBodyBottomInset);
-        bodyRt.offsetMax = new Vector2(-24f, -GuideBodyTopInset);
+        bodyRt.offsetMax = new Vector2(-ColumnGap * 0.5f, -GuideBodyTopInset);
         bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
         bodyText.verticalOverflow = VerticalWrapMode.Overflow; // 文案先完整排版，再由面板高度兜住
         bodyText.lineSpacing = GuideBodyLineSpacing;
         bodyText.raycastTarget = false;
 
+        // 右栏：写法 / 示例代码（无写法段时隐藏，左栏自动变成通栏）
+        sampleText = CreateText("Sample", panelRt, "", SampleFontSize,
+            UITheme.TextBody, TextAnchor.UpperLeft);
+        RectTransform sampleRt = sampleText.rectTransform;
+        sampleRt.anchorMin = new Vector2(ColumnSplitRatio, 0f);
+        sampleRt.anchorMax = new Vector2(1f, 1f);
+        sampleRt.pivot = new Vector2(0.5f, 0.5f);
+        sampleRt.offsetMin = new Vector2(ColumnGap * 0.5f, GuideBodyBottomInset);
+        sampleRt.offsetMax = new Vector2(-24f, -GuideBodyTopInset);
+        sampleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        sampleText.verticalOverflow = VerticalWrapMode.Overflow;
+        sampleText.lineSpacing = GuideBodyLineSpacing;
+        sampleText.raycastTarget = false;
+
+        // 左 / 右分栏竖分隔线（贯穿正文区，用暗色细线，不抢文字）
+        GameObject dividerGo = new GameObject("ColumnDivider", typeof(RectTransform));
+        RectTransform dividerRt = dividerGo.GetComponent<RectTransform>();
+        dividerRt.SetParent(panelRt, false);
+        dividerRt.anchorMin = new Vector2(ColumnSplitRatio, 0f);
+        dividerRt.anchorMax = new Vector2(ColumnSplitRatio, 1f);
+        dividerRt.pivot = new Vector2(0.5f, 0.5f);
+        dividerRt.offsetMin = new Vector2(-DividerWidth * 0.5f, GuideBodyBottomInset);
+        dividerRt.offsetMax = new Vector2(DividerWidth * 0.5f, -GuideBodyTopInset);
+        columnDivider = dividerGo.AddComponent<Image>();
+        columnDivider.sprite = WhiteSprite();
+        columnDivider.color = UITheme.HairlineDim;
+        columnDivider.raycastTarget = false;
+        dividerGo.SetActive(false);
+
         // 「任务完成 ✔」提示
         flashText = CreateText("Flash", panelRt, "", 20,
-            new Color(0.42f, 0.92f, 0.60f, 1f), TextAnchor.MiddleLeft);
+            UITheme.Value, TextAnchor.MiddleLeft);
         RectTransform flRt = flashText.rectTransform;
         flRt.anchorMin = new Vector2(0f, 0f);
         flRt.anchorMax = new Vector2(1f, 0f);
@@ -1954,47 +2030,90 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             editor.SetBottomReservedHeight(height);
     }
 
-    /// <summary>固定半屏高度下的正文自适应字号：从最大号逐级缩小，直到正文实测高度落进可用高度（不低于最小号）。</summary>
+    /// <summary>
+    /// 分栏布局：有示例代码 → 左 = 引导、右 = 代码、中间竖分隔线；没有示例代码 → 左栏通栏，右栏与分隔线隐藏。
+    /// 必须在排版（FitBodyFontSize）之前调用，字号自适应依赖当次栏宽。
+    /// </summary>
+    private void LayoutGuideColumns()
+    {
+        bool hasSample = sampleText != null && !string.IsNullOrEmpty(sampleText.text);
+        columnHasSample = hasSample;
+
+        if (columnDivider != null && columnDivider.gameObject.activeSelf != hasSample)
+            columnDivider.gameObject.SetActive(hasSample);
+
+        if (sampleText != null && sampleText.gameObject.activeSelf != hasSample)
+            sampleText.gameObject.SetActive(hasSample);
+
+        RectTransform bodyRt = bodyText != null ? bodyText.rectTransform : null;
+        if (bodyRt == null)
+            return;
+
+        bodyRt.anchorMin = new Vector2(0f, 0f);
+        bodyRt.anchorMax = new Vector2(hasSample ? ColumnSplitRatio : 1f, 1f);
+        bodyRt.offsetMin = new Vector2(24f, GuideBodyBottomInset);
+        bodyRt.offsetMax = new Vector2(hasSample ? -ColumnGap * 0.5f : -24f, -GuideBodyTopInset);
+    }
+
+    /// <summary>固定半屏高度下的分栏自适应字号：左右两栏各按自己的栏宽从最大号逐级缩小，直到实测高度落进可用高度。</summary>
     private void FitBodyFontSize(float panelHeight)
     {
         if (bodyText == null)
             return;
 
         float available = Mathf.Max(80f, panelHeight - GuideBodyTopInset - GuideBodyBottomInset);
-        float width = PanelWidth();
+        float panelWidth = PanelWidth();
+        float halfGap = ColumnGap * 0.5f;
 
-        int before = bodyText.fontSize;
-        int picked = GuideBodyFontSizeMin;
-        for (int size = GuideBodyFontSizeMax; size >= GuideBodyFontSizeMin; size--)
+        float leftWidth = columnHasSample
+            ? panelWidth * ColumnSplitRatio - 24f - halfGap
+            : panelWidth - 48f;
+        float rightWidth = panelWidth * (1f - ColumnSplitRatio) - 24f - halfGap;
+
+        FitColumnFontSize(bodyText, leftWidth, GuideBodyFontSizeMax, GuideBodyFontSizeMin, available);
+
+        if (columnHasSample)
+            FitColumnFontSize(sampleText, rightWidth, SampleFontSizeMax, SampleFontSizeMin, available);
+    }
+
+    /// <summary>单栏自适应字号：从 maxSize 逐级试到 minSize，取第一个能塞进可用高度的字号。</summary>
+    private void FitColumnFontSize(Text t, float columnWidth, int maxSize, int minSize, float available)
+    {
+        if (t == null || string.IsNullOrEmpty(t.text))
+            return;
+
+        int before = t.fontSize;
+        int picked = minSize;
+        for (int size = maxSize; size >= minSize; size--)
         {
             picked = size;
-            bodyText.fontSize = size;
-            if (GuideBodyHeight(width) <= available)
+            t.fontSize = size;
+            if (MeasureTextHeight(t, columnWidth, size) <= available)
                 break;
         }
 
-        bodyText.fontSize = picked;
-        bodyText.lineSpacing = GuideBodyLineSpacing;
+        t.fontSize = picked;
+        t.lineSpacing = GuideBodyLineSpacing;
 
         if (before != picked)
-            ReloadFont(bodyText); // 字号变化后按新字号重选字体（中文微软雅黑 / 英文 Consolas），避免中文缺字形
+            ReloadFont(t); // 字号变化后按新字号重选字体（中文微软雅黑 / 英文 Consolas），避免中文缺字形
     }
 
-    /// <summary>正文（写法 / 目标 / 提示 / 判定）在给定面板宽度下的实测高度；排版未完成时退回估算值。</summary>
-    private float GuideBodyHeight(float panelWidth)
+    /// <summary>给定文本在指定宽度下的实测高度；首帧排版未就绪时按每行字数估算。</summary>
+    private static float MeasureTextHeight(Text t, float width, int fallbackFontSize)
     {
-        if (bodyText == null)
+        if (t == null)
             return 0f;
 
-        float width = Mathf.Max(200f, panelWidth - 48f);
-        string content = bodyText.text == null ? "" : bodyText.text;
+        float wrapWidth = Mathf.Max(120f, width);
+        string content = t.text == null ? "" : t.text;
 
-        TextGenerationSettings settings = bodyText.GetGenerationSettings(new Vector2(width, 0f));
+        TextGenerationSettings settings = t.GetGenerationSettings(new Vector2(wrapWidth, 0f));
         settings.horizontalOverflow = HorizontalWrapMode.Wrap;
         settings.verticalOverflow = VerticalWrapMode.Overflow;
         settings.lineSpacing = GuideBodyLineSpacing;
-        float preferred = bodyText.cachedTextGeneratorForLayout.GetPreferredHeight(content, settings);
-        float scale = bodyText.pixelsPerUnit > 0.01f ? bodyText.pixelsPerUnit : 1f;
+        float preferred = t.cachedTextGeneratorForLayout.GetPreferredHeight(content, settings);
+        float scale = t.pixelsPerUnit > 0.01f ? t.pixelsPerUnit : 1f;
         float height = preferred / scale;
 
         if (height <= 1f)
@@ -2005,12 +2124,12 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             for (int i = 0; i < raw.Length; i++)
             {
                 float estimated = Mathf.Max(1f, raw[i].Length);
-                lines += Mathf.Max(1, Mathf.CeilToInt(estimated / Mathf.Max(1f, width / GuideBodyFontSize)));
+                lines += Mathf.Max(1, Mathf.CeilToInt(estimated / Mathf.Max(1f, wrapWidth / fallbackFontSize)));
             }
-            height = lines * GuideBodyFontSize * GuideBodyLineSpacing;
+            height = lines * fallbackFontSize * GuideBodyLineSpacing;
         }
 
-        return Mathf.Max(height, GuideBodyFontSize * 1.2f);
+        return Mathf.Max(height, fallbackFontSize * 1.2f);
     }
 
     private void BuildHintBar(Transform parent)
@@ -2025,10 +2144,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         Image bg = hintRoot.AddComponent<Image>();
         bg.sprite = WhiteSprite();
-        bg.color = new Color(0f, 0f, 0f, 0.55f);
+        bg.color = UITheme.ScrimSoft;
         bg.raycastTarget = false;
 
-        hintText = CreateText("HintText", hintRt, "", 22, Color.white, TextAnchor.MiddleCenter);
+        hintText = CreateText("HintText", hintRt, "", 22, UITheme.TextPrimary, TextAnchor.MiddleCenter);
         Stretch(hintText.rectTransform);
         hintText.horizontalOverflow = HorizontalWrapMode.Wrap;
         hintText.verticalOverflow = VerticalWrapMode.Overflow;

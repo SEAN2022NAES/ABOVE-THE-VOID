@@ -11,7 +11,37 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.1**
+Current version: **v0.2.2**
+
+### v0.2.2
+
+**UI theme**
+
+- Added `UITheme` as the single source of colour for every runtime-built surface: the void background, the accent cyan, the on-accent (dark) text, the dimmed text, the editor and panel surfaces, and the syntax highlight colours.
+- The menu, HUD, crosshair, hit indicator, lives bar, screen fade, tower print screen, developer console, developer overlay, settings panel, tutorial panel and code editor now read their colours from it instead of repeating literal `Color` values, so one edit re-colours the whole UI; text sitting on the accent colour switches to the dark on-accent colour instead of white.
+
+**Code editor**
+
+- The editor is segmented: past `segEnableThreshold` (15000) characters the code is split into blocks of at most `segCharBudget` (14000) characters and any block over 15500 characters is re-split, so a long file no longer hits the 16383-vertex limit of a single UI `Text`. The caret is converted between the block-local and the global index, and a cut is aligned to a blank line when one is close enough.
+- The extra line each block end adds is filled with a diagonal stripe band, so the seam does not look like an editable empty line.
+- Line height is measured per block (rendered preferred height divided by the rendered line count) instead of being derived from the font size, so the line numbers stay aligned with the code and no band of blank lines builds up past line 400.
+- Column layout is skipped while the layout signature (text, font size, width, height) is unchanged, so typing no longer re-flows the whole document.
+- Click placement is guarded for 0.5s after a click, because an `InputField` re-activates and rewrites the caret after the pointer is released: the guard hands the caret back on a drag of 6 pixels or more, on Shift, on any key press, on a change of the text length, or when the window expires, and a double click (under 0.35s and 30 pixels apart) is left to the field.
+- The click position is converted to a character index through `InputField.GetCharacterIndexFromPosition` and falls back to the measured character width, so a click lands on the character under the pointer.
+- The scroll follows the caret using the block-local line multiplied by the measured line height, with a two-way gate that stops a typing frame from bouncing between two rows.
+- Dragging a selection outside the viewport rolls the selection back instead of letting the caret run away.
+- Added a code file picker: browse folders page by page, open a `.cs` file into the editor, or save the current code to a chosen folder, with a desktop shortcut, a parent-folder entry, a remembered last directory and a hover tip on every control.
+- `Alt+O` and `Ctrl+Shift+O` open the editor from anywhere; `Ctrl+O` is only honoured outside the Unity editor, because the editor consumes it for File > Open Project.
+
+**Syntax tutorial panel**
+
+- The panel is split left and right inside the fixed half-screen: goal, hints, checks and completion state on the left, the signature and sample code on the right, with a thin divider between them. When a task has no sample code the left column spans the full width and the right column and divider stay hidden.
+- Each column picks its own font size, from its maximum down to its minimum, until the measured text fits the shared height, so a long task no longer shrinks the whole panel.
+- The Level 1 laser hint is rewritten: each hit eats one layer, a block's layers equal its own maximum HP, and the bottom `HP: current/max` line is explained before the first shot.
+
+**Maintenance**
+
+- Added `CodeEditorCaretGuard` (`[DefaultExecutionOrder(20000)]`), the small component the editor attaches to itself to run its click-guard tick in `LateUpdate`.
 
 ### v0.2.1
 
@@ -303,9 +333,11 @@ ABOVE THE VOID/
 │       ├── GameProgress.cs                # Save data: resume point and high scores
 │       ├── EscapeRouter.cs                # Single ESC input router
 │       ├── CodeEditorController.cs        # In-game code editor and runner
+│       ├── CodeEditorCaretGuard.cs       # Click-caret guard tick for the editor
 │       ├── CodeSyntaxTutorialController.cs  # Level 1 grammar and Level 2 API course panel
 │       ├── CodeTower.cs                   # Code-controlled tower interface
 │       ├── UIFitScreen.cs                 # Screen-fitting UI helper
+│       ├── UITheme.cs                     # Single colour source for the whole UI
 │       ├── PlayerCameraController.cs      # Camera and movement state machine
 │       ├── CoordinateAxesDrawer.cs        # 3D coordinate axes
 │       └── SettingsPanelController.cs     # Pause and settings UI
@@ -351,7 +383,7 @@ For a manual setup, create an empty scene, add an empty GameObject with `GameBoo
 | E | Freeze or resume time. |
 | ESC | Pause or resume gameplay. |
 | `~` | Open the developer console (ESC closes it). |
-| Enter | Open or close the code editor. |
+| Enter | Open or close the code editor (also `Alt+O` or `Ctrl+Shift+O` from anywhere). |
 | Settings button | Open the pause/settings panel. |
 
 ## 7. Camera State Machine
@@ -391,7 +423,8 @@ Use the Inspector to adjust:
 - `SettingsPanelController`: sensitivity range and UI colors.
 - `FlyingBlockSpawner`: spawn interval, block size limits, speed, spawn distance, and block type probabilities.
 - `FlyingBlock`: size, speed, overlap margin, and externally controlled destruction.
-- `CodeEditorController`: editor font sizes, colors, line height, caret blink rate, and the Enter key binding.
+- `UITheme`: the whole UI palette (void background, accent, on-accent text, dimmed text, editor surfaces, syntax colours).
+- `CodeEditorController`: editor font sizes, line height, caret blink rate, the Enter / `Alt+O` / `Ctrl+Shift+O` bindings, and the segment thresholds (`segEnableThreshold`, `segCharBudget`).
 
 ## 10. Future Extensions
 
