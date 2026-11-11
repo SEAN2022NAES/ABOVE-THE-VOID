@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 玩家游玩进度存档（断点续玩 + 各关最高分），全部基于 PlayerPrefs 持久化，跨重启保留。
@@ -16,10 +16,16 @@ using UnityEngine;
 ///   - 提交时机：Level 3 一局结束（判负 GAME OVER / 返回主页 / 用 /level 跳走）时，本局分数高于历史最高分才写入；
 ///   - 无记录时 GetHighScore 返回 0、HasHighScore 返回 false，主页不显示最高分行。
 ///
-/// 三、与 /lock 联动
-///   - /lock 回厂重置调用 ClearAll()，一次清空续玩断点与全部最高分存档。
+/// 三、任务完成记录（TaskDone）
+///   - 每个教学课程一份「哪些章节真的做过」的记录：键 ABOVETHEVOID.Done.&lt;课程名&gt;，内容为等长的 0/1 串；
+///   - 用途：任务卡顶部的进度格只标记「玩家实际完成过的任务」，而不是「当前序号之前的一律算做过」，
+///     所以用 /level 直接跳到第 10 个任务时，前面 9 个仍然是未完成状态；
+///   - 写入时机：每个任务完成时立刻写盘；读取时机：进入课程（Begin）时读回。
+
+/// 四、与 /lock 联动
+///   - /lock 回厂重置调用 ClearAll()，一次清空续玩断点、任务完成记录与全部最高分存档。
 ///
-/// 四、兼容性
+/// 五、兼容性
 ///   - 未存过档的老玩家：所有读取都先判 HasKey，缺省一律视为「无存档」，行为与加持久化前完全一致
 ///     （主页进关卡从该关开头开始、主页不显示最高分），读取路径不写任何键。
 /// </summary>
@@ -28,7 +34,7 @@ public static class GameProgress
     /// <summary>PlayerPrefs 键：续玩断点的关卡号（1~3）。</summary>
     public const string ResumeLevelKey = "ABOVETHEVOID.ResumeLevel";
 
-    /// <summary>PlayerPrefs 键：续玩断点的分区号（1~2）。</summary>
+    /// <summary>PlayerPrefs 键：续玩断点的分区号（1~3，仅 Level 1 用到 3）。</summary>
     public const string ResumePartKey = "ABOVETHEVOID.ResumePart";
 
     /// <summary>PlayerPrefs 键：续玩断点的章节号（1 起；0 = 该分区无章节拆分）。</summary>
@@ -37,11 +43,23 @@ public static class GameProgress
     /// <summary>PlayerPrefs 键前缀：各关最高分，完整键名 = 前缀 + 关卡号（如 ABOVETHEVOID.HighScore.Level3）。</summary>
     public const string HighScoreKeyPrefix = "ABOVETHEVOID.HighScore.Level";
 
+    /// <summary>PlayerPrefs 键前缀：各课程「已完成任务」记录，完整键名 = 前缀 + 课程名（如 ABOVETHEVOID.Done.Api）。</summary>
+    public const string TaskDoneKeyPrefix = "ABOVETHEVOID.Done.";
+
+    /// <summary>C# 语法课（Level 1 - Part 3）的任务完成记录键名。</summary>
+    public const string TaskDoneKeyGrammar = TaskDoneKeyPrefix + "Grammar";
+
+    /// <summary>炮台 API 课（Level 2 - Part 2）的任务完成记录键名。</summary>
+    public const string TaskDoneKeyApi = TaskDoneKeyPrefix + "Api";
+
+    /// <summary>方块图鉴关（Level 2 - Part 1）的页码完成记录键名。</summary>
+    public const string TaskDoneKeyBlockIntro = TaskDoneKeyPrefix + "BlockIntro";
+
     /// <summary>分区号最小值。</summary>
     public const int MinPart = 1;
 
-    /// <summary>分区号最大值（仅 Level 1 有 part 1 / part 2 两个分区）。</summary>
-    public const int MaxPart = 2;
+    /// <summary>分区号最大值（Level 1 有 part 1 / 2 / 3，Level 2 有 part 1 / 2，其余关卡只有 part 1）。</summary>
+    public const int MaxPart = 3;
 
     /// <summary>本次运行的当前位置：关卡号（0 = 不在任何关卡内，例如停在主页）。</summary>
     public static int CurrentLevel { get; private set; }
@@ -62,7 +80,8 @@ public static class GameProgress
 
     /// <summary>
     /// 该「关卡 - 分区」是否为已实现的分区（与 LevelDirector.JumpTo 的分区集合保持一致：
-    /// level 1 - part 1、level 1 - part 2、level 2 - part 1、level 3 - part 1）。
+    /// level 1 - part 1（引导教学）、level 1 - part 2（编程序章讲解）、level 1 - part 3（C# 语法课）、
+    /// level 2 - part 1（方块图鉴）、level 2 - part 2（炮台 API 课）、level 3 - part 1）。
     /// </summary>
     public static bool IsSupportedLocation(int level, int part)
     {
@@ -71,42 +90,106 @@ public static class GameProgress
         if (part < MinPart || part > MaxPart)
             return false;
         if (level == 1)
+            return part == 1 || part == 2 || part == 3;
+        if (level == 2)
             return part == 1 || part == 2;
         return part == 1;
     }
 
-    /// <summary>该关卡的分区总数（Level 1 为 2，其余为 1）。</summary>
+    /// <summary>该关卡的分区总数（Level 1 为 3、Level 2 为 2，其余为 1）。</summary>
     public static int GetPartCount(int level)
     {
-        return level == 1 ? 2 : 1;
+        if (level == 1)
+            return 3;
+        if (level == 2)
+            return 2;
+        return 1;
     }
 
     /// <summary>
     /// 该「关卡 - 分区」的章节（section）总数；返回 0 表示该分区没有章节拆分。
-    /// 章节拆分只存在于代码编辑器教学关：Level 1 - Part 2 语法课（18 项任务）、Level 2 - Part 1 API 课（13 项任务）。
+    /// 章节拆分：Level 1 - Part 2 编程序章（页数，可翻页）、Level 1 - Part 3 C# 语法课（18 项任务）、
+    /// Level 2 - Part 1 方块图鉴（页数）、Level 2 - Part 2 API 课（13 项任务）。
     /// </summary>
     public static int GetSectionCount(int level, int part)
     {
         if (level == 1 && part == 2)
+            return CodeIntroTutorialController.PageCount;
+        if (level == 1 && part == 3)
             return CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Grammar);
         if (level == 2 && part == 1)
+            return BlockIntroController.PageCount;
+        if (level == 2 && part == 2)
             return CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Api);
         return 0;
     }
 
-    /// <summary>教学课程 → 「关卡 - 分区」映射（语法课 = Level 1 - Part 2，API 课 = Level 2 - Part 1）。</summary>
+    /// <summary>教学课程 → 「关卡 - 分区」映射（语法课 = Level 1 - Part 3，API 课 = Level 2 - Part 2）。</summary>
     public static void GetCourseLocation(CodeSyntaxTutorialController.Course course, out int level, out int part)
     {
         if (course == CodeSyntaxTutorialController.Course.Api)
         {
             level = 2;
-            part = 1;
+            part = 2;
         }
         else
         {
             level = 1;
-            part = 2;
+            part = 3;
         }
+    }
+
+    // ==================== 任务完成记录 ====================
+
+    /// <summary>
+    /// 读取某课程「哪些章节真的做过」的记录，长度 = count；没有记录时返回全 false 的数组（不写任何键）。
+    /// 记录的是一份独立的完成表，而不是「当前序号之前的都算做过」——用 /level 直接跳到第 10 个任务时，
+    /// 第 1~9 个不会被误标为已完成。
+    /// </summary>
+    public static bool[] LoadTaskDone(string key, int count)
+    {
+        bool[] done = new bool[Mathf.Max(0, count)];
+        if (string.IsNullOrEmpty(key) || count <= 0)
+            return done;
+        if (!PlayerPrefs.HasKey(key))
+            return done;
+
+        string raw = PlayerPrefs.GetString(key, string.Empty);
+        if (string.IsNullOrEmpty(raw))
+            return done;
+
+        int len = Mathf.Min(raw.Length, done.Length);
+        for (int i = 0; i < len; i++)
+            done[i] = raw[i] == '1';
+        return done;
+    }
+
+    /// <summary>写入某课程的任务完成记录（0/1 串）并 PlayerPrefs.Save()；空数组视为清除该键。</summary>
+    public static void SaveTaskDone(string key, bool[] done)
+    {
+        if (string.IsNullOrEmpty(key))
+            return;
+        if (done == null || done.Length == 0)
+        {
+            PlayerPrefs.DeleteKey(key);
+            PlayerPrefs.Save();
+            return;
+        }
+
+        char[] chars = new char[done.Length];
+        for (int i = 0; i < done.Length; i++)
+            chars[i] = done[i] ? '1' : '0';
+        PlayerPrefs.SetString(key, new string(chars));
+        PlayerPrefs.Save();
+    }
+
+    /// <summary>清除全部课程的任务完成记录（/lock 回厂重置）。</summary>
+    public static void ClearAllTaskDone()
+    {
+        PlayerPrefs.DeleteKey(TaskDoneKeyGrammar);
+        PlayerPrefs.DeleteKey(TaskDoneKeyApi);
+        PlayerPrefs.DeleteKey(TaskDoneKeyBlockIntro);
+        PlayerPrefs.Save();
     }
 
     // ==================== 断点续玩：写 ====================
@@ -204,6 +287,21 @@ public static class GameProgress
         if (savedLevel != level)
             return false; // 存档属于别的关卡：与本关无关，从本关开头进入
 
+        // 存档迁移（教学关重排）：旧版本里「Level 1 - Part 2」是 C# 语法课（18 项任务），
+        // 现在语法课整体挪到 Level 1 - Part 3，Part 2 改为「编程序章」讲解关（4 页）。
+        // 旧存档的 part=2 一定指旧语法课，因此原样迁移到 part=3（章节号保留，越界则回落到第 1 章），
+        // 迁移后立即写回盘，保证玩家进度不因这次重排而回退，也不会被反复迁移。
+        if (savedLevel == 1 && savedPart == 2)
+        {
+            int grammarCount = CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Grammar);
+            int migrateSection = (savedSection >= 1 && savedSection <= grammarCount) ? savedSection : 1;
+            Debug.Log("[GameProgress] 旧存档迁移：Level 1 - Part 2（旧语法课）第 " + savedSection +
+                      " 章 → Level 1 - Part 3 第 " + migrateSection + " 章。");
+            savedPart = 3;
+            savedSection = migrateSection;
+            SaveResume(savedLevel, savedPart, savedSection);
+        }
+
         if (!IsSupportedLocation(savedLevel, savedPart))
         {
             Debug.LogWarning("[GameProgress] 续玩存档脏值（Level " + savedLevel + " - Part " + savedPart +
@@ -296,18 +394,21 @@ public static class GameProgress
     }
 
     /// <summary>
-    /// /lock 回厂重置的统一清理入口：续玩断点（Level / Part / Section 三个键）+ 全部关卡最高分一次清空，
-    /// 并把本次运行的当前位置重置为「不在任何关卡内」。
+    /// /lock 回厂重置的统一清理入口：续玩断点（Level / Part / Section 三个键）+ 全部关卡最高分 + 各课程任务完成记录
+    /// 一次清空，并把本次运行的当前位置重置为「不在任何关卡内」。
     /// </summary>
     public static void ClearAll()
     {
         PlayerPrefs.DeleteKey(ResumeLevelKey);
         PlayerPrefs.DeleteKey(ResumePartKey);
         PlayerPrefs.DeleteKey(ResumeSectionKey);
+        PlayerPrefs.DeleteKey(TaskDoneKeyGrammar);
+        PlayerPrefs.DeleteKey(TaskDoneKeyApi);
+        PlayerPrefs.DeleteKey(TaskDoneKeyBlockIntro);
         for (int level = LevelProgress.MinLevel; level <= LevelProgress.MaxLevel; level++)
             PlayerPrefs.DeleteKey(GetHighScoreKey(level));
         PlayerPrefs.Save();
         ClearSessionPosition();
-        Debug.Log("[GameProgress] 回厂重置：续玩断点与全部最高分存档已清空。");
+        Debug.Log("[GameProgress] 回厂重置：续玩断点、任务完成记录与全部最高分存档已清空。");
     }
 }

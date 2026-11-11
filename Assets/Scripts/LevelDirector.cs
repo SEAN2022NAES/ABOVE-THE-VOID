@@ -1,9 +1,10 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 关卡跳转导演（开发者指令 /level 专用）：
-///   - 负责从任意状态跳转到指定「关卡 - 分区」（已实现 level 1 - part 1 / level 1 - part 2 /
-///     level 2 - part 1 / level 3 - part 1）；
+///   - 负责从任意状态跳转到指定「关卡 - 分区」（已实现 level 1 - part 1 引导教学 /
+///     level 1 - part 2 编程序章 / level 1 - part 3 C# 语法课 / level 2 - part 1 方块图鉴 /
+///     level 2 - part 2 炮台 API 课 / level 3 - part 1）；
 ///   - 跳转动作：隐藏主页（若显示）、重置玩家到开局、清空场上长方体并重新开始生成、
 ///     按分区配置顶部时间提示显隐；
 ///   - JumpTo 返回面向指令框的结果文本。
@@ -18,22 +19,29 @@ public static class LevelDirector
 
     /// <summary>
     /// 跳转到指定关卡分区，并可直接定位到该分区第 section 个 part 章节（1 起；section &lt;= 0 表示从第 1 章开始）。
-    /// 章节拆分仅存在于代码编辑器教学关（Level 1 - Part 2 语法课 / Level 2 - Part 1 API 课），
+    /// 章节拆分仅存在于教学关（Level 1 - Part 2 讲解页 / Level 1 - Part 3 语法课 / Level 2 - Part 1 方块图鉴 / Level 2 - Part 2 API 课），
     /// 其他关卡传入 section 时按「无章节拆分、从开头进入」处理并提示。
     /// </summary>
     public static string JumpTo(int level, int part, int section)
     {
-        bool level1 = (level == 1 && part == 1); // 引导教学关
-        bool level2 = (level == 1 && part == 2); // C# 基础语法教学关（代码编辑器内教学，18 项任务）
-        bool levelApi = (level == 2 && part == 1); // 炮台 API 调用教学关（代码编辑器内教学，13 项任务）
-        bool level3 = (level == 3 && part == 1); // 完整玩法关（跳过教学）
-        if (!level1 && !level2 && !levelApi && !level3)
-            return "[level] 该关卡部分尚未开放（当前已实现：level 1 - part 1、level 1 - part 2、level 2 - part 1、level 3 - part 1）。";
+        bool level1 = (level == 1 && part == 1);        // 引导教学关（全程手动点方块）
+        bool levelIntro = (level == 1 && part == 2);    // 编程序章讲解关（多页阅读，最后一页直接进语法课）
+        bool levelGrammar = (level == 1 && part == 3);  // C# 基础语法教学关（代码编辑器内教学，18 项任务）
+        bool levelBlockIntro = (level == 2 && part == 1); // 方块图鉴关（旋转立方体 + 多页阅读，最后一页直接进 API 课）
+        bool levelApi = (level == 2 && part == 2);      // 炮台 API 调用教学关（代码编辑器内教学，13 项任务）
+        bool level3 = (level == 3 && part == 1);        // 完整玩法关（跳过教学）
+        if (!level1 && !levelIntro && !levelGrammar && !levelBlockIntro && !levelApi && !level3)
+            return "[level] 该关卡部分尚未开放（当前已实现：level 1 - part 1、level 1 - part 2、level 1 - part 3、" +
+                   "level 2 - part 1、level 2 - part 2、level 3 - part 1）。";
 
         // 章节参数校验：必须在改动任何状态之前完成，越界只提示、不跳转、不崩
         int chapterCount = 0;
-        if (level2)
+        if (levelIntro)
+            chapterCount = CodeIntroTutorialController.PageCount; // 讲解关的「章节」= 讲解页
+        else if (levelGrammar)
             chapterCount = CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Grammar);
+        else if (levelBlockIntro)
+            chapterCount = BlockIntroController.PageCount;       // 图鉴关的「章节」= 图鉴页
         else if (levelApi)
             chapterCount = CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Api);
 
@@ -57,7 +65,9 @@ public static class LevelDirector
         // 离开主页进入关卡：恢复三维坐标轴显示（主页期间被 LevelPresentation.ApplyMainMenu 隐藏）
         LevelPresentation.RestoreAxes();
 
-        // 先结束可能仍在进行的「代码编辑器 C# 语法教学」（跳进 part 2 时会在下方重新开始并重置进度）
+        // 先结束可能仍在进行的教学序列（编程序章 / 方块图鉴 / 语法课），跳进对应分区时会在下方重新开始并重置进度
+        CodeIntroTutorialController.End();
+        BlockIntroController.End();
         CodeSyntaxTutorialController.End();
 
         // 隐藏主页（若主页仍显示，如开发者指令在主页面板输入时）
@@ -72,9 +82,9 @@ public static class LevelDirector
 
         TutorialController tutorial = Object.FindObjectOfType<TutorialController>();
 
-        // Level 3 完整玩法 / Level 1 Part 2 语法教学 / Level 2 Part 1 API 教学：若正处 Part 1 引导教学，先退出教学，
-        // 确保教学面板隐藏、Started=false（E 键时间冻结恢复可用；编辑器教学关还需编辑器可打开）
-        if ((level3 || level2 || levelApi) && tutorial != null)
+        // Level 3 完整玩法 / Level 1 Part 2 讲解关 / Level 2 Part 1 图鉴关 / Level 1 Part 3 语法教学 / Level 2 Part 2 API 教学：
+        // 若正处 Part 1 引导教学，先退出教学，确保教学面板隐藏、Started=false（E 键时间冻结恢复可用；编辑器教学关还需编辑器可打开）
+        if ((level3 || levelIntro || levelBlockIntro || levelGrammar || levelApi) && tutorial != null)
             tutorial.ExitToMenu();
 
         // 清空场上所有长方体；教学关由 Tutorial / 语法教学接管生成时机（先不生成），Level 3 先进入开场停顿
@@ -91,7 +101,7 @@ public static class LevelDirector
             }
             else
             {
-                spawner.ResetSession();     // Level 3 / Part 2 / API 关：重开会话（清零计数与编号）
+                spawner.ResetSession();     // Level 3 / 讲解关 / 语法课 / API 关：重开会话（清零计数与编号）
                 spawner.SuspendSpawning();  // 先暂停生成：Level 3 等 5 秒开场停顿，编辑器教学关等全部任务完成
             }
         }
@@ -100,18 +110,26 @@ public static class LevelDirector
         if (level1 && tutorial != null)
             tutorial.StartTutorial();
 
-        // 章节起始序号（0 基）：/level 1 2 3 与 /level 2 1 3 表示从该分区第 3 个章节开始
+        // 章节起始序号（0 基）：/level 1 3 3 与 /level 2 2 3 表示从该分区第 3 个章节开始
         int startIndex = useSection ? (section - 1) : 0;
 
-        // Level 1 Part 2 为 C# 基础语法教学关：进入即启用编辑器内教学序列（重复进入即重置进度）
-        if (level2)
+        // Level 1 Part 2 为「编程序章」讲解关：进入即显示讲解卡片（重复进入即回到第一页 = 重置阅读进度）
+        if (levelIntro)
+            CodeIntroTutorialController.Begin(startIndex);
+
+        // Level 2 Part 1 为「方块图鉴」关：进入即显示旋转立方体 + 图鉴页
+        if (levelBlockIntro)
+            BlockIntroController.Begin(startIndex);
+
+        // Level 1 Part 3 为 C# 基础语法教学关：进入即启用编辑器内教学序列（重复进入即重置进度）
+        if (levelGrammar)
             CodeSyntaxTutorialController.Begin(CodeSyntaxTutorialController.Course.Grammar, startIndex);
 
-        // Level 2 Part 1 为炮台 API 调用教学关：同样进入即启用编辑器内教学序列（重复进入即重置进度）
+        // Level 2 Part 2 为炮台 API 调用教学关：同样进入即启用编辑器内教学序列（重复进入即重置进度）
         if (levelApi)
             CodeSyntaxTutorialController.Begin(CodeSyntaxTutorialController.Course.Api, startIndex);
 
-        // Level 1（Part 1 / Part 2）与 Level 2（Part 1）不显示顶部时间提示（Level 3 显示，保留实现）；Level 3 重新开始计时
+        // Level 1（Part 1 / 2 / 3）与 Level 2（Part 1 / 2）不显示顶部时间提示（Level 3 显示，保留实现）；Level 3 重新开始计时
         TimeHintController timeHint = Object.FindObjectOfType<TimeHintController>();
         if (timeHint != null)
         {
@@ -126,13 +144,14 @@ public static class LevelDirector
         if (tower != null)
             tower.SetVisualVisible(false);
 
-        // 关卡表现开关：Level 1 Part 1 不显示 Score / print 输出面板、只出红块；
-        // Part 2 语法教学关不显示 Score 但显示 print 荧幕（观察 PrintLine 输出）、只出红块；
-        // Level 2 Part 1 API 教学关不显示 Score、显示 print 荧幕，并允许蓝块（教学 Type 取值）；
+        // 关卡表现开关：Level 1 Part 1 / Part 2（讲解关）不显示 Score / print 输出面板、只出红块；
+        // Level 2 Part 1 方块图鉴关同样按最精简表现（纯阅读，不出方块）；
+        // Part 3 语法教学关不显示 Score 但显示 print 荧幕（观察 PrintLine 输出）、只出红块；
+        // Level 2 Part 2 API 教学关不显示 Score、显示 print 荧幕，并允许蓝块（教学 Type 取值）；
         // Level 3 全部恢复
-        if (level1)
+        if (level1 || levelIntro || levelBlockIntro)
             LevelPresentation.ApplyLevel1();
-        else if (level2)
+        else if (levelGrammar)
             LevelPresentation.ApplyLevel2();
         else if (levelApi)
             LevelPresentation.ApplyLevel2Api();
@@ -146,7 +165,7 @@ public static class LevelDirector
         LivesManager.ResetAll();
 
         // 鼠标左键手动激光：只有 Level 1 - Part 1（引导教学关，教学 Step.FireLaser 需要左键开火）允许，
-        // 其余所有关卡（Part 2 / API 关 / Level 3 完整玩法关）一律禁用。
+        // 其余所有关卡（Part 2 讲解关 / Part 3 语法课 / API 关 / Level 3 完整玩法关）一律禁用。
         // 仅影响「左键 → FireLaser」手动链路，不影响 tower.FireAtPlane 等自动化调用。
         CommandConsoleController.SetManualLaserAllowed(level, part);
 
@@ -178,7 +197,8 @@ public static class LevelDirector
         // 断点续玩：位置成功应用后写入存档（关卡 + 分区 + 章节），并 PlayerPrefs.Save()
         //   · /level 跳关优先级最高：这里用「本次跳关参数」无条件覆盖旧存档，跳关后的位置就是新的续玩点；
         //   · 主页点击关卡进入时读的就是这份刚被覆盖的存档，因此绝不可能出现「跳关后又被旧存档拽回旧位置」；
-        //   · 无章节拆分的分区（Level 1 - Part 1、Level 3 - Part 1）section 存 0，表示从该分区开头进入。
+        //   · 无章节拆分的分区（Level 1 - Part 1、Level 3 - Part 1）section 存 0，表示从该分区开头进入；
+        //     有章节拆分的分区（Part 2 讲解页 / Part 3 语法课 / API 课）section 为 1 起的页码或任务号。
         GameProgress.SaveResume(level, part, useSection ? section : 0);
 
         Debug.Log("[LevelDirector] 已跳转 Level " + level + " - Part " + part +

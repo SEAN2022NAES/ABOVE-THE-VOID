@@ -285,7 +285,7 @@ public class SettingsPanelController : MonoBehaviour
                "Press again to return      Sprint: LeftShift   Pause: ESC / Freeze time: E";
     }
 
-    /// <summary>按当前语言刷新全部文案与字体（中文微软雅黑 / 英文 Consolas）。</summary>
+    /// <summary>按当前语言刷新全部文案与字体（中文Noto Sans CJK SC / 英文 JetBrains Mono）。</summary>
     private void ApplyLocalizedTexts()
     {
         SetLocalized(titleText, Localization.Pick("游戏暂停", "Paused"));
@@ -473,7 +473,7 @@ public class SettingsPanelController : MonoBehaviour
         t.horizontalOverflow = HorizontalWrapMode.Overflow;
         t.verticalOverflow = VerticalWrapMode.Overflow;
 
-        t.font = UIFontHelper.LoadForText(content, fontSize); // v0.1.1：按内容自动选字体（中文微软雅黑 / 英文 Consolas）
+        t.font = UIFontHelper.LoadForText(content, fontSize); // v0.1.1：按内容自动选字体（中文Noto Sans CJK SC / 英文 JetBrains Mono）
         return t;
     }
 

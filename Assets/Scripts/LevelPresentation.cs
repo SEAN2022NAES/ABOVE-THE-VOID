@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 关卡表现统一开关（分数 HUD / print 输出荧幕 / 蓝色 BOMB 块生成）：
@@ -6,7 +6,7 @@ using UnityEngine;
 ///     不生成蓝色 BOMB 块（该关只出红色 ATTACK 块）；
 ///   - Level 1 - Part 2 语法教学关：不显示 Score 分数 UI，但**显示** print 输出荧幕
 ///     （玩家要能看见 tower.PrintLine 的输出），同样只出红色 ATTACK 块；
-///   - Level 2 - Part 1 炮台 API 教学关：不显示 Score 分数 UI，显示 print 输出荧幕，
+///   - Level 2 - Part 2 炮台 API 教学关：不显示 Score 分数 UI，显示 print 输出荧幕，
 ///     并允许生成蓝色 BOMB 块（教学 TowerObjectInfo.Type 的两种取值）；
 ///   - 其他关卡（Level 3 完整玩法）：恢复上述全部显示与蓝块生成。
 /// 由 TutorialController / CodeSyntaxTutorialController / LevelDirector / MainMenuController
@@ -27,7 +27,7 @@ public static class LevelPresentation
     }
 
     /// <summary>
-    /// Level 2 - Part 1 炮台 API 教学关表现：隐藏分数、显示 print 荧幕（观察 API 输出），
+    /// Level 2 - Part 2 炮台 API 教学关表现：隐藏分数、显示 print 荧幕（观察 API 输出），
     /// 并**允许蓝色 BOMB 块生成** —— 教学 TowerObjectInfo.Type 的 "ATTACK" / "BOMB" 两种取值需要两种块都出现。
     /// </summary>
     public static void ApplyLevel2Api()

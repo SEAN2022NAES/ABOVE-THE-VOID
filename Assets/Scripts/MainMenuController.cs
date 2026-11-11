@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
@@ -128,7 +128,7 @@ public class MainMenuController : MonoBehaviour
         LevelPresentation.RestoreAxes();
 
         // 断点续玩：主页点击某关时，若存在「属于该关」的合法存档，就从记录的 part / section 续玩，而不是从该关开头重来。
-        //   · 只有带章节拆分的分区（Level 1 - Part 2 语法课 / Level 2 - Part 1 API 课）才需要按章节定位，
+        //   · 只有带章节拆分的分区（Level 1 - Part 2 讲解关 / Part 3 语法课 / Level 2 - Part 1 图鉴关 / Part 2 API 课）才需要按章节定位，
         //     这里统一交给 LevelDirector.JumpTo 路由，与 /level 走完全同一条路径，避免两套逻辑不一致；
         //   · 优先级：/level 跳关成功后已用跳关参数覆盖存档，所以这里读到的必然是「最后一次到达的位置」，
         //     存档不会把玩家拽回跳关之前的旧位置；
@@ -144,7 +144,7 @@ public class MainMenuController : MonoBehaviour
             return;
         }
 
-        // 关卡 2 - 1 炮台 API 教学：统一走 LevelDirector 路由，保证表现开关 / 生成控制 / 教学启动与指令框一致
+        // 关卡 2 - 1 方块图鉴（图鉴读完自动进 Part 2 API 课）：统一走 LevelDirector 路由，保证表现开关 / 生成控制与指令框一致
         if (levelIndex == 2)
         {
             string msg = LevelDirector.JumpTo(2, 1);
@@ -163,7 +163,10 @@ public class MainMenuController : MonoBehaviour
         if (root != null)
             root.SetActive(false);
 
-        // 从主页进入关卡：先把可能残留的「代码编辑器 C# 语法教学」重置（Part 2 进度清空、任务卡隐藏）
+        // 从主页进入关卡：先把可能残留的教学关组件（讲解关 / 图鉴关 / C# 语法课）全部收掉，
+        // 否则上一次没走完的面板会盖在实时画面上
+        CodeIntroTutorialController.End();
+        BlockIntroController.End();
         CodeSyntaxTutorialController.End();
 
         if (playerController != null)
@@ -352,6 +355,13 @@ public class MainMenuController : MonoBehaviour
         CreateLevelButton("Level2", new Vector2(0f, -382f), 2, out level2Label);
         CreateLevelButton("Level3", new Vector2(280f, -382f), 3, out level3Label);
 
+        // ---- 第三方字体署名（SIL OFL 1.1 要求署名 + 随包附带许可全文）----
+        // 两款字体均以 SIL Open Font License 1.1 授权，许可全文见 Assets/Resources/Fonts/OFL.txt。
+        Text fontCredits = CreateText("FontCredits", root.transform,
+            "Fonts: Noto Sans CJK SC / JetBrains Mono — SIL OFL 1.1",
+            18, UITheme.TextMuted, TextAnchor.MiddleCenter, false);
+        SetRect(fontCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -472f), new Vector2(1400f, 26f));
+
         // 初始填充当前语言文案
         RefreshLanguageTexts();
     }
@@ -458,7 +468,7 @@ public class MainMenuController : MonoBehaviour
             case 1:
                 return zh ? "关卡 1" : "Level 1";
             case 2:
-                return zh ? "关卡 2\nAPI 教学" : "Level 2\nAPI Tutorial";
+                return zh ? "关卡 2\n方块 · API" : "Level 2\nBlocks · API";
             case 3:
                 {
                     string level3Text = zh ? "关卡 3\n完整玩法" : "Level 3\nFull Game";
@@ -532,7 +542,7 @@ public class MainMenuController : MonoBehaviour
         // 关卡按钮文案 + 解锁/锁定状态一起刷新（未解锁附「锁定 / LOCKED」标注）
         RefreshLevelLocks();
 
-        // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → 微软雅黑，英文/数字 → Consolas）
+        // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → Noto Sans CJK SC，英文/数字 → JetBrains Mono）
         RefreshTextFonts();
 
         ApplyLanguage();
@@ -542,7 +552,7 @@ public class MainMenuController : MonoBehaviour
     private void RefreshTextFonts()
     {
         if (titleText != null)
-            titleText.font = UIFontHelper.LoadForText(titleText.text, titleText.fontSize); // v0.1.1：标题刷新字体（英文 → Consolas）
+            titleText.font = UIFontHelper.LoadForText(titleText.text, titleText.fontSize); // v0.1.1：标题刷新字体（英文 → JetBrains Mono）
         if (subtitleText != null)
             subtitleText.font = UIFontHelper.LoadForText(subtitleText.text, subtitleText.fontSize);
         if (bodyText != null)
@@ -604,7 +614,7 @@ public class MainMenuController : MonoBehaviour
         text.fontSize = fontSizeValue;
         text.color = color;
         text.alignment = anchor;
-        text.font = UIFontHelper.LoadForText(content, fontSizeValue); // v0.1.1：按内容自动选字体（中文微软雅黑 / 英文 Consolas）
+        text.font = UIFontHelper.LoadForText(content, fontSizeValue); // v0.1.1：按内容自动选字体（中文Noto Sans CJK SC / 英文 JetBrains Mono）
         text.raycastTarget = false;
         text.supportRichText = false;
         text.horizontalOverflow = HorizontalWrapMode.Overflow;

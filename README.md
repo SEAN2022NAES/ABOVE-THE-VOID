@@ -11,7 +11,43 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.2**
+Current version: **v0.2.3**
+
+> **Licence / 许可**：Non-commercial use (study, teaching, research, non-profit open source) is free with
+> attribution and no monetisation of any kind; **commercial use requires a prior written licence**.
+> See [LICENSE](LICENSE) and [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). © 2026 Ma Yixiao (Sean Ma). All rights reserved.
+> **非商业用途免费（须署名、禁任何盈利场景），商业用途必须事先取得书面授权。** 详见下方「12. License / 许可」。
+
+### v0.2.3
+
+**Licence / 许可**
+
+- Switched the repository from the MIT licence to a custom dual licence: non-commercial use (personal study, teaching, research, non-profit open source) is free of charge but requires attribution and forbids any direct or indirect monetisation (advertising, paid downloads, in-app purchases, platform revenue sharing); any commercial use now requires a prior written licence from the author, with fees and terms negotiated per project. All rights are reserved by default.
+- Rewrote `LICENSE` with an exhaustive definition of commercial use, attribution requirements, automatic termination on breach, warranty disclaimer, limitation of liability, and the author's right to interpret and to change the terms at any time.
+- Added `LICENSE-COMMERCIAL.md` (commercial licensing scope, per-project / per-term / per-scope negotiation, legal consequences of unauthorised use) and `docs/COMMERCIAL-LICENSE-INQUIRY.md` (bilingual enquiry, reply and enforcement e-mail templates).
+- Added `docs/LICENSE-MIGRATION-CHECKLIST.md` covering files to replace, every place that must carry a notice (README, source headers, About panel, in-game credits, store pages), and the evidence-preservation steps (Git history, software copyright registration, cold backups).
+- Version note: v0.2.2 and earlier releases remain available under MIT and that grant cannot be revoked; the dual licence applies from v0.2.3 onward.
+
+**Block guide (Level 2 - Part 1)**
+
+- Level 2 - Part 1 is now a block guide instead of a code task: a cube spins in its own 3D stage while five pages explain its six faces — the travel face, the end-plane face, the start point, the block number, the block name and its data type — so a learner understands what `#0 ATTACK` of type `int` physically is before writing code against it.
+- Each page lists the position and the facing of the highlighted face, and the last page offers "Skip the guide" to jump straight into the API course.
+- The tower API course moved to Level 2 - Part 2, and the level map is now `levelBlockIntro (2,1)` + `levelApi (2,2)`.
+
+**Programming prologue (Level 1 - Part 2)**
+
+- Added `CodeIntroTutorialController` as a dedicated prologue that explains what a program is, what the editor does, and how a task is judged, using the same paged panel as the grammar course.
+
+**Progress tracking**
+
+- Task completion is now recorded per task instead of per course: `GameProgress` stores three independent done-sets (`TaskDoneKeyGrammar`, `TaskDoneKeyApi`, `TaskDoneKeyBlockIntro`), so leaving a course halfway keeps the tasks already solved.
+- The course header shows the real count (`Task x/N · 已完成 n/N`) and only reports "all complete" when every task is done; otherwise it says the course was walked through with the remaining count, so the unlock condition (finish the grammar course to unlock Level 2, finish the API course to unlock Level 3) can no longer be satisfied by paging through without solving anything.
+- `GameProgress.MaxPart`, `IsSupportedLocation` and `GetPartCount` now allow Level 2 to have two parts, and `ClearAll` resets all three done-sets.
+
+**Navigation**
+
+- `LevelDirector.JumpTo` maps `levelIntro (1,2)`, `levelGrammar (1,3)`, `levelBlockIntro (2,1)`, `levelApi (2,2)` and `level3 (3,1)`; the page count of each paged course is read from its controller.
+- `CodeEditorController` suppresses the Enter prompt while either paged reading panel (the programming prologue or the block guide) is open, so pressing Enter cannot open the editor behind a tutorial page.
 
 ### v0.2.2
 
@@ -335,6 +371,8 @@ ABOVE THE VOID/
 │       ├── CodeEditorController.cs        # In-game code editor and runner
 │       ├── CodeEditorCaretGuard.cs       # Click-caret guard tick for the editor
 │       ├── CodeSyntaxTutorialController.cs  # Level 1 grammar and Level 2 API course panel
+│       ├── CodeIntroTutorialController.cs   # Level 1 Part 2 programming prologue
+│       ├── BlockIntroController.cs          # Level 2 Part 1 block guide (cube faces)
 │       ├── CodeTower.cs                   # Code-controlled tower interface
 │       ├── UIFitScreen.cs                 # Screen-fitting UI helper
 │       ├── UITheme.cs                     # Single colour source for the whole UI
@@ -443,3 +481,54 @@ Use the Inspector to adjust:
 - If axis materials render incorrectly in URP, replace the LineRenderer material with `URP/Unlit/Color`.
 - Pausing uses `Time.timeScale = 0`; UGUI buttons and sliders remain interactive while paused.
 - Runtime localization supports English and Simplified Chinese.
+
+---
+
+## 12. License / 许可
+
+**一句话结论 / In one line**
+
+- **学习、教学、研究、非盈利开源 —— 免费，但要署名，且不能有任何盈利。**
+- **上架发行、商用集成、公司内部使用、收费课程、广告变现 —— 必须先拿到作者的书面商业授权。**
+- **Free** for study, teaching, research and non-profit open-source projects, **with attribution and without any
+  monetisation**. **Commercial use** — publishing, commercial integration, internal company use, paid courses,
+  advertising — **requires a prior written licence from the author.**
+
+**非商业用途可以做什么 / What non-commercial use allows**
+
+- 下载、阅读、运行、调试本项目，学习坐标系统、相机状态机、方块系统、代码塔、运行时 C# 代码编辑器与关卡编排的实现。
+- 在课堂、社团、公开课中演示讲解；在**不收费、无广告、无付费入口**的前提下分发副本。
+- 修改本项目、创作衍生作品，用于个人学习或非盈利开源项目。
+
+**非商业用途不能做什么 / What it forbids**
+
+- 任何直接或间接盈利：付费下载、内购、广告、平台流量分成、赞助、收费课程、众包募资等。
+- 在商业项目、公司内部生产、外包交付或软件即服务（SaaS）中使用。
+- 删除或篡改版权声明与作者署名；改用其他许可重新发布。
+- 单独或成规模提取代码与资源用于构建竞品、素材库或训练营利性模型。
+
+**商业用途 / Commercial use**
+
+商业授权按项目、期限、范围分别协商，不公开报价。请通过
+[`LICENSE-COMMERCIAL.md`](LICENSE-COMMERCIAL.md) 了解授权范围与流程，并使用
+[`docs/COMMERCIAL-LICENSE-INQUIRY.md`](docs/COMMERCIAL-LICENSE-INQUIRY.md) 中的模板发起咨询。
+Commercial licences are negotiated per project, term and scope; no public price list.
+See [`LICENSE-COMMERCIAL.md`](LICENSE-COMMERCIAL.md) for scope and process, and use the templates in
+[`docs/COMMERCIAL-LICENSE-INQUIRY.md`](docs/COMMERCIAL-LICENSE-INQUIRY.md) to start an enquiry.
+
+| Document | 内容 / Content |
+|---|---|
+| [`LICENSE`](LICENSE) | 双许可全文：默认保留所有权利、非商业许可范围、商业用途穷举清单、署名要求、终止条款、免责声明、解释与变更权 / full dual-licence terms |
+| [`LICENSE-COMMERCIAL.md`](LICENSE-COMMERCIAL.md) | 商业授权说明：覆盖权利范围、按项目/期限/范围协商、未授权使用的法律后果 / commercial licensing scope and consequences |
+| [`docs/COMMERCIAL-LICENSE-INQUIRY.md`](docs/COMMERCIAL-LICENSE-INQUIRY.md) | 商业授权询问、回复、交涉邮件模板（中英）/ bilingual enquiry, reply and enforcement e-mail templates |
+| [`docs/LICENSE-MIGRATION-CHECKLIST.md`](docs/LICENSE-MIGRATION-CHECKLIST.md) | 仓库改造与权属留证清单 / migration checklist and evidence preservation |
+
+**版本边界 / Version boundary**
+
+v0.2.3 起适用本双许可；v0.2.2 及更早版本按 MIT 提供，该授权不可撤回。
+The dual licence applies from v0.2.3 onward; v0.2.2 and earlier releases remain under MIT and that grant is
+irrevocable.
+
+---
+
+© 2026 Ma Yixiao (Sean Ma). All rights reserved.

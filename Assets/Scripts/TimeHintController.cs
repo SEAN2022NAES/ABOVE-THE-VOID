@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -6,7 +6,7 @@ using UnityEngine.UI;
 /// 画面正上方常驻时间提示：
 ///   - 顶部居中显示游戏实际运行时间（精确到秒）；
 ///   - 未满 1 小时显示 mm:ss，满 1 小时后显示 HH:mm:ss（如 01:23:42 = 1小时23分42秒）；
-///   - 使用 Consolas 字体（Resources/Fonts/consolas.ttf，系统 Consolas 已复制入项目），
+///   - 使用 JetBrains Mono 字体（Resources/Fonts/JetBrains Mono.ttf，系统 JetBrains Mono 已复制入项目），
 ///     缺失时回退 arial / 引擎内置字体；
 ///   - 基于 Time.time（受 timeScale 影响），暂停（timeScale=0）时计时冻结。
 /// 纯代码构建 UI，挂到任意物体即可。

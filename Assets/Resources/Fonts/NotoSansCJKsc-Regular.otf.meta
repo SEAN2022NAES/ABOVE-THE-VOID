@@ -1,5 +1,5 @@
-fileFormatVersion: 2
-guid: 2fc841bb1def52e7cb9a1041f705d925
+﻿fileFormatVersion: 2
+guid: a2ae03d372d14eea8df499239ffb66dd
 TrueTypeFontImporter:
   externalObjects: {}
   serializedVersion: 4
@@ -9,7 +9,7 @@ TrueTypeFontImporter:
   characterPadding: 1
   includeFontData: 1
   fontNames:
-  - Arial
+  - Noto Sans CJK SC
   fallbackFontReferences: []
   customCharacters: 
   fontRenderingMode: 0

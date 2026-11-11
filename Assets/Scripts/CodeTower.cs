@@ -440,7 +440,7 @@ public class CodeTower : MonoBehaviour
         RefreshPrintScreen();
     }
 
-    /// <summary>用当前行列表刷新荧幕文本；按内容自动切换中 / 英字体（中→微软雅黑，英→Consolas）。</summary>
+    /// <summary>用当前行列表刷新荧幕文本；按内容自动切换中 / 英字体（中→Noto Sans CJK SC，英→JetBrains Mono）。</summary>
     private void RefreshPrintScreen()
     {
         if (printText == null)

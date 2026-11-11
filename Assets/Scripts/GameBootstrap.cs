@@ -90,7 +90,7 @@ public class GameBootstrap : MonoBehaviour
             dev.AddComponent<DevOverlayController>();
         }
 
-        // 7. 顶部常驻时间提示（Consolas）
+        // 7. 顶部常驻时间提示（JetBrains Mono）
         if (createTimeHint && FindObjectOfType<TimeHintController>() == null)
         {
             GameObject time = new GameObject("UI_TimeHint");

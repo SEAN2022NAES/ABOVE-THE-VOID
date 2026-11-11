@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
@@ -439,7 +439,7 @@ public class TutorialController : MonoBehaviour
                 break;
         }
 
-        // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → 微软雅黑，英文/数字 → Consolas）
+        // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → Noto Sans CJK SC，英文/数字 → JetBrains Mono）
         if (stepText != null)
             stepText.font = UIFontHelper.LoadForText(stepText.text, stepText.fontSize);
         if (bodyText != null)
@@ -648,7 +648,7 @@ public class TutorialController : MonoBehaviour
         text.fontSize = fontSizeValue;
         text.color = color;
         text.alignment = anchor;
-        text.font = UIFontHelper.LoadForText(content, fontSizeValue); // v0.1.1：按内容自动选字体（中文微软雅黑 / 英文 Consolas）
+        text.font = UIFontHelper.LoadForText(content, fontSizeValue); // v0.1.1：按内容自动选字体（中文Noto Sans CJK SC / 英文 JetBrains Mono）
         text.raycastTarget = false;
         text.supportRichText = false;
         return text;

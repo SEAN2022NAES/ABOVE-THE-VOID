@@ -1,19 +1,22 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
 /// 代码编辑器内的顺序式 C# 教学（两门课程，均由 LevelDirector 调用 Begin(course) 进入）：
-///   - Course.Grammar（Level 1 - Part 2）：C# 基础语法全套 18 项 —— 注释、变量声明与类型、const 常量、
+///   - Course.Grammar（Level 1 - Part 3）：C# 基础语法全套 18 项 —— 注释、变量声明与类型、const 常量、
 ///     算术运算符、关系运算符、逻辑运算符、if、if-else、switch、for、while、do-while、一维数组、List 集合、
 ///     方法定义与参数（局部函数）、方法返回值 return、字符串拼接、string.Format；
-///   - Course.Api（Level 2 - Part 1）：炮台 API 调用全套 13 项 —— Print、PrintLine、ClearPrint、
+///   - Course.Api（Level 2 - Part 2）：炮台 API 调用全套 13 项 —— Print、PrintLine、ClearPrint、
 ///     GetAllObjects、TowerObjectInfo.Index / Type / HP / Position / Velocity / Volume、GetFireCooldown、
 ///     FireAtPlane，以及「遍历 + 条件 + 发射」实战组合（收官项固定留在最后）；
 ///   - 每一项任务的完成条件都相同：① 编辑器里的代码命中该任务的语法 ② 本次任务期间点过【编译运行 (F6)】
 ///     并且**编译通过的那份代码本身**满足该语法（防止先写后编译 / 先编译后补写蒙混过关）；
 ///     任务卡常驻显示「① 语法 / ② 编译」两条勾选状态，未编译时明确提示「点标题栏【编译运行 (F6)】验证」；
+///   - 说明分页（专为零基础）：每个任务都有「第 1 页 = 写法 / 示例」「第 2 页 = 手把手细节」两页，
+///     任务卡右上角「‹ 细节 1/2 ›」可来回翻；第 2 页整段通栏放大指导框（DetailPageRatio），
+///     内容 = ① 一步一步怎么做（按哪个键、写在哪）② 逐符号读懂它 ③ 三个必踩的坑 + 正确做法；
 ///   - 判定机制：结构类用正则解析编辑器文本（先剥离注释与字符串字面量，避免注释 / 字符串误判），
 ///     编译类用 CodeEditorController.OnCompiledSuccessfully 事件，不依赖运行时反射；
 ///   - 离开 / 重进关卡都会重置进度（Begin 每次从第 1 项开始并重建进度格）。
@@ -21,7 +24,7 @@ using UnityEngine.UI;
 /// </summary>
 public class CodeSyntaxTutorialController : MonoBehaviour
 {
-    /// <summary>教学课程：C# 基础语法（Level 1-2）/ 炮台 API 调用（Level 2-1）。</summary>
+    /// <summary>教学课程：C# 基础语法（Level 1-3）/ 炮台 API 调用（Level 2-2）。</summary>
     public enum Course
     {
         Grammar = 0,
@@ -36,8 +39,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         public string TitleZh;
         public string TitleEn;
-        public string BodyZh;
+        public string BodyZh;      // 第 1 页：写法 / 示例 + 目标 / 提示 / 判定（原有内容）
         public string BodyEn;
+        public string Page2Zh;     // 第 2 页：零基础手把手细节（为 null 表示本任务只有一页）
+        public string Page2En;
         public TaskMatch Match;
     }
 
@@ -71,14 +76,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private const float ReferenceWidth = 1920f;          // CanvasScaler 参考分辨率宽（面板铺满宽度回退值）
     private const float ReferenceHeight = 1080f;         // Canvas 参考分辨率高（取不到父级高度时的回退值）
     private const float SplitRatio = 0.5f;               // 上下对半平分：上方代码区 50%、下方指导框 50%，固定不随窗口 / 文案变化
+    private const float DetailPageRatio = 0.66f;
+    private const float MinHintHeight = 200f;         // 提示区最小高度（拖到底也不会消失）
+    private const float MinCodeHeight = 180f;         // 代码区最小高度（拖动分割线时的下限保护）
+    private const float DragHandleHeight = 12f;       // 蓝色分割线的拖动热区高度（跨在线上，好抓）         // 第 2 页（手把手细节）指导框占比：文字量大，临时把指导框放大到 68%，翻回第 1 页自动复原
     private const float GuideBodyTopInset = 132f;        // 正文上边距（让开强调线 / 标题 / 进度格 / 任务名）
     private const float GuideBodyBottomInset = 46f;      // 正文下边距（让开「任务完成 ✔」提示）
-    private const int GuideBodyFontSizeMax = 24;         // 左栏（目标 / 提示 / 判定）最大字号：文字少，尽量放大
-    private const int GuideBodyFontSizeMin = 16;         // 左栏最小字号（文案长时自动缩到不溢出半屏）
-    private const int GuideBodyFontSize = 22;            // 左栏初始字号（构建时使用，运行期由 FitColumnFontSize 调整）
-    private const int SampleFontSizeMax = 20;            // 右栏（写法 / 示例代码）最大字号
-    private const int SampleFontSizeMin = 13;            // 右栏最小字号
-    private const int SampleFontSize = 18;               // 右栏初始字号
+    private const int GuideBodyFontSize = 24;            // 左栏（目标 / 提示 / 判定）固定字号：不再自适应，靠拖动蓝色长条看全
+    private const int SampleFontSize = 20;               // 右栏（写法 / 示例代码）固定字号：同上，恒定不随高度变化
     private const float GuideBodyLineSpacing = 1.05f;    // 正文行距
     private const float ColumnSplitRatio = 0.5f;         // 左（引导）/ 右（示例代码）分栏界线位置（0.5 = 对半）
     private const float ColumnGap = 28f;                 // 分栏内边距：文字与竖分隔线之间的间距
@@ -86,6 +91,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private const float HintBarMaxWidth = 1400f;         // 提示条最大宽度
     private const float HintBarMinWidth = 420f;          // 提示条最小宽度
     private const float HintBarMinHeight = 64f;          // 提示条最小高度
+    private const float EntryPromptY = 150f;             // 进入提示在实机页面上的纵向位置（相对屏幕中心向上偏移）
+    private const float PageNavWidth = 240f;             // 任务卡右上角翻页条宽度（‹ 页码 ›）
     private GameObject panelRoot;      // 编辑器打开时显示的任务卡（底部指导框）
     private float appliedSplitHeight = -1f; // 最近一次应用的对半分栏高度（用于窗口尺寸变化时重算）
     private RectTransform hintRect;    // 提示条矩形（按文案自适应宽高）
@@ -97,10 +104,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private Image columnDivider;       // 左 / 右分栏之间的竖分隔线
     private bool columnHasSample;      // 当前任务是否有右侧示例代码（决定是否分栏）
     private Text flashText;            // 「任务完成 ✔」短暂提示
+    private GameObject pageNavRoot;    // 任务卡内翻页条（‹ 说明 1/2 ›），只在该任务有多页时显示
+    private Button prevPageBtn;        // 上一页（翻回去）
+    private Button nextPageBtn;        // 下一页（翻回来 / 翻到第 2 页）
+    private Text pageNoText;           // 「说明 1/2」页码
     private Text[] chipTexts;          // 进度格文字（索引 = 任务序号）
     private Image[] chipBgs;           // 进度格底色
     private Color[] chipBaseColors;    // 进度格基准色（悬停高亮后据此还原）
-    private GameObject hintRoot;       // 编辑器关闭时的常驻提示条
+    private GameObject hintRoot;       // 编辑器关闭时实机页面正中的进入提示（提示「按下 Enter 打开代码编辑界面」）
     private Text hintText;
 
     // ---------------- 运行时状态 ----------------
@@ -113,11 +124,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private string compiledRaw;        // 最近一次编译成功的用户代码原文
     private string compiledSnapshot;   // 最近一次编译成功的代码（已剥离注释 / 字符串）
     private bool finished;
-    private bool autoOpenPending;      // 需要自动打开编辑器（指令框仍打开时会延后到下一帧重试）
     private float checkTimer;          // 结构判定节流（真实时间）
     private float flashTimer;          // 「任务完成」提示倒计时（真实时间）
     private string hintCache = "";     // 提示条文案缓存，避免逐帧改文字
     private int statusCache = -1;      // 任务卡状态缓存（1=语法命中 2=编译通过），避免逐帧重建正文
+    private int guidePage;             // 当前任务正在看的说明页（0 = 第 1 页 写法/示例，1 = 第 2 页 手把手细节）
+    private float manualSplitOffset;  // 手动拖动蓝色分割线的偏移（UI 像素，>0 = 提示区更高 / 代码区更矮）
+    private Image accentLine;         // 面板顶部那条蓝色分割线（拖动把手悬停时提亮）
+    private SplitDragHandle splitDragHandle;
 
     // ---------------- 结构判定正则（语法课） ----------------
     // 变量声明与初始化：类型 + 变量名 = 值;
@@ -241,8 +255,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     }
 
     /// <summary>
-    /// 进入教学关并从第 startIndex 个任务（0 基）开始（供 /level 1 2 n、/level 2 1 n 章节跳转使用）；
-    /// 越界值自动收敛到合法范围，之前（序号更小）的任务标记为已完成。
+    /// 进入教学关并从第 startIndex 个任务（0 基）开始（供 /level 1 3 n、/level 2 2 n 章节跳转使用）；
+    /// 越界值自动收敛到合法范围；跳过的任务保持「未开始」，是否已完成只以玩家真实完成记录为准。
     /// </summary>
     public static void Begin(Course course, int startIndex)
     {
@@ -260,6 +274,12 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         TaskDef[] list = (course == Course.Api) ? ApiTasks : GrammarTasks;
         return list != null ? list.Length : 0;
+    }
+
+    /// <summary>课程 → 该课「已完成任务」记录的 PlayerPrefs 键名（语法课 / API 课各一张完成表）。</summary>
+    public static string DoneKeyOf(Course course)
+    {
+        return course == Course.Api ? GameProgress.TaskDoneKeyApi : GameProgress.TaskDoneKeyGrammar;
     }
 
     /// <summary>离开教学关（回主页 / 跳其他关卡）：结束教学，隐藏任务卡与提示条并清空激活状态。</summary>
@@ -302,16 +322,6 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (Mathf.Abs(appliedSplitHeight - SplitHalfHeight()) > 0.5f)
             ApplySplitLayout();
 
-        // 自动打开编辑器：正常情况当帧即打开；若此时开发者指令框仍开着（/level 的同一帧），
-        // 延后到下一帧（指令框关闭后）再重试，避免任务卡无编辑器可依附。
-        if (autoOpenPending && editor != null)
-        {
-            if (!editor.IsOpen)
-                editor.Open();
-            if (editor.IsOpen)
-                autoOpenPending = false;
-        }
-
         // 「任务完成」提示倒计时（真实时间：编辑器打开时 timeScale = 0）
         if (flashTimer > 0f)
         {
@@ -348,11 +358,15 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         done = new bool[tasks.Length];
         finished = false;
 
-        // 章节定位：startIndex 为 0 基任务序号，越界自动收敛；之前章节标记为已完成（进度格显示已过）
+        // 章节定位：startIndex 为 0 基任务序号，越界自动收敛。
+        //   · 「哪些章节做过了」只认玩家真实完成记录（PlayerPrefs 里一张独立的完成表），
+        //     不再按「序号在 startIndex 之前的都算做过」伪造进度：直接 /level 1 3 10 或 /level 2 2 10
+        //     跳到第 10 个任务时，第 1~9 个任务保持「未开始」的灰色，不会显示成已完成；
+        //   · 没有记录（第一次进入 / 清档后 / 老版本存档）时是一张全 false 的表，等价于「什么都没做过」。
         int start = Mathf.Clamp(startIndex, 0, Mathf.Max(0, tasks.Length - 1));
-        for (int i = 0; i < start && i < done.Length; i++)
-            done[i] = true;
+        done = GameProgress.LoadTaskDone(DoneKeyOf(course), tasks.Length);
         CurrentIndex = start;
+        guidePage = 0; // 进入教学总是从每个任务的第 1 页（写法 / 示例）开始看
 
         compiledThisTask = false;
         compiledRaw = "";
@@ -398,7 +412,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         // 布局：上下对半平分 —— 上方代码编辑器占工作区上半（50%，代码过长时用编辑器内部竖向滚动条），
         // 下方指导框横跨工作区下半（50%）、上边缘与代码编辑器下边缘严丝合缝、下边缘贴屏幕底部。
         // 比例固定，不随窗口尺寸变化、也不随任务文案长短变化（ApplySplitLayout）。
-        // 只在本教学（Level 1-Part 2 / Level 2-Part 1）生效，EndInternal 恢复默认全屏布局。
+        // 只在本教学（Level 1-Part 3 / Level 2-Part 2）生效，EndInternal 恢复默认全屏布局。
         if (editor != null)
             editor.SetRightReservedWidth(0f); // 上下分栏不再左右平分，右侧不再预留
         // 「选中方块信息」恢复屏幕水平居中（下方指导框已横向占满，不再需要左右错位避让）
@@ -408,12 +422,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         RefreshText();
         ApplySplitLayout(); // 指导框固定占工作区下半 50%，并把同一高度作为编辑器底部预留
 
-        // 进入即打开代码编辑器 —— 教学发生在编辑器页面内
-        autoOpenPending = true;
-        if (editor != null && !editor.IsOpen)
-            editor.Open();
+        // 进入教学后先停在实机页面（不自动弹出编辑器）：玩家看到的是真实关卡画面，
+        // 页面正中的提示告知「按下 Enter 打开代码编辑界面」，按 Enter 之后才进入编辑器、任务卡随之出现。
         if (editor != null && editor.IsOpen)
-            autoOpenPending = false;
+            editor.ForceCloseSelf(); // 从 API 课等别的教学切进来时，先收掉上一关残留的编辑器
 
         SyncVisibility();
         Debug.Log("[CodeSyntaxTutorial] 教学开始（" + course + "，共 " + TaskCount + " 项任务）。");
@@ -445,7 +457,6 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         flashTimer = 0f;
         hintCache = "";
         statusCache = -1;
-        autoOpenPending = false;
         if (done != null)
         {
             for (int i = 0; i < done.Length; i++)
@@ -583,6 +594,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             return;
 
         CurrentIndex = index;
+        guidePage = 0; // 换任务回到第 1 页
 
         // 编译快照属于上一个任务，跳转后必须清零：否则新任务会被旧代码误判成「已编译通过」
         compiledThisTask = false;
@@ -603,6 +615,197 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         // 新任务的语法 / 编译两条勾选都要重新判定，先按当前编辑器内容刷新一次
         RefreshText();
         EvaluateCurrentTask();
+    }
+
+    // ================== 说明分页（第 2 页：零基础手把手细节） ==================
+
+    /// <summary>某个任务有几页说明：第 2 页文案非空即为 2 页，否则 1 页。</summary>
+    private int PageCountOf(int index)
+    {
+        if (tasks == null || index < 0 || index >= tasks.Length)
+            return 1;
+        TaskDef t = tasks[index];
+        bool hasSecond = !string.IsNullOrEmpty(t.Page2Zh) || !string.IsNullOrEmpty(t.Page2En);
+        return hasSecond ? 2 : 1;
+    }
+
+    /// <summary>翻回上一页（第 1 页时按钮不可点）。</summary>
+    private void PrevPage()
+    {
+        if (!Active || finished || tasks == null)
+            return;
+        if (guidePage <= 0 || CurrentIndex < 0 || CurrentIndex >= tasks.Length)
+            return;
+        guidePage--;
+        RefreshText();
+    }
+
+    /// <summary>翻到下一页（手把手细节页）。</summary>
+    private void NextPage()
+    {
+        if (!Active || finished || tasks == null)
+            return;
+        if (CurrentIndex < 0 || CurrentIndex >= tasks.Length)
+            return;
+        if (guidePage >= PageCountOf(CurrentIndex) - 1)
+            return;
+        guidePage++;
+        RefreshText();
+    }
+
+    /// <summary>刷新翻页条：该任务有多页时才显示，并按当前页码更新文字与按钮可点状态（index = -1 表示隐藏）。</summary>
+    private void RefreshPageNav(int index)
+    {
+        if (pageNavRoot == null)
+            return;
+
+        bool show = !finished && tasks != null && index >= 0 && index < tasks.Length && PageCountOf(index) > 1;
+        if (pageNavRoot.activeSelf != show)
+            pageNavRoot.SetActive(show);
+        if (!show)
+            return;
+
+        bool zh = Localization.IsChinese;
+        int pageCount = PageCountOf(index);
+        SetLabel(pageNoText, zh
+            ? "细节 " + (guidePage + 1) + "/" + pageCount
+            : "Detail " + (guidePage + 1) + "/" + pageCount);
+
+        if (prevPageBtn != null)
+            prevPageBtn.interactable = guidePage > 0;
+        if (nextPageBtn != null)
+            nextPageBtn.interactable = guidePage < pageCount - 1;
+    }
+
+    /// <summary>构建翻页条：‹ 细节 1/2 ›，横向贴在任务名右侧同一行。</summary>
+    private void BuildPageNav(Transform panelRt)
+    {
+        RectTransform navRt = CreateRect("PageNav", panelRt, new Vector2(1f, 1f), Vector2.zero,
+            new Vector2(PageNavWidth, 32f), new Vector2(1f, 1f));
+        navRt.anchoredPosition = new Vector2(-24f, -90f);
+        pageNavRoot = navRt.gameObject;
+
+        // ‹ 上一页：贴翻页条左端
+        prevPageBtn = CreateNavButton(navRt, "PrevPage", "‹", TextAnchor.MiddleCenter,
+            new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0f), new Vector2(32f, 30f));
+        prevPageBtn.onClick.AddListener(PrevPage);
+
+        // › 下一页：贴翻页条右端
+        nextPageBtn = CreateNavButton(navRt, "NextPage", "›", TextAnchor.MiddleCenter,
+            new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0f, 0f), new Vector2(32f, 30f));
+        nextPageBtn.onClick.AddListener(NextPage);
+
+        // 中间页码：「细节 1/2」
+        pageNoText = CreateText("PageNo", navRt, "", 18, UITheme.TextMuted, TextAnchor.MiddleCenter);
+        RectTransform pnRt = pageNoText.rectTransform;
+        pnRt.anchorMin = new Vector2(0f, 0f);
+        pnRt.anchorMax = new Vector2(1f, 1f);
+        pnRt.offsetMin = new Vector2(38f, 0f);
+        pnRt.offsetMax = new Vector2(-38f, 0f);
+
+        pageNavRoot.SetActive(false);
+    }
+
+    /// <summary>
+    /// 构建「蓝色分割线」的拖动热区：一条横跨面板、骑在顶部强调线上的透明横带（高 DragHandleHeight），
+    /// 上下拖动即调整提示区高度（向上拖 = 提示区变高，向下拖 = 提示区变矮、代码区变高）。
+    /// 拖动只改高度、不重算字号：字号保持玩家看到的大小，放不下的部分直接截断。
+    /// </summary>
+    private void BuildSplitDragHandle(RectTransform panelRt)
+    {
+        RectTransform handleRt = CreateRect("SplitDragHandle", panelRt, new Vector2(0.5f, 1f), Vector2.zero,
+            new Vector2(0f, DragHandleHeight), new Vector2(0.5f, 0.5f));
+        handleRt.anchorMin = new Vector2(0f, 1f);
+        handleRt.anchorMax = new Vector2(1f, 1f);
+        handleRt.pivot = new Vector2(0.5f, 0.5f);
+        handleRt.anchoredPosition = new Vector2(0f, 0f); // 跨在强调线上：上方外沿 DragHandleHeight/2 也能抓
+        handleRt.sizeDelta = new Vector2(0f, DragHandleHeight);
+
+        Image hit = handleRt.gameObject.AddComponent<Image>();
+        hit.sprite = WhiteSprite();
+        hit.color = new Color(1f, 1f, 1f, 0f); // 完全透明：视觉上仍是那条 3px 蓝线，但整条都能拖
+        hit.raycastTarget = true;
+
+        splitDragHandle = handleRt.gameObject.AddComponent<SplitDragHandle>();
+        splitDragHandle.Owner = this;
+        splitDragHandle.Hit = hit;
+    }
+
+    /// <summary>分割线被拖动：把屏幕像素增量换成 UI 像素，叠加到 manualSplitOffset 后重排（不重算字号）。</summary>
+    internal void DragSplitLineBy(float screenDeltaY)
+    {
+        if (screenDeltaY == 0f)
+            return;
+        float scale = 1f;
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas != null && canvas.scaleFactor > 0.0001f)
+            scale = canvas.scaleFactor;
+        manualSplitOffset += screenDeltaY / scale;
+        ApplySplitLayout(); // 拖蓝色长条：只改上下高度，字号恒定（不重排、不缩放）
+    }
+
+    /// <summary>鼠标悬停在分割线上时给一点视觉反馈（半透明蓝带），让玩家知道这条线能拖。</summary>
+    internal void SetSplitHandleHover(bool on)
+    {
+        if (splitDragHandle == null || splitDragHandle.Hit == null)
+            return;
+        splitDragHandle.Hit.color = on
+            ? UITheme.WithAlpha(UITheme.Accent, 0.22f)
+            : new Color(1f, 1f, 1f, 0f);
+        if (accentLine != null)
+            accentLine.color = UITheme.WithAlpha(UITheme.Accent, on ? 1f : 0.95f);
+    }
+
+    /// <summary>蓝色分割线的拖动把手：只处理「按下拖动 → 回调控制器」，其余交给控制器。</summary>
+    private sealed class SplitDragHandle : MonoBehaviour,
+        UnityEngine.EventSystems.IBeginDragHandler, UnityEngine.EventSystems.IDragHandler,
+        UnityEngine.EventSystems.IPointerEnterHandler, UnityEngine.EventSystems.IPointerExitHandler
+    {
+        public CodeSyntaxTutorialController Owner;
+        public Image Hit;
+
+        public void OnBeginDrag(UnityEngine.EventSystems.PointerEventData e)
+        {
+            if (Owner != null)
+                Owner.SetSplitHandleHover(true);
+        }
+
+        public void OnDrag(UnityEngine.EventSystems.PointerEventData e)
+        {
+            if (Owner != null)
+                Owner.DragSplitLineBy(e.delta.y);
+        }
+
+        public void OnPointerEnter(UnityEngine.EventSystems.PointerEventData e)
+        {
+            if (Owner != null)
+                Owner.SetSplitHandleHover(true);
+        }
+
+        public void OnPointerExit(UnityEngine.EventSystems.PointerEventData e)
+        {
+            if (Owner != null)
+                Owner.SetSplitHandleHover(false);
+        }
+    }
+
+    /// <summary>创建一个翻页按钮（深色底 + 箭头文字，点击回调由调用方挂接）。</summary>
+    private Button CreateNavButton(Transform parent, string name, string label, TextAnchor align,
+        Vector2 anchor, Vector2 pivot, Vector2 pos, Vector2 size)
+    {
+        RectTransform rt = CreateRect(name, parent, anchor, pos, size, pivot);
+        Image bg = rt.gameObject.AddComponent<Image>();
+        bg.sprite = WhiteSprite();
+        bg.color = UITheme.PanelSunk;
+        bg.raycastTarget = true;
+
+        Button btn = rt.gameObject.AddComponent<Button>();
+        btn.targetGraphic = bg;
+        btn.transition = Selectable.Transition.ColorTint; // 可点 / 不可点由 interactable 的着色体现
+
+        Text t = CreateText("Label", rt, label, 20, UITheme.TextPrimary, align);
+        Stretch(t.rectTransform);
+        return btn;
     }
 
     /// <summary>进度格悬停高亮：在基准色上提亮，提示这一格可以点击。</summary>
@@ -628,11 +831,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             return;
 
         done[CurrentIndex] = true;
+        // 真做过的章节写盘（跨重启 / 跨跳关保留）：进度格显示的是这张表，而不是「序号之前的都算做过」
+        GameProgress.SaveTaskDone(DoneKeyOf(CurrentCourse), done);
         int completed = CurrentIndex + 1;
         CurrentIndex++;
+        guidePage = 0; // 新任务从第 1 页开始
 
         // 断点续玩：章节（任务）推进即把「关卡 + 分区 + 章节」写入存档并 Save()
-        //   · 语法课（Course.Grammar）= Level 1 - Part 2，API 课（Course.Api）= Level 2 - Part 1；
+        //   · 语法课（Course.Grammar）= Level 1 - Part 3，API 课（Course.Api）= Level 2 - Part 2；
         //   · CurrentIndex 是 0 基任务序号，存档中的 section 是 1 起章节号，故 +1；
         //   · 若本次推进后全部章节都已完成（整关通关），则清掉属于本分区的断点，下次从该关开头进入。
         GameProgress.GetCourseLocation(CurrentCourse, out int progressLevel, out int progressPart);
@@ -667,8 +873,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         flashTimer = 3.5f;
 
         // 逐级解锁：本次课程全部完成即视为整关通关（PlayerPrefs 持久化，跨重启保留）
-        //   语法课（Level 1 - Part 2）→ 关卡 1 通关，解锁关卡 2；
-        //   API 课（Level 2 - Part 1）→ 关卡 2 通关，解锁关卡 3。
+        //   语法课（Level 1 - Part 3）→ 关卡 1 通关，解锁关卡 2；
+        //   API 课（Level 2 - Part 2）→ 关卡 2 通关，解锁关卡 3。
         LevelProgress.MarkLevelCompleted(CurrentCourse == Course.Api ? 2 : 1);
 
         SetLabel(flashText, Localization.Pick("全部任务完成！", "All tasks done!"));
@@ -761,7 +967,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         ApplySplitLayout();
     }
 
-    /// <summary>文本创建时是空串，字体按英文（Consolas）选的；写入中文后必须重选字体，否则中文缺字形。</summary>
+    /// <summary>文本创建时是空串，字体按英文（JetBrains Mono）选的；写入中文后必须重选字体，否则中文缺字形。</summary>
     private void RefreshFonts()
     {
         ReloadFont(headlineText);
@@ -771,6 +977,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         ReloadFont(sampleText);
         ReloadFont(flashText);
         ReloadFont(hintText);
+        ReloadFont(pageNoText);
         if (chipTexts != null)
         {
             for (int i = 0; i < chipTexts.Length; i++)
@@ -785,7 +992,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         t.font = UIFontHelper.LoadForText(t.text, t.fontSize);
     }
 
-    /// <summary>赋值并同步字体（中文微软雅黑 / 英文 Consolas）。</summary>
+    /// <summary>赋值并同步字体（中文Noto Sans CJK SC / 英文 JetBrains Mono）。</summary>
     private static void SetLabel(Text t, string content)
     {
         if (t == null)
@@ -806,14 +1013,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             if (CurrentCourse == Course.Api)
             {
                 headlineText.text = zh
-                    ? "关卡 2 · 第 1 部分 · 炮台 API 调用教学"
-                    : "Level 2 · Part 1 · Tower API Tutorial";
+                    ? "关卡 2 · 第 2 部分 · 炮台 API 调用教学"
+                    : "Level 2 · Part 2 · Tower API Tutorial";
             }
             else
             {
                 headlineText.text = zh
-                    ? "关卡 1 · 第 2 部分 · C# 基础语法教学"
-                    : "Level 1 · Part 2 · C# Syntax Tutorial";
+                    ? "关卡 1 · 第 3 部分 · C# 基础语法教学（零基础手把手）"
+                    : "Level 1 · Part 3 · C# Syntax Tutorial";
             }
         }
 
@@ -847,17 +1054,40 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             }
         }
 
+        // 「当前在第几个任务」与「实际做完几个任务」是两回事：用 /level 直接跳到第 10 个任务时，
+        // 前面 9 个并没有做过，因此进度文案一律以真实完成数为准，避免看起来像「前面全做完了」。
+        int doneCount = 0;
+        if (done != null)
+            for (int i = 0; i < done.Length && i < TaskCount; i++)
+                if (done[i])
+                    doneCount++;
+
         if (progressText != null)
         {
             int shown = Mathf.Min(CurrentIndex + 1, TaskCount);
-            progressText.text = finished
-                ? (zh ? "全部完成" : "All done")
-                : (zh ? "任务 " + shown + "/" + TaskCount : "Task " + shown + "/" + TaskCount);
+            if (finished)
+            {
+                // 跳关走完最后一章 ≠ 每一章都做过：只有真做满 TaskCount 个任务才敢说「全部完成」
+                if (doneCount >= TaskCount)
+                    progressText.text = zh ? "全部完成" : "All done";
+                else if (zh)
+                    progressText.text = "本课已走完 · 已完成 " + doneCount + "/" + TaskCount;
+                else
+                    progressText.text = "Course finished · done " + doneCount + "/" + TaskCount;
+            }
+            else if (zh)
+                progressText.text = "任务 " + shown + "/" + TaskCount + " · 已完成 " + doneCount + "/" + TaskCount;
+            else
+                progressText.text = "Task " + shown + "/" + TaskCount + " · done " + doneCount + "/" + TaskCount;
         }
 
         if (finished)
         {
-            taskNameText.text = zh ? "✔ 教学完成" : "✔ Tutorial complete";
+            // 走完最后一章 ≠ 每章都做过（可能是 /level 跳过来的），标题也按真实完成数给
+            taskNameText.text = doneCount >= TaskCount
+                ? (zh ? "✔ 教学完成" : "✔ Tutorial complete")
+                : (zh ? "✔ 本课已走完（" + doneCount + "/" + TaskCount + "）"
+                      : "✔ Course finished (" + doneCount + "/" + TaskCount + ")");
             if (bodyText != null)
             {
                 bodyText.text = CurrentCourse == Course.Api
@@ -866,26 +1096,27 @@ public class CodeSyntaxTutorialController : MonoBehaviour
                           + "Velocity / Volume 字段、GetFireCooldown、FireAtPlane、PrintLine / Print / ClearPrint。\n\n"
                           + "关卡已开始刷新方块：按 Esc 关闭编辑器，你写的程序就会每帧自动运行、驱动炮台。\n"
                           + "想继续改进代码：按 Enter 重新打开编辑器修改，按 F6 重新编译运行。\n"
-                          + "想从头再学一遍：在开发者指令框输入 /level 2 1，进度会自动重置。"
+                          + "想从头再学一遍：在开发者指令框输入 /level 2 2，进度会自动重置。"
                         : "You have used the whole tower API: GetAllObjects, TowerObjectInfo.Index / Type / HP /\n"
                           + "Position / Velocity / Volume, GetFireCooldown, FireAtPlane, PrintLine / Print / ClearPrint.\n\n"
                           + "Blocks are now spawning: press Esc to close the editor and your program runs every frame.\n"
                           + "Press Enter to reopen the editor and F6 to recompile.\n"
-                          + "Type /level 2 1 in the console to restart this tutorial.")
+                          + "Type /level 2 2 in the console to restart this tutorial.")
                     : (zh
                         ? "你已经用到了变量、const、运算符、关系 / 逻辑运算、if / if-else / switch、for / while / do-while、\n"
                           + "数组、List、方法定义与返回值、字符串拼接与 string.Format、注释。\n\n"
                           + "关卡已开始刷新方块：按 Esc 关闭编辑器，你写的程序就会每帧自动运行、驱动炮台。\n"
                           + "想继续改进代码：按 Enter 重新打开编辑器修改，按 F6 重新编译运行。\n"
-                          + "想学炮台 API：在开发者指令框输入 /level 2 1。想重学本关：输入 /level 1 2。"
+                          + "想学炮台 API：在开发者指令框输入 /level 2 2。想重学本关：输入 /level 1 3。"
                         : "You have used variables, const, operators, comparisons, logic, if / if-else / switch,\n"
                           + "for / while / do-while, arrays, List, methods & return values, string concat & Format, comments.\n\n"
                           + "Blocks are now spawning: press Esc to close the editor and your program runs every frame.\n"
                           + "Press Enter to reopen the editor and F6 to recompile.\n"
-                          + "For the tower API tutorial type /level 2 1; to restart this one type /level 1 2.");
+                          + "For the tower API tutorial type /level 2 2; to restart this one type /level 1 3.");
             }
             if (sampleText != null)
                 sampleText.text = string.Empty;
+            RefreshPageNav(-1); // 全部完成：没有分页可翻
             LayoutGuideColumns();
             return;
         }
@@ -893,16 +1124,30 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         int index = Mathf.Clamp(CurrentIndex, 0, Mathf.Max(0, TaskCount - 1));
         if (tasks != null && index < tasks.Length)
         {
+            int pageCount = PageCountOf(index);
+            guidePage = Mathf.Clamp(guidePage, 0, Mathf.Max(0, pageCount - 1));
+
             taskNameText.text = zh ? tasks[index].TitleZh : tasks[index].TitleEn;
             if (bodyText != null)
             {
-                string guidePart, samplePart;
-                SplitTaskBody(zh ? tasks[index].BodyZh : tasks[index].BodyEn, out guidePart, out samplePart);
+                string guidePart;
+                string samplePart = string.Empty;
+                if (guidePage > 0)
+                {
+                    // 第 2 页 = 零基础手把手细节（怎么一步步做出来 / 常见写错的样子）：
+                    // 整段放左栏通栏显示，不配示例代码（示例已经在第 1 页右侧）
+                    guidePart = (zh ? tasks[index].Page2Zh : tasks[index].Page2En) ?? string.Empty;
+                }
+                else
+                {
+                    SplitTaskBody(zh ? tasks[index].BodyZh : tasks[index].BodyEn, out guidePart, out samplePart);
+                }
                 bodyText.text = BuildGuideBody(index, zh, guidePart);
                 if (sampleText != null)
                     sampleText.text = samplePart;
                 LayoutGuideColumns();
             }
+            RefreshPageNav(index);
         }
     }
 
@@ -969,10 +1214,33 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         string syntaxState = hit
             ? (zh ? "✔ 已命中" : "✔ Found")
-            : (zh ? "✘ 未命中 —— 请按右侧的写法补全" : "✘ Missing — add it as shown on the right");
+            : (guidePage > 0
+                ? (zh ? "✘ 未命中 —— 照本页①的步骤写出来，再点【编译运行 (F6)】" : "✘ Missing — follow the step-by-step list on this page, then click [Compile & Run (F6)]")
+                : (zh ? "✘ 未命中 —— 请按右侧的写法补全" : "✘ Missing — add it as shown on the right"));
 
-        StringBuilder sb = new StringBuilder(main.Length + 160);
+        StringBuilder sb = new StringBuilder(main.Length + 320);
         sb.Append(main);
+
+        // 蓝色长条提示：只在 Level 1 - Part 3（语法课）的每一章出现 —— 新手不知道卡顶那条蓝线能拖，
+        // 字号固定后文案过长会被截断，必须先告诉他可以把提示区拉高；API 课及之后不再重复提示。
+        if (CurrentCourse == Course.Grammar)
+        {
+            sb.Append(zh
+                ? "\n\n【蓝色长条】按住本卡顶部的蓝色长条上下拖动，可随时调整「提示区 / 代码区」的高度，字号不变。"
+                : "\n\n【Blue bar】Drag the blue bar at the top of this card up or down to resize the hint area and the code area. The font size stays the same.");
+        }
+
+        // 第 1 页底部提示「还有一页手把手细节」：完全不懂代码的人通常不会主动去点右上角的翻页箭头，
+        // 所以在第 1 页明确告诉他下一步该翻页（第 2 页是逐步操作 + 常见写错的样子）。
+        if (guidePage == 0 && PageCountOf(index) > 1)
+        {
+            sb.Append(zh
+                ? "\n\n【不会写？】点本卡右上角「‹ 细节 1/2 ›」翻到第 2 页：\n"
+                  + "那里写着一共几步、每一步敲什么、写在哪一行，以及三个最常见的写错方式。"
+                : "\n\n【Stuck?】Click \"‹ Detail 1/2 ›\" at the top right of this card to open page 2:\n"
+                  + "it lists every step, what to type, where to type it, and the three most common mistakes.");
+        }
+
         sb.Append(zh ? "\n\n—— 本任务完成条件（两项都满足才算完成）——\n" : "\n\n—— Complete when BOTH are satisfied ——\n");
         sb.Append(zh ? "① 语法：" : "① Syntax: ").Append(syntaxState).Append('\n');
         sb.Append(zh ? "② 编译：" : "② Compile: ").Append(compileState);
@@ -984,7 +1252,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (panelRoot == null)
             return;
 
-        // 任务卡只在编辑器打开时显示（编辑器关闭时不遮挡玩法，改由底部提示条提示按 Enter 继续）
+        // 任务卡只在编辑器打开时显示；编辑器关闭时玩家看到的是实机页面，
+        // 由页面正中的进入提示（按下 Enter 打开代码编辑界面）引导，不遮挡任何玩法元素。
         bool editorOpen = editor != null && editor.IsOpen;
 
         if (panelRoot.activeSelf != editorOpen)
@@ -1007,12 +1276,31 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             return;
 
         bool zh = Localization.IsChinese;
-        string text;
+
+        // 主行：实机页面上最醒目的一句 —— 按下 Enter 打开代码编辑界面
+        string main = zh ? "按下 Enter 打开代码编辑界面" : "Press Enter to open the code editor";
+
+        // 副行：当前任务进度 / 完成后可随时回来改代码
+        string sub;
         if (finished)
         {
-            text = CurrentCourse == Course.Api
-                ? (zh ? "炮台 API 教学已完成 —— 按 Enter 可重新打开代码编辑器修改" : "Tower API tutorial complete — press Enter to reopen the editor")
-                : (zh ? "C# 语法教学已完成 —— 按 Enter 可重新打开代码编辑器修改" : "C# syntax tutorial complete — press Enter to reopen the editor");
+            // 走完最后一章 ≠ 每一章都做过（可能是 /level 跳过来的）：没做满就只报「本课已走完 + 真实完成数」
+            int allDoneCount = 0;
+            if (done != null)
+                for (int i = 0; i < done.Length && i < TaskCount; i++)
+                    if (done[i])
+                        allDoneCount++;
+            bool reallyAll = allDoneCount >= TaskCount;
+            if (CurrentCourse == Course.Api)
+                sub = reallyAll
+                    ? (zh ? "炮台 API 教学已全部完成 —— 按 Enter 可随时回来修改代码" : "Tower API course complete — press Enter anytime to edit your code")
+                    : (zh ? "本课已走完 · 已完成 " + allDoneCount + "/" + TaskCount + " —— 按 Enter 可随时回来补做"
+                          : "Course finished · done " + allDoneCount + "/" + TaskCount + " — press Enter anytime to catch up");
+            else
+                sub = reallyAll
+                    ? (zh ? "C# 语法教学已全部完成 —— 按 Enter 可随时回来修改代码" : "C# syntax course complete — press Enter anytime to edit your code")
+                    : (zh ? "本课已走完 · 已完成 " + allDoneCount + "/" + TaskCount + " —— 按 Enter 可随时回来补做"
+                          : "Course finished · done " + allDoneCount + "/" + TaskCount + " — press Enter anytime to catch up");
         }
         else
         {
@@ -1020,10 +1308,12 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             string title = "";
             if (tasks != null && CurrentIndex >= 0 && CurrentIndex < tasks.Length)
                 title = zh ? tasks[CurrentIndex].TitleZh : tasks[CurrentIndex].TitleEn;
-            text = zh
-                ? "任务 " + shown + "/" + TaskCount + "：" + title + " —— 按 Enter 打开代码编辑器，写完后点【编译运行 (F6)】"
-                : "Task " + shown + "/" + TaskCount + ": " + title + " — press Enter to open the editor, then click [Compile & Run (F6)]";
+            sub = zh
+                ? "当前任务 " + shown + "/" + TaskCount + "：" + title + "（进入编辑器后写代码，写完点【编译运行 (F6)】）"
+                : "Task " + shown + "/" + TaskCount + ": " + title + " (write the code in the editor, then click [Compile & Run (F6)])";
         }
+
+        string text = "<color=#5CD8F2>" + main + "</color>\n<size=22><color=#A8C4D6>" + sub + "</color></size>";
 
         if (text == hintCache)
             return;
@@ -1453,7 +1743,522 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: string.Format( appears.",
             (raw, code) => ReStringFormat.IsMatch(code));
 
+        AppendGrammarDetailPages(list); // 每项任务补「第 2 页」手把手细节（任务卡右上角翻页查看）
         return list;
+    }
+
+
+    // ================== 第 2 页：零基础手把手细节（每任务一页，任务卡右上角 ‹ › 翻页） ==================
+
+    /// <summary>
+    /// 给语法课 18 项任务补上「第 2 页」：完全不懂代码的人照着做就能完成的那一页。
+    /// 第 1 页讲写法与示例，第 2 页讲「这一步到底在做什么 / 手把手第几步按哪里 / 逐行拆解 / 新手最容易踩的坑」，
+    /// 并参照 runoob C# 教程补充了类型转换、运算符优先级、真值表、数组与 List 差异、局部函数等概念。
+    /// </summary>
+        private static void AppendGrammarDetailPages(TaskDef[] list)
+    {
+        list[0].Page2Zh = "【这一页：亲手敲一遍，再故意写错一次】\n"
+            + "① 点上方代码区空白处，让光标在那里闪，就可以开始敲。\n"
+            + "② 敲两个英文斜杠 //，后面随便写一句话，回车。\n"
+            + "③ 需要写多行说明就用 /* 开头、*/ 结尾，中间可以换行。\n"
+            + "④ 点【编译运行 (F6)】：注释不参与运行，能编译就是对的。\n"
+            + "【逐符号读懂它】\n"
+            + "· // ：从这里到本行末尾，全部给人看，程序看不见。\n"
+            + "· /* */ ：成对出现，中间的换行也算注释，不能只写一半。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 中文输入法敲出「／／」→ 全角斜杠报 CS1056 意外字符，切英文再敲。\n"
+            + "✘ 只写 /* 不写 */ → 报 CS1035 注释未结束，后面代码全被吃掉。\n"
+            + "✔ 想临时屏蔽一行代码：在行首加 //，比删掉更安全。";
+        list[0].Page2En = "THIS PAGE: TYPE IT YOURSELF, THEN BREAK IT ON PURPOSE\n"
+            + "1) Click a blank spot in the code area and let the caret blink.\n"
+            + "2) Type two forward slashes // and any sentence after them, then Enter.\n"
+            + "3) For several lines use /* to open and */ to close; newlines are allowed.\n"
+            + "4) Press [Compile & Run (F6)]. A comment never runs; compiling clean means it is valid.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- // : from here to the end of the line is for humans only.\n"
+            + "- /* */ : always a pair; half a pair swallows the rest of the file.\n"
+            + "THREE TRAPS\n"
+            + "- Full-width slashes from a Chinese IME give CS1056; switch to English input.\n"
+            + "- Missing */ gives CS1035 and eats every line below it.\n"
+            + "- To mute one line fast, put // in front of it instead of deleting.";
+        list[1].Page2Zh = "【这一页：亲手敲出四个不同类型的变量】\n"
+            + "① 光标进代码区，先敲类型：int / float / bool / string。\n"
+            + "② 空一格写名字：只能用字母、数字、下划线，不能用数字开头。\n"
+            + "③ 写 = 和初始值，行末必须敲英文分号 ;。\n"
+            + "④ 四行敲完，点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· int hp = 100; int 只装整数，= 把右边放进左边，; 表示一句结束。\n"
+            + "· float sp = 1.5f; 尾巴那个 f 必须写，否则 1.5 被当成 double 而报错。\n"
+            + "· bool ok = true; 只装 true / false，不加引号。\n"
+            + "· string tag = \"塔\"; 文字要用英文双引号，中文引号不认。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ int hp = 1.5; → 报 CS0266 无法把 double 隐式转成 int，小数要用 float。\n"
+            + "✘ 行末漏分号 → 报 CS1002 应输入 ;。\n"
+            + "✔ 类型转换：int a = 3; float b = a; 小盒子倒大盒子自动转；(int)2.8f 得 2，要强制。";
+        list[1].Page2En = "THIS PAGE: TYPE FOUR VARIABLES OF DIFFERENT TYPES\n"
+            + "1) In the code area start with a type: int / float / bool / string.\n"
+            + "2) Space once, then the name: letters, digits, underscore, never starting with a digit.\n"
+            + "3) Type = and the starting value, then an English semicolon ;.\n"
+            + "4) After four lines press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- int hp = 100;  int holds whole numbers only; = copies right into left; ; ends the statement.\n"
+            + "- float sp = 1.5f;  the trailing f is required, else 1.5 is a double and will not fit.\n"
+            + "- bool ok = true;  only true / false, no quotes.\n"
+            + "- string tag = \"tower\";  text needs double quotes; curly quotes are rejected.\n"
+            + "THREE TRAPS\n"
+            + "- int hp = 1.5; gives CS0266, use float for decimals.\n"
+            + "- A missing semicolon gives CS1002.\n"
+            + "- Conversion: int a = 3; float b = a; widens free; (int)2.8f narrows to 2 by hand.";
+        list[2].Page2Zh = "【这一页：把「不该变的数」交给 const 保管】\n"
+            + "① 先敲 const，紧跟类型 int / string，再空一格写名字。\n"
+            + "② 写 = 和值，行末分号；命名习惯全大写，如 MAX_HP。\n"
+            + "③ 再写一行 int x = MAX_HP; x = 6; 观察常量本身不许改。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· const int MAX_HP = 100; const 表示这个盒子封死后不许再改。\n"
+            + "· 必须在声明同一行就给值，不能先 const int a; 之后再赋值。\n"
+            + "· 想改常量会报 CS0131，赋值号左边必须是可赋值变量。\n"
+            + "· 常量天生适合放「魔法数字」：冷却、血量上限、计分倍数。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 用 const 装会变的数（比如当前血量）→ 一改就编译不过。\n"
+            + "✘ const 后面忘了写类型 → const 不是类型，语法错误。\n"
+            + "✔ 同一个数字在多处用到，就定义成常量，改一处全局生效。";
+        list[2].Page2En = "THIS PAGE: PUT NUMBERS THAT MUST NOT CHANGE INTO const\n"
+            + "1) Type const, then the type int / string, then a space and the name.\n"
+            + "2) Type = and the value, then a semicolon; name it in caps like MAX_HP.\n"
+            + "3) Add int x = MAX_HP; x = 6; and see that the constant itself cannot change.\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- const int MAX_HP = 100;  const seals the box after the first value.\n"
+            + "- The value must be given on the same line; const int a; then a = 5; is illegal.\n"
+            + "- Assigning to a constant raises CS0131.\n"
+            + "- Constants are for magic numbers: cooldowns, HP caps, score multipliers.\n"
+            + "THREE TRAPS\n"
+            + "- A const holding a value that must change will fail to compile later.\n"
+            + "- Forgetting the type after const is a syntax error; const is not a type.\n"
+            + "- One number used in many places should be a constant so one edit fixes all.";
+        list[3].Page2Zh = "【这一页：用 C# 当计算器，算四道题】\n"
+            + "① 敲 int total = 2 + 3 * 4; 先猜结果再看下一段。\n"
+            + "② 敲 int t2 = 7 / 2; 再敲 float half = 7 / 2f; 对比两者的差别。\n"
+            + "③ 敲 int rest = 7 % 3; % 是取余数，7 除 3 余 1。\n"
+            + "④ 点【编译运行 (F6)】，用 PrintLine 把四个值打到荧幕上。\n"
+            + "【逐符号读懂它】\n"
+            + "· + - * / ：加减乘除；乘是星号 *，写成 x 或 × 都不认。\n"
+            + "· % ：取余数，判断奇偶就用 n % 2 == 0。\n"
+            + "· 优先级：先 * / %，再 + -，有括号先算括号，和小学数学一样。\n"
+            + "· total 是 14 不是 20，因为 3 * 4 先算。\n"
+            + "· 7 / 2 是 3，整数除整数小数被直接丢掉。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 想要小数却写 7 / 2 → 得 3；要 3.5 请写 7 / 2f 或 7f / 2。\n"
+            + "✘ 除以 0 → 运行时报 DivideByZeroException，程序直接中断。\n"
+            + "✔ 拿不准就加括号：(2 + 3) * 4 = 20，读起来也清楚。";
+        list[3].Page2En = "THIS PAGE: USE C# AS A CALCULATOR, FOUR EXERCISES\n"
+            + "1) Type int total = 2 + 3 * 4; guess the result before reading on.\n"
+            + "2) Type int t2 = 7 / 2; then float half = 7 / 2f; and compare both.\n"
+            + "3) Type int rest = 7 % 3; the % sign returns the remainder, here 1.\n"
+            + "4) Press [Compile & Run (F6)] and PrintLine all four values.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- + - * / : add, subtract, multiply, divide. Multiplication is *, not x.\n"
+            + "- % : remainder, handy for odd/even with n % 2 == 0.\n"
+            + "- Order: * / % first, then + -, brackets win, exactly like school maths.\n"
+            + "- total is 14, not 20, because 3 * 4 runs first.\n"
+            + "- 7 / 2 is 3: integer division throws the fraction away.\n"
+            + "THREE TRAPS\n"
+            + "- 7 / 2 gives 3; write 7 / 2f or 7f / 2 for 3.5.\n"
+            + "- Dividing by zero throws DivideByZeroException at runtime.\n"
+            + "- When in doubt add brackets: (2 + 3) * 4 = 20.";
+        list[4].Page2Zh = "【这一页：让程序自己回答「是还是不是」】\n"
+            + "① 先备两个数：int hpNow = 5; int hurt = 2;\n"
+            + "② 用 bool 接住结果：bool alive = hpNow > hurt;\n"
+            + "③ 再把 == != >= <= 各写一行，观察 true / false。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· == 判断两边是否相等，答案只有 true / false；= 是赋值，别混。\n"
+            + "· != 不等于，>= 大于或等于，<= 小于或等于。\n"
+            + "· bool alive = hpNow > hurt; 结果是 true，因为 5 大于 2。\n"
+            + "· 括号不是必需，写 (hpNow == 0) 只是让人一眼看清意图。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 判断相等写成 = → 变成赋值，还会报 CS0029 类型不匹配。\n"
+            + "✘ 把 >= 写成 => → => 是 Lambda 符号，比较只认 >=。\n"
+            + "✔ 比较结果本身就是 true/false，可以直接塞进 if 的括号里。";
+        list[4].Page2En = "THIS PAGE: LET THE PROGRAM ANSWER YES OR NO\n"
+            + "1) Prepare two numbers: int hpNow = 5; int hurt = 2;\n"
+            + "2) Catch the answer in a bool: bool alive = hpNow > hurt;\n"
+            + "3) Write one line each for == != >= <= and watch true / false.\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- == asks whether both sides are equal; the answer is true or false. A single = assigns.\n"
+            + "- != not equal, >= at least, <= at most.\n"
+            + "- bool alive = hpNow > hurt; is true because 5 is greater than 2.\n"
+            + "- Brackets are optional; (hpNow == 0) just makes the intent obvious.\n"
+            + "THREE TRAPS\n"
+            + "- Using = for equality assigns and may give CS0029.\n"
+            + "- => is a lambda arrow; comparison needs >=.\n"
+            + "- A comparison already yields true/false, so it can go straight into if (...).";
+        list[5].Page2Zh = "【这一页：把两个「是 / 否」合成一个答案】\n"
+            + "① 先备前提：bool weaponReady = true; int hpLeft = 5;\n"
+            + "② 两个条件都要成立用 &&：bool canFire = weaponReady && hpLeft > 0;\n"
+            + "③ 任一成立用 ||，取反用 !，各写一行试试。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· &&（并且）：两边都 true 才是 true，一边 false 就 false。\n"
+            + "· ||（或者）：一边 true 就 true，两边都 false 才 false。\n"
+            + "· !（反过来）：写在操作数前面，!true 就是 false。\n"
+            + "· bool needHeal = hpLeft <= 0 || !weaponReady; 血空了或武器没好都得处理。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 只写一个 & 或 | → 那是按位运算，条件里必须写两个。\n"
+            + "✘ 把 != 当成「取反」→ != 是不等于，和 ! 意思完全不同。\n"
+            + "✔ 把更可能为假的条件放在 && 左边，短路能少算一半。";
+        list[5].Page2En = "THIS PAGE: MERGE TWO YES/NO ANSWERS INTO ONE\n"
+            + "1) Prepare the premises: bool weaponReady = true; int hpLeft = 5;\n"
+            + "2) Both must hold, use &&: bool canFire = weaponReady && hpLeft > 0;\n"
+            + "3) Either may hold, use ||; negate with !. Write one line of each.\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- && (and): true only when both sides are true.\n"
+            + "- || (or): true when at least one side is true.\n"
+            + "- ! (not): placed before the operand, !true is false.\n"
+            + "- bool needHeal = hpLeft <= 0 || !weaponReady;  low HP or no weapon both need care.\n"
+            + "THREE TRAPS\n"
+            + "- A single & or | is bitwise, not logical; conditions need the doubled form.\n"
+            + "- != is not-equal, which is a different thing from !.\n"
+            + "- Put the more likely false test on the left of && to short-circuit sooner.";
+        list[6].Page2Zh = "【这一页：让程序「看情况」才做事】\n"
+            + "① 敲 if，紧跟一对英文圆括号 ( )，括号里放 true/false 条件。\n"
+            + "② 下一行敲 {，写完语句再敲 }，花括号左右配对。\n"
+            + "③ 在 if 上面先把条件用到的值算出来，例如 int n = 3;\n"
+            + "④ 点【编译运行 (F6)】，再把 n 改成 0，看荧幕输出变化。\n"
+            + "【逐符号读懂它】\n"
+            + "· if (n > 0) ：条件是 n > 0，为真才进入下面的大括号。\n"
+            + "· { } ：里面可以有任意多条语句，它们同进同退。\n"
+            + "· 只有一条语句时花括号可省，但零基础阶段建议一律写上。\n"
+            + "· if 的圆括号后面不加分号，加的是花括号。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ if (n = 0) → 这是赋值不是判断，要写 n == 0。\n"
+            + "✘ if (n > 0); → 多写分号，花括号里的内容就永远都会执行。\n"
+            + "✔ 花括号里的语句缩进写，一眼就能看出哪几行属于这个 if。";
+        list[6].Page2En = "THIS PAGE: MAKE THE PROGRAM ACT ONLY WHEN IT SHOULD\n"
+            + "1) Type if and a pair of round brackets holding a true/false condition.\n"
+            + "2) On the next line open a brace, write the statements, then close it.\n"
+            + "3) Compute the value used by the condition above the if, e.g. int n = 3;\n"
+            + "4) Press [Compile & Run (F6)], then set n to 0 and watch the output change.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- if (n > 0) : the condition is n > 0; only a true result enters the braces.\n"
+            + "- { } : any number of statements inside, all or nothing.\n"
+            + "- One statement may skip braces, but beginners should always write them.\n"
+            + "- No semicolon after the if brackets, the brace follows directly.\n"
+            + "THREE TRAPS\n"
+            + "- if (n = 0) assigns instead of comparing; use n == 0.\n"
+            + "- if (n > 0); with a stray semicolon makes the braces always run.\n"
+            + "- Indent the body so you can see at a glance which lines belong to the if.";
+        list[7].Page2Zh = "【这一页：二选一，两条路只走一条】\n"
+            + "① 先写完整的 if (条件) { … }。\n"
+            + "② 在右花括号下一行敲 else，else 后面不带圆括号、不带条件。\n"
+            + "③ 再跟一对花括号，写条件不成立时要执行的内容。\n"
+            + "④ 三分支以上接 else if (条件)，最后可兜一个 else。\n"
+            + "【逐符号读懂它】\n"
+            + "· if … else ：条件真走 if，假走 else，永远只走一段。\n"
+            + "· else if (条件) ：前一个条件不成立时，才轮到它继续判断。\n"
+            + "· else 必须紧挨着上一个 if 的右花括号，中间不能插别的语句。\n"
+            + "· 花括号不配对时编辑器提示 expected }，那就是少了一个 }。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ else (条件) → else 不接受条件，要条件请写 else if。\n"
+            + "✘ if 和 else 中间插了语句 → 编译报错，两者必须连着。\n"
+            + "✔ 先想清「if 不成立时还剩哪些情况」，else 才不会漏。";
+        list[7].Page2En = "THIS PAGE: TWO ROADS, ONLY ONE IS WALKED\n"
+            + "1) First write a complete if (condition) { ... }.\n"
+            + "2) On the line after the closing brace type else, with no brackets and no condition.\n"
+            + "3) Add a pair of braces with what should happen when the condition is false.\n"
+            + "4) For three or more cases chain else if (condition) and optionally a final else.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- if ... else : true walks the if, false walks the else, never both.\n"
+            + "- else if (condition) : tested only when the previous condition failed.\n"
+            + "- else must touch the previous if closing brace; nothing in between.\n"
+            + "- expected } in the console means one closing brace is missing.\n"
+            + "THREE TRAPS\n"
+            + "- else (condition) is illegal; that job belongs to else if.\n"
+            + "- A statement between if and else breaks the pair.\n"
+            + "- List every remaining case before writing else, or one case is lost.";
+        list[8].Page2Zh = "【这一页：一个值，对上多个固定选项】\n"
+            + "① 敲 switch (要判断的变量) {，先写左花括号。\n"
+            + "② 每个选项写 case 值: 然后跟语句，最后 break;。\n"
+            + "③ 全部不匹配时交给 default: 收尾。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· switch 只判断「等于哪个固定值」，范围判断请改用 if。\n"
+            + "· case 1: 用冒号结尾不是分号，每个 case 结束要写 break;。\n"
+            + "· 漏写 break 会穿透到下一个 case 继续执行，编译器报 CS0163。\n"
+            + "· default: 是兜底项，可以不写，但写了更安全。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ case 后面写变量（case hp:）→ 必须是常量，报 CS0150。\n"
+            + "✘ case 1; 冒号写成逗号或分号 → 语法错误。\n"
+            + "✔ 同样的代码要服务多个值，就并列写 case 1: case 2: 共用一个 break。";
+        list[8].Page2En = "THIS PAGE: ONE VALUE, SEVERAL FIXED CHOICES\n"
+            + "1) Type switch (value) { and open the brace.\n"
+            + "2) For each option write case value: then the statements, then break;\n"
+            + "3) Let default: catch everything that matched nothing.\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- switch only compares against fixed values; use if for ranges.\n"
+            + "- case 1: ends with a colon, not a semicolon; each case ends with break;\n"
+            + "- A missing break falls through and the compiler reports CS0163.\n"
+            + "- default: is optional, but it keeps holes closed.\n"
+            + "THREE TRAPS\n"
+            + "- case hp: with a variable gives CS0150; cases must be constants.\n"
+            + "- case 1; with a semicolon is a syntax error.\n"
+            + "- To run one block for several values, stack case 1: case 2: before one break;";
+        list[9].Page2Zh = "【这一页：让程序替你连点 5 次】\n"
+            + "① 敲 for，圆括号里三段用两个分号隔开：for (int i = 0; i < 5; i++)。\n"
+            + "② 第一段 int i = 0 只执行一次；第二段 i < 5 每圈都检查。\n"
+            + "③ 第三段 i++ 每圈结束执行，等于 i = i + 1。\n"
+            + "④ 花括号里写要重复的语句，点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· i 是计数变量，习惯叫 i，也可以取别的名字。\n"
+            + "· i < 5 变成假就立刻退出，所以从 0 数到 4 共跑 5 次，不含 5。\n"
+            + "· i++ 相当于 i = i + 1，也等于 i += 1，三种写法完全等价。\n"
+            + "· 想从 1 数到 5：for (int i = 1; i <= 5; i++)。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 三段之间写成逗号 → 必须用分号隔开，否则语法错误。\n"
+            + "✘ 漏了 i++ → 条件永远成立，死循环，按标题栏【停止 (F7)】。\n"
+            + "✔ 循环体里别去改 i 的值，容易跳号或死循环。";
+        list[9].Page2En = "THIS PAGE: LET THE LOOP CLICK FIVE TIMES FOR YOU\n"
+            + "1) Type for with three sections split by two semicolons: for (int i = 0; i < 5; i++)\n"
+            + "2) Section one, int i = 0, runs once; section two, i < 5, is checked each round.\n"
+            + "3) Section three, i++, runs after each round and equals i = i + 1.\n"
+            + "4) Put the repeated statements in the braces and press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- i is the counter; the name is a habit, not a rule.\n"
+            + "- Once i < 5 turns false the loop exits, so 0 to 4 runs five times, 5 excluded.\n"
+            + "- i++ means i = i + 1, which also equals i += 1.\n"
+            + "- To count 1 to 5: for (int i = 1; i <= 5; i++)\n"
+            + "THREE TRAPS\n"
+            + "- Commas between the sections are a syntax error, they must be semicolons.\n"
+            + "- Forgetting i++ loops forever; press [Stop (F7)] in the title bar.\n"
+            + "- Never modify i inside the body or you will skip numbers or hang.";
+        list[10].Page2Zh = "【这一页：条件成立就一直转下去】\n"
+            + "① 先在循环外面备好变量：int n = 3;\n"
+            + "② 敲 while (n > 0) {，花括号里写要重复的事。\n"
+            + "③ 关键：花括号里必须让 n 变小（n--;），否则永不退出。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· while (条件)：每圈开始前检查一次，真就再转，假就退出。\n"
+            + "· 条件一开始就是假 → 花括号一次都不进，这是它和 do-while 的区别。\n"
+            + "· n-- 等于 n = n - 1，也可以写 n -= 1。\n"
+            + "· 不知道自己会转多少圈时，用 while 比 for 更自然。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 花括号里忘了改条件变量 → 死循环，按【停止 (F7)】退出。\n"
+            + "✘ while (n > 0); 多写一个分号 → 变成空循环，永远卡在这行。\n"
+            + "✔ 只有循环体里一定会变的东西，才适合当 while 的条件。";
+        list[10].Page2En = "THIS PAGE: KEEP SPINNING WHILE THE CONDITION HOLDS\n"
+            + "1) Prepare the variable outside the loop: int n = 3;\n"
+            + "2) Type while (n > 0) { and put the repeated work inside the braces.\n"
+            + "3) Critical: something inside must shrink n (n--;), or the loop never ends.\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- while (condition) checks before every round: true spins again, false exits.\n"
+            + "- A condition that starts false means the body never runs, unlike do-while.\n"
+            + "- n-- equals n = n - 1, also written n -= 1.\n"
+            + "- When the number of rounds is unknown, while reads better than for.\n"
+            + "THREE TRAPS\n"
+            + "- Forgetting to change the condition variable loops forever; press [Stop (F7)].\n"
+            + "- while (n > 0); with a stray semicolon becomes an empty endless loop.\n"
+            + "- Only something that really changes inside the body belongs in the condition.";
+        list[11].Page2Zh = "【这一页：先干一次，再问要不要继续】\n"
+            + "① 先敲 do {，里面写要做的事，别忘了改条件变量。\n"
+            + "② 写完 } 紧跟 while (条件); 这里的分号必须有。\n"
+            + "③ 条件为真就回去再执行一轮 do 里的内容。\n"
+            + "④ 点【编译运行 (F6)】，把初值改成不满足条件，看它是否仍跑一次。\n"
+            + "【逐符号读懂它】\n"
+            + "· do { } while (条件); 先执行一次再判断，所以至少执行一次。\n"
+            + "· while 后面那个分号不能漏，漏了报 CS1002 / CS1525。\n"
+            + "· 初值 n = 0 且条件 n > 0：while 一次不跑，do-while 会跑一次。\n"
+            + "· 适合「菜单至少显示一次」「先出手再判断」这类场景。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 写成 do (条件) { } → do 后面直接跟花括号，不带条件。\n"
+            + "✘ 漏掉 while 后面的分号 → 编译直接报错。\n"
+            + "✔ 只要逻辑是「无论如何先做一次」，就用 do-while。";
+        list[11].Page2En = "THIS PAGE: ACT FIRST, THEN ASK WHETHER TO REPEAT\n"
+            + "1) Type do { and write the work inside, remembering to change the condition variable.\n"
+            + "2) After the closing brace follow with while (condition); the semicolon is required.\n"
+            + "3) A true condition sends you back for another round.\n"
+            + "4) Press [Compile & Run (F6)], then start with a false value and see it still run once.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- do { } while (condition);  runs once, then decides, so the body runs at least once.\n"
+            + "- The semicolon after while may not be omitted; missing it gives CS1002 / CS1525.\n"
+            + "- Starting at n = 0 with n > 0: a while loop skips, a do-while still runs once.\n"
+            + "- Perfect for show the menu at least once or fire first, judge later.\n"
+            + "THREE TRAPS\n"
+            + "- do (condition) { } is wrong; do goes straight to the brace.\n"
+            + "- Dropping the semicolon after while fails to compile.\n"
+            + "- If the logic is always do it once, choose do-while.";
+        list[12].Page2Zh = "【这一页：一个名字，装一排数】\n"
+            + "① 敲 int[] hp = new int[3]; 声明能装 3 个整数的数组。\n"
+            + "② 下标从 0 开始：hp[0] = 10; hp[1] = 20; hp[2] = 30;\n"
+            + "③ 也可以一次写全：int[] a = new int[] { 1, 2, 3 };\n"
+            + "④ 用 a.Length 取长度，点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· int[] ：方括号表示这是数组，不是单个 int。\n"
+            + "· new int[3] 分配 3 个坑位，每个默认值都是 0。\n"
+            + "· hp[0] 读第一个，最大下标是 Length - 1，写 hp[3] 就越界。\n"
+            + "· foreach (int v in a) 能逐个取出值，不用自己管下标。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 写 hp[3] → 报 IndexOutOfRangeException 越界，运行中断。\n"
+            + "✘ 声明写 int hp[] → C# 要求方括号跟类型：int[] hp。\n"
+            + "✔ 数组长度定死不能改，数量会变就改用 List。";
+        list[12].Page2En = "THIS PAGE: ONE NAME HOLDING A WHOLE ROW OF VALUES\n"
+            + "1) Type int[] hp = new int[3]; to declare an array of three integers.\n"
+            + "2) Indexing starts at 0: hp[0] = 10; hp[1] = 20; hp[2] = 30;\n"
+            + "3) Or fill it at once: int[] a = new int[] { 1, 2, 3 };\n"
+            + "4) Read the size with a.Length and press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- int[] : the brackets make it an array instead of a single int.\n"
+            + "- new int[3] reserves three slots, each defaulting to 0.\n"
+            + "- hp[0] is the first slot; the highest index is Length - 1, hp[3] overflows.\n"
+            + "- foreach (int v in a) walks the values without touching indexes.\n"
+            + "THREE TRAPS\n"
+            + "- hp[3] throws IndexOutOfRangeException and kills the run.\n"
+            + "- int hp[] is not C#; brackets follow the type: int[] hp.\n"
+            + "- An array size is fixed. When the count varies, use a List.";
+        list[13].Page2Zh = "【这一页：会自己长个儿的「数组」】\n"
+            + "① 文件第一行必须有 using System.Collections.Generic; 否则 List 不认。\n"
+            + "② 敲 List<int> hp = new List<int>(); 尖括号里是元素类型。\n"
+            + "③ 加元素 hp.Add(10); 取元素 hp[0]，数量看 hp.Count。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· List<int> ：尖括号里的 int 表示这个列表只装整数。\n"
+            + "· new List<int>() 后面那对圆括号不能少，那是构造调用。\n"
+            + "· Count 是属性不是方法：写 hp.Count，不要写 hp.Count()。\n"
+            + "· 删除用 hp.Remove(10) 或 hp.RemoveAt(0)，数组做不到这些。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 只写 using System.Collections; → 缺 Generic，报 CS0246 找不到 List。\n"
+            + "✘ 用 hp.Length → List 没有 Length，只有 Count。\n"
+            + "✔ 数量事先不知道用 List；长度固定又要快就用数组。";
+        list[13].Page2En = "THIS PAGE: AN ARRAY THAT GROWS BY ITSELF\n"
+            + "1) The first line needs using System.Collections.Generic; or List is unknown.\n"
+            + "2) Type List<int> hp = new List<int>(); the type goes inside the angle brackets.\n"
+            + "3) Add with hp.Add(10); read with hp[0]; count with hp.Count.\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- List<int> : the angle brackets say this list holds integers only.\n"
+            + "- The empty () after new List<int> is required, it is the constructor call.\n"
+            + "- Count is a property, so write hp.Count, never hp.Count().\n"
+            + "- Remove with hp.Remove(10) or hp.RemoveAt(0); arrays cannot do this.\n"
+            + "THREE TRAPS\n"
+            + "- using System.Collections; alone gives CS0246; Generic is required.\n"
+            + "- hp.Length does not exist on a List, only Count.\n"
+            + "- Unknown count: use List. Fixed length and speed: use an array.";
+        list[14].Page2Zh = "【这一页：把一段代码打包成一个按钮】\n"
+            + "① 先敲返回类型 void，空格，方法名（首字母大写，如 FireOnce）。\n"
+            + "② 紧跟一对圆括号，括号里写参数：类型 名字，多个用逗号隔开。\n"
+            + "③ 下一行花括号里放这段代码要做的事。\n"
+            + "④ 写完必须调用一次：FireOnce(); 定义不等于执行。\n"
+            + "【逐符号读懂它】\n"
+            + "· void 表示不交回答案，只做事。\n"
+            + "· (int x, float y) 是参数表，调用时按顺序把值交进去。\n"
+            + "· 本课程的方法写在当前代码里，调用它的语句要放在它下面或同一段内。\n"
+            + "· 名字后面那对圆括号才是调用，只写名字不会执行。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 方法名中间带空格（fire once）→ 语法错误，名字是一个整体。\n"
+            + "✘ 定义了却从不调用 → 编译能过，但荧幕毫无反应，判定也不认。\n"
+            + "✔ 参数个数与类型必须和定义完全一致，多一个少一个报 CS1501。";
+        list[14].Page2En = "THIS PAGE: PACK A BLOCK OF CODE INTO ONE BUTTON\n"
+            + "1) Type the return type void, a space, then the name in PascalCase such as FireOnce.\n"
+            + "2) Add round brackets holding the parameters: type then name, comma separated.\n"
+            + "3) On the next line put the work inside braces.\n"
+            + "4) Then call it once: FireOnce(); a definition alone does nothing.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- void means nothing is returned, it only performs an action.\n"
+            + "- (int x, float y) is the parameter list; arguments arrive in order.\n"
+            + "- In this course the method lives in your own code; the call goes below it.\n"
+            + "- The brackets after the name are the call. The bare name never executes.\n"
+            + "THREE TRAPS\n"
+            + "- A space inside the name (fire once) is a syntax error.\n"
+            + "- Defining without calling compiles but prints nothing, so the checker refuses it.\n"
+            + "- Argument count and types must match exactly, otherwise CS1501.";
+        list[15].Page2Zh = "【这一页：让方法把答案交回来】\n"
+            + "① 把返回类型从 void 改成 int（要交回什么类型就写什么）。\n"
+            + "② 方法体最后写 return 结果; 交回答案。\n"
+            + "③ 调用处接住它：int n = AddHp(1, 2);\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· int AddHp(int a, int b) ：开头的 int 是交回的类型，不再是 void。\n"
+            + "· return a + b; 交回 a + b 的值，同时立刻结束这个方法。\n"
+            + "· return 之后的语句永远不会执行，别在那之后写代码。\n"
+            + "· 非 void 方法必须保证每条路径都有 return，否则报 CS0161。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 声明成 int 却只写 return; → return 后面必须跟一个值。\n"
+            + "✘ 忘写 return → 报 CS0161 并非所有代码路径都返回值。\n"
+            + "✔ 只要方法要「算出个数、算出伤害」，就该让它带返回值。";
+        list[15].Page2En = "THIS PAGE: MAKE THE METHOD HAND AN ANSWER BACK\n"
+            + "1) Change the return type from void to int, or whatever type you return.\n"
+            + "2) End the body with return value; to hand the answer back.\n"
+            + "3) Catch it where you call: int n = AddHp(1, 2);\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- int AddHp(int a, int b) : the leading int is what comes back, no longer void.\n"
+            + "- return a + b; hands back the value and ends the method immediately.\n"
+            + "- Anything after return never runs, so do not write code there.\n"
+            + "- A non-void method must return on every path, or you get CS0161.\n"
+            + "THREE TRAPS\n"
+            + "- Declaring int but writing return; fails, a value is required.\n"
+            + "- Forgetting return gives CS0161, not all code paths return a value.\n"
+            + "- Any method that computes a count or damage should return a value.";
+        list[16].Page2Zh = "【这一页：把文字和数字接成一句话】\n"
+            + "① 先备变量：int n = 3; string tag = \"塔\";\n"
+            + "② 用 + 接起来：string s = tag + \" 有 \" + n + \" 个\";\n"
+            + "③ 想换行就在字符串里写 \\n，要输出就 tower.PrintLine(s);\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· + 两边只要有一边是 string，另一边就会自动变成文字。\n"
+            + "· 引号里的空格也算字符，\" 有 \" 的前后空格是故意留的。\n"
+            + "· 3 + \" 个\" 得 \"3 个\"，但 3 + 4 得 7，看的是运算顺序与类型。\n"
+            + "· tag + n 与 n + tag 结果一样，但 n + 3 会先做加法再拼字符串。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 用中文引号「塔」或“塔” → 报 CS1010 / CS1012，必须英文双引号。\n"
+            + "✘ 想装文字却用单引号 '塔' → 单引号只装一个字符，多字报错。\n"
+            + "✔ 想先算数再拼：写成 \"共 \" + (n + 1) + \" 个\"，把算式用括号包起来。";
+        list[16].Page2En = "THIS PAGE: GLUE TEXT AND NUMBERS INTO ONE SENTENCE\n"
+            + "1) Prepare values: int n = 3; string tag = \"tower\";\n"
+            + "2) Glue with +: string s = tag + \" has \" + n + \" blocks\";\n"
+            + "3) Put \\n inside the string to break a line; print with tower.PrintLine(s);\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- When either side of + is a string, the other side turns into text.\n"
+            + "- Spaces inside the quotes count, so \" has \" really has them.\n"
+            + "- 3 + \" blocks\" gives \"3 blocks\" while 3 + 4 gives 7: order and types matter.\n"
+            + "- n + 3 adds numbers first, then the sum is glued to a string.\n"
+            + "THREE TRAPS\n"
+            + "- Curly quotes like \"tower\" give CS1010 / CS1012; use straight double quotes.\n"
+            + "- Single quotes are for one char only; 'tower' is invalid.\n"
+            + "- To add before gluing write \"total \" + (n + 1) + \" blocks\".";
+        list[17].Page2Zh = "【这一页：把变量塞进一句话的占位符】\n"
+            + "① 一句话里先写占位符 {0} {1}，编号从 0 开始。\n"
+            + "② 逗号后面按顺序把值填进去：string.Format(\"塔 {0} 有 {1} 个\", 1, 3);\n"
+            + "③ 也可以直接 tower.PrintLine(\"块数={0}\", n); 省掉拼接。\n"
+            + "④ 点【编译运行 (F6)】。\n"
+            + "【逐符号读懂它】\n"
+            + "· {0} 是第 0 个值的坑位，{1} 是第 1 个，可以重复用也可以乱序用。\n"
+            + "· 占位符数量比给的参数多 → 运行时抛 FormatException。\n"
+            + "· {0:F2} 保留两位小数，{0,5} 占 5 个字符宽度并靠右对齐。\n"
+            + "· string.Format 返回一个新字符串，不会改动原来的变量。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 写了 {1} 却只给一个参数 → 运行时报 FormatException 中断。\n"
+            + "✘ 占位符用中文花括号｛0｝→ 编辑器不认，必须英文 { }。\n"
+            + "✔ 句子长、变量多时用 {0} 代替拼接，少写很多加号和引号。";
+        list[17].Page2En = "THIS PAGE: DROP VARIABLES INTO PLACEHOLDERS\n"
+            + "1) Put placeholders {0} {1} inside the sentence, numbered from 0.\n"
+            + "2) After the comma pass the values in order: string.Format(\"tower {0} has {1}\", 1, 3);\n"
+            + "3) Or print directly: tower.PrintLine(\"blocks={0}\", n);\n"
+            + "4) Press [Compile & Run (F6)].\n"
+            + "READ EVERY SYMBOL\n"
+            + "- {0} is the slot for the first value, {1} the second; they may repeat or reorder.\n"
+            + "- More placeholders than arguments throws FormatException at runtime.\n"
+            + "- {0:F2} keeps two decimals; {0,5} pads to five characters, right aligned.\n"
+            + "- string.Format returns a new string and never changes the original variable.\n"
+            + "THREE TRAPS\n"
+            + "- Writing {1} with only one argument throws FormatException.\n"
+            + "- Full-width braces from a Chinese IME are rejected; use { }.\n"
+            + "- Long sentences with many values are cleaner with {0} than with +.";
     }
 
     // ================== 任务表（炮台 API 调用 13 项） ==================
@@ -1752,7 +2557,393 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "Check: foreach, if and tower.FireAtPlane( all appear.",
             (raw, code) => ReForeach.IsMatch(code) && ReIf.IsMatch(code) && ReFireAtPlane.IsMatch(code));
 
+        AppendApiDetailPages(list);
+
         return list;
+    }
+
+    /// <summary>
+    /// 炮台 API 课（Level 2 - Part 2，13 项）的第 2 页：不写泛泛概念，只写「这一页亲手敲什么 / 每个符号什么意思 /
+    /// 新手一定踩的坑（含真实报错编号）」，与语法课 AppendGrammarDetailPages 的结构保持一致。
+    /// 第 1 页仍是签名 + 示例 + 判定条件，第 2 页是照着做就能跑通的操作指引。
+    /// </summary>
+    private static void AppendApiDetailPages(TaskDef[] list)
+    {
+        // ---------- 任务 1：Print 不换行 ----------
+        list[0].Page2Zh = "【这一页：亲手敲出两段拼在同一行的话】\n"
+            + "① 光标点进代码区，敲 tower.Print(\"hp={0} \", 7); 回车。\n"
+            + "② 再敲 tower.Print(\"count={0}\", 42); 回车（第一句末尾故意留了个空格，别删）。\n"
+            + "③ 点【编译运行 (F6)】：编辑器自动关闭，抬头看 +X 正前方那块荧幕。\n"
+            + "④ 荧幕上只有一行「hp=7 count=42」，两句话拼成一行——这就是 Print 的全部意义。\n"
+            + "【逐符号读懂它】\n"
+            + "· tower：炮台对象，引擎已经作为参数 Run(CodeTower tower) 传进来，直接用，不要自己 new。\n"
+            + "· .Print( )：方法调用，括号里叫实参。\n"
+            + "· \"hp={0} \"：双引号里是格式串，{0} 是第 0 号占位符，会被第一个实参 7 填进去。\n"
+            + "· 7 与 42：实参，按顺序填 {0}、{1}。\n"
+            + "· 行尾的空格：Print 不换行，空格是唯一的分隔手段，删了就变成 hp=7count=42。\n"
+            + "· ; 分号：一句话结束，漏了报 CS1002。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 中文输入法敲出「“hp={0}”」→ 报 CS1010/CS1056，引号必须英文。\n"
+            + "✘ 格式串里 {0} {1} 写了但实参给少了 → 运行期抛 FormatException，编辑器当场报错停下。\n"
+            + "✔ Run 每帧都执行：无条件 Print 会在同一行越拼越长，实测几秒后整行被挤出屏幕。";
+        list[0].Page2En = "THIS PAGE: TYPE TWO PRINTS THAT LAND ON ONE LINE\n"
+            + "1) Click into the code area and type tower.Print(\"hp={0} \", 7); then Enter.\n"
+            + "2) Type tower.Print(\"count={0}\", 42); then Enter (keep the trailing space in line 1).\n"
+            + "3) Press [Compile & Run (F6)]; the editor closes and you look at the +X screen.\n"
+            + "4) The screen shows one single line: hp=7 count=42 - that is what Print is for.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- tower: the tower object, already passed in as Run(CodeTower tower); never new it yourself.\n"
+            + "- .Print( ): a method call; whatever is inside the parentheses are arguments.\n"
+            + "- \"hp={0} \": a format string; {0} is placeholder zero, filled by the first argument 7.\n"
+            + "- 7 and 42: arguments, filled into {0} and {1} in order.\n"
+            + "- the trailing space: Print never breaks the line, the space is your only separator.\n"
+            + "- ; semicolon: ends the statement; missing it gives CS1002.\n"
+            + "THREE TRAPS\n"
+            + "- Curly quotes from a Chinese IME give CS1010/CS1056; use straight quotes.\n"
+            + "- More placeholders than arguments throws FormatException at run time and stops the editor.\n"
+            + "- Run executes every frame, so an unconditional Print keeps growing that one line until it scrolls off.";
+        // ---------- 任务 2：PrintLine 换行 ----------
+        list[1].Page2Zh = "【这一页：让荧幕出现两行独立的话】\n"
+            + "① 敲 tower.PrintLine(\"hp={0}\", 7); 回车。\n"
+            + "② 再敲 tower.PrintLine(\"tower ready\"); 回车（这句没有占位符，不用给实参）。\n"
+            + "③ F6 运行，荧幕从上到下是两行：hp=7 / tower ready。\n"
+            + "④ 对比上一项：同样两句，用 PrintLine 就分了两行。\n"
+            + "【逐符号读懂它】\n"
+            + "· PrintLine 末尾自带换行，等价于 Print(text) 再补一个换行符。\n"
+            + "· 只有一串纯文字时，括号里直接放 \"文字\"，不必写 {0}。\n"
+            + "· 荧幕上限 24 行（引擎常量 PrintMaxLines），再多的行会从最旧的开始丢弃。\n"
+            + "· 每次 Run 每帧执行一次，所以每帧至少多一行 → 一秒几十行，几秒就刷满 24 行。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 想换行却写了 Print → 所有输出挤在同一行，越挤越长。\n"
+            + "✘ 在 Run 里无条件 PrintLine → 屏幕疯狂滚动，看不到自己关心的那行；要用 if 条件限频。\n"
+            + "✔ 想在循环里只打一次，先把结果存变量，循环外再 PrintLine。";
+        list[1].Page2En = "THIS PAGE: MAKE THE SCREEN SHOW TWO SEPARATE LINES\n"
+            + "1) Type tower.PrintLine(\"hp={0}\", 7); then Enter.\n"
+            + "2) Type tower.PrintLine(\"tower ready\"); then Enter (no placeholder, no arguments).\n"
+            + "3) Press F6: the screen reads hp=7 on one line and tower ready on the next.\n"
+            + "4) Compare with the previous task: same text, but PrintLine splits the lines.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- PrintLine appends a newline; it equals Print(text) plus a line break.\n"
+            + "- For plain text just put \"text\" in the parentheses; {0} is only needed with arguments.\n"
+            + "- The screen keeps 24 lines (PrintMaxLines); older lines are dropped first.\n"
+            + "- Run fires every frame, so you add at least one line per frame - the 24 lines fill in seconds.\n"
+            + "THREE TRAPS\n"
+            + "- Using Print when you wanted a newline piles everything onto one ever-growing line.\n"
+            + "- An unconditional PrintLine inside Run floods the screen; gate it with an if.\n"
+            + "- To print once from inside a loop, collect the value first and print after the loop.";
+        // ---------- 任务 3：ClearPrint ----------
+        list[2].Page2Zh = "【这一页：先写满，再一次清空】\n"
+            + "① 先敲两行 tower.PrintLine(\"line A\"); 和 tower.PrintLine(\"line B\");。\n"
+            + "② 在这两行下面敲 tower.ClearPrint();。\n"
+            + "③ F6 运行：荧幕空白一片——因为同一次执行里，打印完立刻被清掉了。\n"
+            + "④ 把 ClearPrint 挪到最上面（第一句），再运行：荧幕只剩 line A / line B。\n"
+            + "【逐符号读懂它】\n"
+            + "· 顺序即结果：代码从上往下一句句执行，谁在后面谁生效。\n"
+            + "· ClearPrint() 括号里没有参数，连空括号也要写。\n"
+            + "· 常见正确用法：每帧先 ClearPrint() 再打印本帧状态 → 荧幕永远只显示「当前这一帧」。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ ClearPrint 放在 PrintLine 之后 → 刚打的东西立刻被抹掉，看起来像「打印失败」。\n"
+            + "✘ 写成 Clear / ClearScreen / clearPrint → 报 CS1061 找不到成员（C# 区分大小写）。\n"
+            + "✔ 只想清一次：用 if 判断条件（例如计数到某个值）再调，别每帧无条件清。";
+        list[2].Page2En = "THIS PAGE: FILL THE SCREEN, THEN WIPE IT ONCE\n"
+            + "1) Type tower.PrintLine(\"line A\"); and tower.PrintLine(\"line B\");.\n"
+            + "2) Below them type tower.ClearPrint();.\n"
+            + "3) Press F6: the screen stays blank, because the prints were wiped in the same pass.\n"
+            + "4) Move ClearPrint to the very top and run again: now line A / line B survive.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Order is the result: statements run top to bottom, the last one wins.\n"
+            + "- ClearPrint() takes no arguments but still needs the empty parentheses.\n"
+            + "- The usual correct pattern: ClearPrint() first, then print this frame's state.\n"
+            + "THREE TRAPS\n"
+            + "- ClearPrint after your prints erases everything, which looks like printing is broken.\n"
+            + "- Clear / ClearScreen / clearPrint give CS1061 (C# is case sensitive).\n"
+            + "- To clear only once, guard it with an if instead of calling it every frame.";
+        // ---------- 任务 4：GetAllObjects ----------
+        list[3].Page2Zh = "【这一页：手敲一个能列出全场方块的循环】\n"
+            + "① 敲 foreach (var o in tower.GetAllObjects()) 回车，再敲一对花括号 { }。\n"
+            + "② 光标进花括号里，敲 tower.PrintLine(\"block #{0}\", o.Index);。\n"
+            + "③ F6 运行：荧幕一行一个编号，有几个方块就打几行。\n"
+            + "④ 方块全飞过去之后再看，荧幕不新增任何行——列表空了，循环体一次都不进。\n"
+            + "【逐符号读懂它】\n"
+            + "· GetAllObjects() 返回 List<TowerObjectInfo>，就是「此刻还活着的方块」的快照。\n"
+            + "· var o：让编译器自己推断元素类型，等价于写 TowerObjectInfo o。\n"
+            + "· foreach：把列表里的元素一个个取出来，自动处理开头结尾，不会越界。\n"
+            + "· 花括号里叫循环体，列表有几个元素就跑几遍。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 漏写括号 tower.GetAllObjects → 报 CS0428 方法组无法转换为变量。\n"
+            + "✘ 循环里反复调用 GetAllObjects()（如 for 条件里写 .Count）→ 每轮都重建列表，又慢又容易前后不一致。\n"
+            + "✔ 想循环里删除/打标记：先 var list = tower.GetAllObjects(); 用 list 遍历并另存要打的，再统一发射。";
+        list[3].Page2En = "THIS PAGE: HAND-TYPE A LOOP THAT LISTS EVERY BLOCK\n"
+            + "1) Type foreach (var o in tower.GetAllObjects()) then a pair of braces { }.\n"
+            + "2) Inside the braces type tower.PrintLine(\"block #{0}\", o.Index);.\n"
+            + "3) Press F6: one line per block, as many lines as there are blocks.\n"
+            + "4) Watch after every block has flown past: no new lines - the list is empty, the body never runs.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- GetAllObjects() returns List<TowerObjectInfo>: a snapshot of the blocks alive right now.\n"
+            + "- var o lets the compiler infer the element type; it equals TowerObjectInfo o.\n"
+            + "- foreach walks the list element by element and never runs past the end.\n"
+            + "- The braces are the loop body; it runs once per element.\n"
+            + "THREE TRAPS\n"
+            + "- Omitting the parentheses tower.GetAllObjects gives CS0428.\n"
+            + "- Calling GetAllObjects() repeatedly inside the loop (for example in a for condition) rebuilds the list every round.\n"
+            + "- To shoot inside a loop, take var list = tower.GetAllObjects(); first, collect picks, then fire.";
+        // ---------- 任务 5：Index ----------
+        list[4].Page2Zh = "【这一页：把方块编号打到荧幕上】\n"
+            + "① 照上一项敲好 foreach 遍历，循环体里只留一行。\n"
+            + "② 敲 tower.PrintLine(\"#{0}\", o.Index);。\n"
+            + "③ F6 运行，荧幕出现 #12 #13 #17 这样的编号。\n"
+            + "④ 多等几波：编号会跳号（中间的号对应已击毁的方块），这是正常的。\n"
+            + "【逐符号读懂它】\n"
+            + "· Index 是 int，生成器每生成一个方块就 +1，全局递增、永不复用。\n"
+            + "· 它只用来「认身份」，既不是数组下标，也不代表离炮台远近。\n"
+            + "· o.Index 里的点号读字段；写成 o.Index() 会报 CS1061（字段不是方法）。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 拿 Index 当集合下标：list[o.Index] → 编号早就超过元素个数，抛 ArgumentOutOfRangeException。\n"
+            + "✘ 以为第一个方块编号是 0：它是全局计数器，关卡里可能从任意值开始。\n"
+            + "✔ 想只打某个特定方块：用 Index 做记录（比如 if (o.Index == target)），而不是靠位置猜。";
+        list[4].Page2En = "THIS PAGE: PRINT THE BLOCK SERIAL NUMBERS\n"
+            + "1) Build the same foreach loop as the previous task, body left with one line.\n"
+            + "2) Type tower.PrintLine(\"#{0}\", o.Index);.\n"
+            + "3) Press F6: numbers such as #12 #13 #17 appear on the screen.\n"
+            + "4) Wait a few waves: numbers skip because destroyed blocks spent their number. That is normal.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Index is an int increased by one per spawn; it is global and never reused.\n"
+            + "- It identifies a block only; it is not an array index and not a distance.\n"
+            + "- o.Index uses a dot to read a field; o.Index() gives CS1061 (a field is not a method).\n"
+            + "THREE TRAPS\n"
+            + "- Using Index as a list position (list[o.Index]) throws ArgumentOutOfRangeException.\n"
+            + "- Assuming the first block has Index 0; the counter is global and may start anywhere.\n"
+            + "- To hit one specific block, keep its Index (if (o.Index == target)) instead of guessing a position.";
+        // ---------- 任务 6：Type ----------
+        list[5].Page2Zh = "【这一页：按颜色分两类打出来】\n"
+            + "① 遍历里加判断：if (o.Type == \"ATTACK\") 回车，下一行缩进写 tower.PrintLine(\"red #{0}\", o.Index);。\n"
+            + "② 再补一段 else if (o.Type == \"BOMB\")，里面打 tower.PrintLine(\"blue #{0}\", o.Index);。\n"
+            + "③ F6 运行：荧幕上红块、蓝块各占一批，互不混。\n"
+            + "④ 试着只留 if 不留 else，感受一下「筛掉」和「分类」的区别。\n"
+            + "【逐符号读懂它】\n"
+            + "· Type 是 string，取值 \"ATTACK\"（红，击毁加分）/ \"BOMB\"（蓝，打了不加分也不扣分）。\n"
+            + "· 字符串比较用 == 比较内容，两边都必须带英文双引号。\n"
+            + "· else if 表示「上一条不成立时再判断这一条」。\n"
+            + "· && 是并且：if (o.Type == \"ATTACK\" && o.HP <= 2) 表示既红又残血。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 写成 o.Type = \"ATTACK\"（单等号）→ 这是赋值，条件里会报 CS0029 无法转换。\n"
+            + "✘ 大小写写成 \"Attack\" / \"attack\" → 字符串比较区分大小写，永远不成立，看着像「判断失效」。\n"
+            + "✔ 蓝块可以顺手打掉刷干净屏幕，但别指望它加分。";
+        list[5].Page2En = "THIS PAGE: SPLIT THE OUTPUT BY BLOCK TYPE\n"
+            + "1) Add if (o.Type == \"ATTACK\") inside the loop, then indented tower.PrintLine(\"red #{0}\", o.Index);.\n"
+            + "2) Add else if (o.Type == \"BOMB\") printing tower.PrintLine(\"blue #{0}\", o.Index);.\n"
+            + "3) Press F6: red and blue blocks come out as two separate groups.\n"
+            + "4) Then drop the else and feel the difference between filtering and classifying.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Type is a string: \"ATTACK\" (red, destroying scores) or \"BOMB\" (blue, no score either way).\n"
+            + "- Strings compare with == on content; both sides need straight double quotes.\n"
+            + "- else if means \"only test this when the previous test failed\".\n"
+            + "- && is AND: if (o.Type == \"ATTACK\" && o.HP <= 2) means red and nearly dead.\n"
+            + "THREE TRAPS\n"
+            + "- Writing o.Type = \"ATTACK\" (single =) is an assignment and gives CS0029 inside a condition.\n"
+            + "- \"Attack\" / \"attack\" never match because comparison is case sensitive; it looks like broken logic.\n"
+            + "- Blue blocks can be cleaned up for a tidy screen, but they never add score.";
+        // ---------- 任务 7：HP ----------
+        list[6].Page2Zh = "【这一页：找出快死的那个方块】\n"
+            + "① 遍历里敲 float ratio = (float)o.HP / o.MaxHits; 先把血量换算成比例。\n"
+            + "② 再敲 if (o.HP <= 1) 回车，缩进打 tower.PrintLine(\"#{0} nearly dead {1:P0}\", o.Index, ratio);。\n"
+            + "③ F6 运行：只有被打到剩 1 层的方块才会出现在荧幕上。\n"
+            + "④ 看着某块被一点点削，它的比例从 100% 掉到 0%，掉到 0 就从列表里消失（已摧毁）。\n"
+            + "【逐符号读懂它】\n"
+            + "· HP 是 int，等于「还剩几层可打」，每命中一发 -1，减到 0 立刻销毁。\n"
+            + "· MaxHits 是初始层数（各块不同），HP / MaxHits 才是「剩余血条百分比」。\n"
+            + "· (float) 是强制转换：int ÷ int 会做整数除法（3/4 得 0），转成 float 才有小数。\n"
+            + "· {1:P0} 是百分比格式，0 表示不保留小数位。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 直接写 o.HP / o.MaxHits 不加 (float) → 整数除法结果只有 0 或 1，判断全错。\n"
+            + "✘ 用 o.HP <= 0 找残血 → 0 层的方块已被销毁，根本不在 GetAllObjects() 里，永远匹配不到。\n"
+            + "✔ 想优先收人头：把残血目标先挑出来再发射，收益最高（红块击毁加分）。";
+        list[6].Page2En = "THIS PAGE: FIND THE ALMOST-DEAD BLOCK\n"
+            + "1) Inside the loop type float ratio = (float)o.HP / o.MaxHits;.\n"
+            + "2) Then if (o.HP <= 1) with tower.PrintLine(\"#{0} nearly dead {1:P0}\", o.Index, ratio);.\n"
+            + "3) Press F6: only blocks chipped down to one layer show up on the screen.\n"
+            + "4) Watch one block: the ratio falls 100% to 0%, and at 0 it leaves the list (destroyed).\n"
+            + "READ EVERY SYMBOL\n"
+            + "- HP is an int meaning remaining hit layers; each hit removes one, and 0 destroys the block.\n"
+            + "- MaxHits is the starting layer count (differs per block); HP / MaxHits is the health bar.\n"
+            + "- (float) is a cast: int / int truncates (3/4 is 0), casting to float keeps the decimals.\n"
+            + "- {1:P0} is the percent format; 0 means no decimal places.\n"
+            + "THREE TRAPS\n"
+            + "- o.HP / o.MaxHits without (float) is integer division, so only 0 or 1 - every test is wrong.\n"
+            + "- Testing o.HP <= 0 never matches: a 0-layer block is already destroyed and absent from the list.\n"
+            + "- Best payoff: pick the low-HP red blocks first, destroying them scores.";
+        // ---------- 任务 8：Position ----------
+        list[7].Page2Zh = "【这一页：把方块坐标读出来并打印成一位小数】\n"
+            + "① 遍历里敲 Vector3 p = o.Position;——把坐标先存进变量，后面反复用不会重复取值。\n"
+            + "② 敲 tower.PrintLine(\"#{0} ({1:F1},{2:F1},{3:F1})\", o.Index, p.x, p.y, p.z);。\n"
+            + "③ F6 运行：每行末尾出现形如 (12.4,1.6,-3.2) 的三元组。\n"
+            + "④ 盯住 x：方块从 +X 远方飞来，x 一直变小；x 越过 0 就飞过炮台了。\n"
+            + "【逐符号读懂它】\n"
+            + "· Position 是 Vector3，表示方块几何中心的世界坐标（三个分量都带 float）。\n"
+            + "· p.x / p.y / p.z 读三个分量，y 就是离地高度。\n"
+            + "· {1:F1} 是格式说明符：序号 1、F = 定点小数、1 = 保留一位；{0} 仍对应 o.Index。\n"
+            + "· 炮台固定在原点 (0,0,0)，朝 +X 方向发射。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 直接 PrintLine(\"{0}\", o.Position) → 走结构体默认 ToString，精度固定、格式不受控；要控制就写 o.Position.ToString(\"F2\")。\n"
+            + "✘ 把 Position 当成方块尺寸 → 尺寸是 Size（Vector3 三边长度）。\n"
+            + "✔ Vector3 是值类型：p.x = 5f 只改了副本，o.Position 本身没变。";
+        list[7].Page2En = "THIS PAGE: READ BLOCK POSITIONS AT ONE DECIMAL\n"
+            + "1) Inside the loop type Vector3 p = o.Position; so you can reuse it without re-reading.\n"
+            + "2) Type tower.PrintLine(\"#{0} ({1:F1},{2:F1},{3:F1})\", o.Index, p.x, p.y, p.z);.\n"
+            + "3) Press F6: each line ends with a triple such as (12.4,1.6,-3.2).\n"
+            + "4) Watch x: blocks come in from far +X, so x shrinks; once x passes 0 the block has flown by.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Position is a Vector3: the world-space geometric centre, floats in all three components.\n"
+            + "- p.x / p.y / p.z read the components; y is the height above the plane.\n"
+            + "- {1:F1} is a format specifier: index 1, F = fixed point, 1 decimal; {0} still means o.Index.\n"
+            + "- The tower sits at the origin (0,0,0) and fires toward +X.\n"
+            + "THREE TRAPS\n"
+            + "- PrintLine(\"{0}\", o.Position) uses the default ToString; for control write o.Position.ToString(\"F2\").\n"
+            + "- Position is not the block size; the size is Size (edge lengths as a Vector3).\n"
+            + "- Vector3 is a value type: p.x = 5f edits your copy, not o.Position.";
+        // ---------- 任务 9：Velocity ----------
+        list[8].Page2Zh = "【这一页：算出每个方块飞多快、往哪飞】\n"
+            + "① 遍历里敲 Vector3 v = o.Velocity;。\n"
+            + "② 敲 tower.PrintLine(\"#{0} speed={1:F2} vz={2:F2}\", o.Index, v.magnitude, v.z);。\n"
+            + "③ F6 运行：每行给出速度标量与 z 分量。\n"
+            + "④ 观察 vz：正数表示在向 +z 偏，负数向 -z 偏；x 分量在所有方块上基本都是负的（朝炮台飞）。\n"
+            + "【逐符号读懂它】\n"
+            + "· Velocity 是 Vector3，单位是「单位/秒」：方向 × 速度。\n"
+            + "· v.magnitude 是长度（标量速度），做开方运算，循环里别对同一物体反复算。\n"
+            + "· v.normalized 是单位方向向量；速度为 0 时结果是 (0,0,0)，不能拿去当发射法向量。\n"
+            + "· v.x < 0 表示朝炮台方向靠近，v.x > 0 表示已飞过去、正在远离。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 把 Velocity 当成位置用 → 它不带坐标信息，判断远近要用 Position.x。\n"
+            + "✘ 在循环里对每个方块都调 v.magnitude 好几次 → 每调一次就开一次方，白费性能，先存 float。\n"
+            + "✔ 想打「最危险的」目标：比较 Position.x（越接近 0 越危险），别比速度。";
+        list[8].Page2En = "THIS PAGE: COMPUTE HOW FAST EACH BLOCK MOVES\n"
+            + "1) Inside the loop type Vector3 v = o.Velocity;.\n"
+            + "2) Type tower.PrintLine(\"#{0} speed={1:F2} vz={2:F2}\", o.Index, v.magnitude, v.z);.\n"
+            + "3) Press F6: each line reports the scalar speed and the z component.\n"
+            + "4) Read vz: positive means drifting to +z, negative to -z; x is negative on almost every block (flying at you).\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Velocity is a Vector3 in units per second: direction times speed.\n"
+            + "- v.magnitude is the length (scalar speed) and does a square root; cache it instead of recomputing.\n"
+            + "- v.normalized is the unit direction; at zero speed it is (0,0,0) and must not be used as a firing normal.\n"
+            + "- v.x < 0 means closing in on the tower, v.x > 0 means already past and leaving.\n"
+            + "THREE TRAPS\n"
+            + "- Velocity is not a position; use Position.x to judge distance.\n"
+            + "- Calling v.magnitude several times per block repeats the square root; store it in a float first.\n"
+            + "- For the most dangerous target compare Position.x (closest to 0), not speed.";
+        // ---------- 任务 10：Volume ----------
+        list[9].Page2Zh = "【这一页：算出每块还剩多少体积比例】\n"
+            + "① 遍历里敲 float left = o.Volume / o.InitialVolume;（两者都是 float，不必强转）。\n"
+            + "② 敲 tower.PrintLine(\"#{0} vol={1:F2} left={2:P0}\", o.Index, o.Volume, left);。\n"
+            + "③ F6 运行：每块给出现在体积与剩余百分比；新出现的方块是 100%。\n"
+            + "④ 多打几发再看同一块：Volume 变小，InitialVolume 始终不变。\n"
+            + "【逐符号读懂它】\n"
+            + "· Volume：当前剩余体积，被击中切割后变小。\n"
+            + "· InitialVolume：出生时的体积，计分用，任何时刻都不变。\n"
+            + "· MaxHits：初始受击层数；Size：当前三边尺寸（Vector3），体积要比大小请用 Volume。\n"
+            + "· left 越接近 0，说明这块已经快被打干净了，漏掉罚分最少。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 用 Size.x * Size.y * Size.z 自己算体积 → 能算但不等于 Volume（切割方式不同，会有偏差）。\n"
+            + "✘ 把 Volume 当血量：血量是 HP（层数），体积是几何量，两者不同步。\n"
+            + "✔ 只在确定不为 0 时做除法；保险写法 if (o.InitialVolume > 0f) 再算比例。";
+        list[9].Page2En = "THIS PAGE: COMPUTE THE REMAINING VOLUME RATIO\n"
+            + "1) Inside the loop type float left = o.Volume / o.InitialVolume; (both are floats, no cast needed).\n"
+            + "2) Type tower.PrintLine(\"#{0} vol={1:F2} left={2:P0}\", o.Index, o.Volume, left);.\n"
+            + "3) Press F6: current volume plus remaining percent; a fresh block reads 100%.\n"
+            + "4) Fire a few shots and look again: Volume shrinks while InitialVolume never moves.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Volume: the volume left right now; it shrinks as the block is carved.\n"
+            + "- InitialVolume: the spawned volume, used for scoring, constant forever.\n"
+            + "- MaxHits: starting hit layers; Size: current edge lengths (Vector3) - compare sizes with Volume.\n"
+            + "- The closer left is to 0, the less leakage penalty remains.\n"
+            + "THREE TRAPS\n"
+            + "- Hand-computing Size.x * Size.y * Size.z is not equal to Volume (the cuts differ).\n"
+            + "- Volume is not health; health is HP (layers) and the two do not move together.\n"
+            + "- Divide only when the divisor is safe; guard with if (o.InitialVolume > 0f).";
+        // ---------- 任务 11：GetFireCooldown ----------
+        list[10].Page2Zh = "【这一页：先问冷却，再决定开不开火】\n"
+            + "① 敲 float cd = tower.GetFireCooldown(); 把剩余冷却秒数存下来。\n"
+            + "② 敲 if (cd <= 0f) 回车，缩进写 tower.PrintLine(\"ready\");。\n"
+            + "③ 在 else 分支里写 tower.PrintLine(\"cooling {0:F3}s\", cd);。\n"
+            + "④ F6 运行：发射瞬间荧幕跳出 cooling 0.028s，冷却清零后又变回 ready。\n"
+            + "【逐符号读懂它】\n"
+            + "· 返回值是「距离下一发还能打，还差几秒」，0 表示现在就能打。\n"
+            + "· 默认冷却 cooldownSeconds = 0.0285s，约每秒 35 发，比一帧（1/60≈0.0167s）长，所以每帧最多成功一发。\n"
+            + "· 0f 里的 f 表示这是 float 字面量；和 double 比较会报 CS0019 类型不匹配。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 写成 if (cd > 0f) 当就绪判断 → 正好反了，冷却中才 > 0。\n"
+            + "✘ 在 Run 里无条件 PrintLine 冷却值 → 每帧一行，荧幕 24 行几秒被刷空。\n"
+            + "✔ 冷却没到就别调 FireAtPlane：虽然它只会返回 false，但白白浪费一次判断。";
+        list[10].Page2En = "THIS PAGE: ASK THE COOLDOWN BEFORE FIRING\n"
+            + "1) Type float cd = tower.GetFireCooldown(); to store the seconds left.\n"
+            + "2) Type if (cd <= 0f) then tower.PrintLine(\"ready\");.\n"
+            + "3) In the else branch print tower.PrintLine(\"cooling {0:F3}s\", cd);.\n"
+            + "4) Press F6: right after a shot the screen shows cooling 0.028s, then flips back to ready.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- The return value is how many seconds until the next shot; 0 means ready now.\n"
+            + "- Default cooldownSeconds = 0.0285s, about 35 shots per second - longer than a frame (1/60 = 0.0167s), so one shot per frame at most.\n"
+            + "- The f in 0f marks a float literal; comparing with a double gives CS0019.\n"
+            + "THREE TRAPS\n"
+            + "- Testing if (cd > 0f) for readiness is inverted; cooling leaves it above 0.\n"
+            + "- Printing the cooldown unconditionally inside Run writes one line per frame and flushes the 24 lines fast.\n"
+            + "- Skip FireAtPlane while cooling: it only returns false and wastes a check.";
+        // ---------- 任务 12：FireAtPlane ----------
+        list[11].Page2Zh = "【这一页：真的把一发打出去】\n"
+            + "① 敲 bool fired = tower.FireAtPlane(1f, 0f, 0f);——法向量 (1,0,0)，沿 +X 打一发。\n"
+            + "② 敲 tower.PrintLine(\"fired={0}\", fired); 看这次有没有打出去。\n"
+            + "③ F6 运行：看到激光从原点射出，荧幕显示 fired=True。\n"
+            + "④ 改成 tower.FireAtPlane(0f, 1f, 0f); 再运行：激光改成沿 +Y 向上打，证明 A B C 就是方向。\n"
+            + "【逐符号读懂它】\n"
+            + "· 数学含义：沿平面 A*x+B*y+C*z=0 的法线方向 (A,B,C) 发射；平面必过原点（炮台在原点），所以只有三个参数、没有 D。\n"
+            + "· 想打某个方块：直接把它的 Position 三分量传进去，tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z); 因为从原点指向目标的向量本身就是一个合法法向量。\n"
+            + "· 返回 false 的两种情况：(A,B,C) 近似零向量，或者还在冷却中。\n"
+            + "· 1f / 0f 的 f 不能省，否则按 double 传入，重载匹配不上报错。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 传 (0f, 0f, 0f) → 零向量直接返回 false，什么都不会发生。\n"
+            + "✘ 一帧里连调三次想打三发 → 冷却 0.0285s 卡住，后两次全返回 false。\n"
+            + "✔ 想打得更准：先按 Type 筛红块、按 Position.x 挑最近的一个，再传它的坐标。";
+        list[11].Page2En = "THIS PAGE: ACTUALLY FIRE A SHOT\n"
+            + "1) Type bool fired = tower.FireAtPlane(1f, 0f, 0f); - normal (1,0,0), one shot along +X.\n"
+            + "2) Type tower.PrintLine(\"fired={0}\", fired); to see whether it went out.\n"
+            + "3) Press F6: the laser leaves the origin and the screen prints fired=True.\n"
+            + "4) Change it to tower.FireAtPlane(0f, 1f, 0f); and run again: the laser goes straight up, so A B C is the direction.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- Math: fire along the normal (A,B,C) of the plane A*x+B*y+C*z=0; the plane always passes the origin, so there is no D.\n"
+            + "- To aim at a block pass its Position: tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z); the vector from the origin to the target is already a valid normal.\n"
+            + "- false comes back when (A,B,C) is near zero or the tower is still cooling down.\n"
+            + "- The f in 1f / 0f is required, otherwise the arguments are doubles and no overload matches.\n"
+            + "THREE TRAPS\n"
+            + "- Passing (0f, 0f, 0f) returns false immediately and nothing happens.\n"
+            + "- Three calls in one frame cannot fire three shots; the 0.0285s cooldown rejects the last two.\n"
+            + "- For accuracy, filter red blocks by Type, pick the nearest by Position.x, then pass its position.";
+        // ---------- 任务 13：实战组合 ----------
+        list[12].Page2Zh = "【这一页：把三件事串成一段能打的代码】\n"
+            + "① 第一句写 tower.ClearPrint();——每帧先清屏，荧幕才不会越堆越乱。\n"
+            + "② 写 foreach (var o in tower.GetAllObjects())，花括号里开始筛选。\n"
+            + "③ 写 if (o.Type == \"ATTACK\" && o.Position.x > 0f)：只挑红块、且还在炮台前方（没飞过去）的。\n"
+            + "④ 里面写 tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z); 再 break;，打一发就跳出循环。\n"
+            + "【逐符号读懂它】\n"
+            + "· && 把两个条件串起来：两个都成立才进 if。\n"
+            + "· break 立刻结束整个 foreach，防止一帧内对多个目标浪费冷却。\n"
+            + "· o.Position 的三分量直接当法向量传，等于「朝这个方块打」。\n"
+            + "· Run 每帧都会跑一遍这段代码，于是炮台就变成了每帧自动找目标开火的自动炮台。\n"
+            + "【三个必踩的坑】\n"
+            + "✘ 忘了 break → 循环里对每个方块都调一次发射，冷却期内的调用全返回 false，白算。\n"
+            + "✘ 用 o.Position.x > 0f 之外还想打远处的 → 条件写反（< 0）会去打已经飞过去、正在远离的方块。\n"
+            + "✔ 进阶：想打最靠前的，先用 float best = float.MaxValue; 遍历比较 Position.x 取最小，循环结束后只发一次。";
+        list[12].Page2En = "THIS PAGE: CHAIN THE THREE PIECES INTO WORKING CODE\n"
+            + "1) First line: tower.ClearPrint(); so the screen never piles up across frames.\n"
+            + "2) Write foreach (var o in tower.GetAllObjects()) and start filtering in the braces.\n"
+            + "3) Write if (o.Type == \"ATTACK\" && o.Position.x > 0f): red blocks that are still in front of the tower.\n"
+            + "4) Inside, call tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z); then break; - one shot, leave the loop.\n"
+            + "READ EVERY SYMBOL\n"
+            + "- && chains two tests: both must hold to enter the if.\n"
+            + "- break ends the whole foreach at once, so one frame never burns cooldown on many targets.\n"
+            + "- Passing the three components of o.Position as the normal means \"shoot at this block\".\n"
+            + "- Run executes this block every frame, which turns the tower into an auto-turret.\n"
+            + "THREE TRAPS\n"
+            + "- Forgetting break calls FireAtPlane on every block; the calls inside the cooldown just return false.\n"
+            + "- Flipping the test to < 0 shoots blocks that already flew past and are leaving.\n"
+            + "- Next step: keep float best = float.MaxValue;, track the smallest Position.x, and fire once after the loop.";
     }
 
     // ================== UI 构建 ==================
@@ -1796,7 +2987,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         //     CodeEditorController.SetBottomReservedHeight，编辑器整体上移收窄到上半区，两者不重叠；
         //   · 下边缘贴屏幕底部（anchoredPosition = 0），左右铺满整个可用宽度（anchorMin.x = 0 / anchorMax.x = 1）；
         //   · 高度固定为工作区高度的一半（ApplySplitLayout），与上方代码区严格对半平分，不随窗口 / 文案变化；
-        //     文案在半屏内排不下时自动缩小正文字号（FitBodyFontSize），而不是撑大面板。
+        //     字号固定不变，玩家想看全文就拖顶部蓝色长条把提示区拉高（不再自动缩字号）。
         RectTransform panelRt = CreateRect("SyntaxTaskPanel", parent, new Vector2(0f, 0f), Vector2.zero,
             new Vector2(0f, ReferenceHeight * SplitRatio), new Vector2(0.5f, 0f));
         panelRt.anchorMin = new Vector2(0f, 0f);
@@ -1822,6 +3013,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         accent.sprite = WhiteSprite();
         accent.color = UITheme.WithAlpha(UITheme.Accent, 0.95f);
         accent.raycastTarget = false;
+        accentLine = accent;
+
+        // 蓝色分割线可拖动：把热区做成一条透明横带，骑在强调线上，上下拖动即可调整提示区高度
+        BuildSplitDragHandle(panelRt);
 
         // 标题
         headlineText = CreateText("Headline", panelRt, "", 24,
@@ -1892,12 +3087,16 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         tnRt.anchorMax = new Vector2(1f, 1f);
         tnRt.pivot = new Vector2(0f, 1f);
         tnRt.anchoredPosition = new Vector2(24f, -88f);
-        tnRt.sizeDelta = new Vector2(-48f, 36f);
+        // 右侧留出翻页条（‹ 说明 1/2 ›）的宽度，任务名不会与之重叠
+        tnRt.sizeDelta = new Vector2(-48f - PageNavWidth - 12f, 36f);
+
+        // 翻页条：与任务名同一行、贴右边界；只有该任务有第 2 页时才显示（见 RefreshPageNav）
+        BuildPageNav(panelRt);
 
         // 正文分左右两栏：左 = 目标 / 提示 / 判定 + 完成条件，右 = 写法 / 示例代码，中间一条竖分隔线；
         // 这样左右两半都用起来，字号可以放大而不溢出（左右共用同一段正文区高度）。
         // 上下边距固定，正文区高度 = 半屏高度 - 上下留白；面板高度不因文案变化（ApplySplitLayout），
-        // 字号由 FitBodyFontSize 按各自栏宽自适应。
+        // 字号恒定（PinBodyFontSize），不做任何自适应缩放。
         bodyText = CreateText("Body", panelRt, "", GuideBodyFontSize,
             UITheme.TextBody, TextAnchor.UpperLeft);
         RectTransform bodyRt = bodyText.rectTransform;
@@ -1907,7 +3106,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         bodyRt.offsetMin = new Vector2(24f, GuideBodyBottomInset);
         bodyRt.offsetMax = new Vector2(-ColumnGap * 0.5f, -GuideBodyTopInset);
         bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
-        bodyText.verticalOverflow = VerticalWrapMode.Overflow; // 文案先完整排版，再由面板高度兜住
+        // 手动把分割线往下拖时字号保持不变，放不下的文字直接截断（不外溢到代码区）
+        bodyText.verticalOverflow = VerticalWrapMode.Truncate;
         bodyText.lineSpacing = GuideBodyLineSpacing;
         bodyText.raycastTarget = false;
 
@@ -1921,7 +3121,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         sampleRt.offsetMin = new Vector2(ColumnGap * 0.5f, GuideBodyBottomInset);
         sampleRt.offsetMax = new Vector2(-24f, -GuideBodyTopInset);
         sampleText.horizontalOverflow = HorizontalWrapMode.Wrap;
-        sampleText.verticalOverflow = VerticalWrapMode.Overflow;
+        sampleText.verticalOverflow = VerticalWrapMode.Truncate;
         sampleText.lineSpacing = GuideBodyLineSpacing;
         sampleText.raycastTarget = false;
 
@@ -1996,19 +3196,44 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         return ReferenceWidth;
     }
 
-    /// <summary>指导框（下方指引区）在对半平分下应有的高度：恒等于工作区高度的一半，与文案长度无关。</summary>
-    private float SplitHalfHeight()
+    /// <summary>工作区（面板父节点）的高度，拿不到时退回参考分辨率高度。</summary>
+    private float WorkAreaHeight()
     {
         RectTransform panelRt = panelRoot != null ? panelRoot.transform as RectTransform : null;
         RectTransform parentRt = panelRt != null ? panelRt.parent as RectTransform : null;
-        float total = (parentRt != null && parentRt.rect.height > 1f) ? parentRt.rect.height : ReferenceHeight;
-        return Mathf.Max(120f, total * SplitRatio);
+        return (parentRt != null && parentRt.rect.height > 1f) ? parentRt.rect.height : ReferenceHeight;
+    }
+
+    /// <summary>当前是否停在第 2 页（手把手细节）：只有这类任务才把提示区临时放大。</summary>
+    private bool IsOnDetailPage()
+    {
+        return guidePage > 0 && !finished && tasks != null
+            && CurrentIndex >= 0 && CurrentIndex < tasks.Length && PageCountOf(CurrentIndex) > 1;
+    }
+
+    /// <summary>提示区基准高度（不含手动拖动偏移）：第 1 页 = 工作区一半，第 2 页 = DetailPageRatio。</summary>
+    private float SplitBaseHeight()
+    {
+        return Mathf.Max(120f, WorkAreaHeight() * (IsOnDetailPage() ? DetailPageRatio : SplitRatio));
+    }
+
+    /// <summary>
+    /// 提示区实际高度 = 基准高度 + 玩家手动拖动蓝色分割线产生的偏移（manualSplitOffset），
+    /// 并夹在 [MinHintHeight, 工作区高 - MinCodeHeight] 之间，保证代码区与提示区都还剩一截可用空间。
+    /// </summary>
+    private float SplitHalfHeight()
+    {
+        float total = WorkAreaHeight();
+        float baseHeight = SplitBaseHeight();
+        float minHeight = Mathf.Min(MinHintHeight, total * 0.55f);
+        float maxHeight = Mathf.Max(minHeight + 40f, total - MinCodeHeight);
+        return Mathf.Clamp(baseHeight + manualSplitOffset, minHeight, maxHeight);
     }
 
     /// <summary>
     /// 应用「上下各占一半」的固定分栏：指导框高度 = 工作区高度 × 50%，代码编辑器的底部预留高度同步为该值，
     /// 于是上方代码区与下方指引区永远对半平分、严丝合缝，不随窗口尺寸 / 文案长度漂移；
-    /// 文案若在半屏内排不下，则自动缩小正文字号（FitBodyFontSize），而不是撑大面板。
+    /// 字号恒为固定值，不再随高度 / 栏宽自适应 —— 玩家想多看内容就拖蓝色长条把提示区拉高。
     /// </summary>
     private void ApplySplitLayout()
     {
@@ -2021,8 +3246,11 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             panelRt.sizeDelta = new Vector2(0f, height); // 横向靠 anchorMin.x=0 / anchorMax.x=1 铺满，只改高度
 
         appliedSplitHeight = height;
+        // 高度被上下限夹住时把偏移量回写，避免继续往同一方向拖时偏移越积越大（回拖时手感发飘）
+        manualSplitOffset = height - SplitBaseHeight();
 
-        FitBodyFontSize(height);
+        // 手动拖动分割线只改高度、不重排字号：字号恒定，放不下的部分直接截断（拖高即可看全）
+        PinBodyFontSize();
         LayoutChips();
 
         // 关键：指导框高度即编辑器的「底部预留高度」→ 上方代码区与下方指导框各占一半，两者不重叠、中间不留缝
@@ -2032,7 +3260,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
     /// <summary>
     /// 分栏布局：有示例代码 → 左 = 引导、右 = 代码、中间竖分隔线；没有示例代码 → 左栏通栏，右栏与分隔线隐藏。
-    /// 必须在排版（FitBodyFontSize）之前调用，字号自适应依赖当次栏宽。
+    /// 分栏位置只由 LayoutGuideColumns 决定，与字号无关（字号固定，不再依赖栏宽自适应）。
     /// </summary>
     private void LayoutGuideColumns()
     {
@@ -2055,90 +3283,35 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         bodyRt.offsetMax = new Vector2(hasSample ? -ColumnGap * 0.5f : -24f, -GuideBodyTopInset);
     }
 
-    /// <summary>固定半屏高度下的分栏自适应字号：左右两栏各按自己的栏宽从最大号逐级缩小，直到实测高度落进可用高度。</summary>
-    private void FitBodyFontSize(float panelHeight)
+    /// <summary>
+    /// 字号锁定：蓝色长条可拖动后不再做任何自适应缩放 —— 玩家想看全文就直接把提示区拉高，
+    /// 因此这里只把左右两栏恢复到构建时的固定字号（切换任务 / 翻页后也不会被旧字号残留影响）。
+    /// </summary>
+    private void PinBodyFontSize()
     {
-        if (bodyText == null)
-            return;
-
-        float available = Mathf.Max(80f, panelHeight - GuideBodyTopInset - GuideBodyBottomInset);
-        float panelWidth = PanelWidth();
-        float halfGap = ColumnGap * 0.5f;
-
-        float leftWidth = columnHasSample
-            ? panelWidth * ColumnSplitRatio - 24f - halfGap
-            : panelWidth - 48f;
-        float rightWidth = panelWidth * (1f - ColumnSplitRatio) - 24f - halfGap;
-
-        FitColumnFontSize(bodyText, leftWidth, GuideBodyFontSizeMax, GuideBodyFontSizeMin, available);
-
-        if (columnHasSample)
-            FitColumnFontSize(sampleText, rightWidth, SampleFontSizeMax, SampleFontSizeMin, available);
+        PinOneFont(bodyText, GuideBodyFontSize);
+        PinOneFont(sampleText, SampleFontSize);
     }
 
-    /// <summary>单栏自适应字号：从 maxSize 逐级试到 minSize，取第一个能塞进可用高度的字号。</summary>
-    private void FitColumnFontSize(Text t, float columnWidth, int maxSize, int minSize, float available)
+    /// <summary>把单个文本块的字号钉回固定值；字号确实变化过才重选字体（中文Noto Sans CJK SC / 英文 JetBrains Mono）。</summary>
+    private static void PinOneFont(Text t, int size)
     {
-        if (t == null || string.IsNullOrEmpty(t.text))
+        if (t == null || t.fontSize == size)
             return;
 
-        int before = t.fontSize;
-        int picked = minSize;
-        for (int size = maxSize; size >= minSize; size--)
-        {
-            picked = size;
-            t.fontSize = size;
-            if (MeasureTextHeight(t, columnWidth, size) <= available)
-                break;
-        }
-
-        t.fontSize = picked;
+        t.fontSize = size;
         t.lineSpacing = GuideBodyLineSpacing;
-
-        if (before != picked)
-            ReloadFont(t); // 字号变化后按新字号重选字体（中文微软雅黑 / 英文 Consolas），避免中文缺字形
-    }
-
-    /// <summary>给定文本在指定宽度下的实测高度；首帧排版未就绪时按每行字数估算。</summary>
-    private static float MeasureTextHeight(Text t, float width, int fallbackFontSize)
-    {
-        if (t == null)
-            return 0f;
-
-        float wrapWidth = Mathf.Max(120f, width);
-        string content = t.text == null ? "" : t.text;
-
-        TextGenerationSettings settings = t.GetGenerationSettings(new Vector2(wrapWidth, 0f));
-        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
-        settings.verticalOverflow = VerticalWrapMode.Overflow;
-        settings.lineSpacing = GuideBodyLineSpacing;
-        float preferred = t.cachedTextGeneratorForLayout.GetPreferredHeight(content, settings);
-        float scale = t.pixelsPerUnit > 0.01f ? t.pixelsPerUnit : 1f;
-        float height = preferred / scale;
-
-        if (height <= 1f)
-        {
-            // 首帧 TextGenerator 尚未就绪：按每行字数估算行数（中文按 1 字宽、西文按 0.55 字宽）
-            int lines = 0;
-            string[] raw = content.Split('\n');
-            for (int i = 0; i < raw.Length; i++)
-            {
-                float estimated = Mathf.Max(1f, raw[i].Length);
-                lines += Mathf.Max(1, Mathf.CeilToInt(estimated / Mathf.Max(1f, wrapWidth / fallbackFontSize)));
-            }
-            height = lines * fallbackFontSize * GuideBodyLineSpacing;
-        }
-
-        return Mathf.Max(height, fallbackFontSize * 1.2f);
+        ReloadFont(t);
     }
 
     private void BuildHintBar(Transform parent)
     {
-        // 编辑器关闭时的常驻提示条（不遮挡玩法，提示「按 Enter 打开编辑器继续」）。
-        // 文字按一行放宽排版；高度在 RefreshHint 中按实测高度自适应，长文案也不会被截断。
-        RectTransform hintRt = CreateRect("SyntaxHintBar", parent, new Vector2(0.5f, 0f), Vector2.zero,
-            new Vector2(HintBarMaxWidth, HintBarMinHeight), new Vector2(0.5f, 0f));
-        hintRt.anchoredPosition = new Vector2(0f, 24f);
+        // 编辑器关闭时（= 玩家眼前的实机页面：方块、炮台、print 荧幕）在页面正中挂一条进入提示，
+        // 明确告知「按下 Enter 打开代码编辑界面」；按 Enter 后才弹出编辑器、任务卡随之出现。
+        // 宽高在 RefreshHint / RefitHintBar 中按实测宽高自适应，长文案自动换行加高，不会被截断。
+        RectTransform hintRt = CreateRect("SyntaxEntryPrompt", parent, new Vector2(0.5f, 0.5f), Vector2.zero,
+            new Vector2(HintBarMaxWidth, HintBarMinHeight), new Vector2(0.5f, 0.5f));
+        hintRt.anchoredPosition = new Vector2(0f, EntryPromptY);
         hintRoot = hintRt.gameObject;
         hintRect = hintRt;
 
@@ -2147,10 +3320,11 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         bg.color = UITheme.ScrimSoft;
         bg.raycastTarget = false;
 
-        hintText = CreateText("HintText", hintRt, "", 22, UITheme.TextPrimary, TextAnchor.MiddleCenter);
+        hintText = CreateText("HintText", hintRt, "", 34, UITheme.TextPrimary, TextAnchor.MiddleCenter);
         Stretch(hintText.rectTransform);
         hintText.horizontalOverflow = HorizontalWrapMode.Wrap;
         hintText.verticalOverflow = VerticalWrapMode.Overflow;
+        hintText.supportRichText = true; // 主行（按下 Enter）大号高亮、副行（当前任务）小号弱化
         hintText.raycastTarget = false;
 
         hintRoot.SetActive(false);
@@ -2174,10 +3348,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         float preferredWidth = generator.GetPreferredWidth(content, settings) / scale;
         float preferredHeight = generator.GetPreferredHeight(content, settings) / scale;
 
-        float width = Mathf.Clamp(preferredWidth + 72f, HintBarMinWidth, maxWidth);
-        float height = Mathf.Max(HintBarMinHeight, preferredHeight + 26f);
+        float width = Mathf.Clamp(preferredWidth + 96f, HintBarMinWidth, maxWidth);
+        float height = Mathf.Max(HintBarMinHeight, preferredHeight + 36f);
         hintRect.sizeDelta = new Vector2(width, height);
-        hintRect.anchoredPosition = new Vector2(0f, 24f);
+        hintRect.anchoredPosition = new Vector2(0f, EntryPromptY); // 始终居中偏上，不随文字长短漂移
     }
 
 

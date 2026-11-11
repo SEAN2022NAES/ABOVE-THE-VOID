@@ -298,11 +298,31 @@ public class CodeEditorController : MonoBehaviour
         return false;
     }
 
+    /// <summary>
+    /// 「仅打包运行时可用」的 Ctrl 组合键判定，用于给 F8 / F9 提供编辑器用户习惯的等价键（Ctrl+O 载入、Ctrl+S 导出）。
+    /// Unity 编辑器里这两个组合键会被编辑器自身先消费（Ctrl+O = File > Open Project、Ctrl+S = Save Project），
+    /// 脚本根本收不到，因此在编辑器内直接返回 false，避免出现「按了没反应还以为坏了」的错觉。
+    /// </summary>
+    private bool IsPackedEditorShortcut(KeyCode key)
+    {
+        if (Application.isEditor)
+            return false;
+        if (!Input.GetKeyDown(key))
+            return false;
+        return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+    }
+
     private void Update()
     {
         // Enter 开关：关闭时按 Enter 打开；打开时若输入框未聚焦则按 Enter 关闭（聚焦时 Enter 交给输入框换行，便于编写多行代码）
         if (!IsOpen)
         {
+            // Level 1 - Part 2「编程序章」讲解关 / Level 2 - Part 1「方块图鉴」关：正在读讲解页时
+            // 不响应 Enter / Ctrl+O 打开编辑器。否则读字途中按一下 Enter 就会弹出全屏编辑器，
+            // 讲解 / 图鉴面板被盖住，玩家会以为界面卡死。
+            if (CodeIntroTutorialController.Reading || BlockIntroController.Reading)
+                return;
+
             // 一键直接打开代码编辑器（组合键不易误触，且不受 Enter 抑制 / 输入焦点状态影响）
             // 说明：Ctrl+O 已被 Unity 编辑器绑给 File > Open Project，在编辑器里按下去只会弹 Unity 的窗口，
             // 游戏拿不到这次按键（编辑器级快捷键无法从脚本里拦截）。因此改用 Alt+O / Ctrl+Shift+O，
@@ -332,7 +352,7 @@ public class CodeEditorController : MonoBehaviour
         }
         else
         {
-            // 文件选择面板打开时：吞掉编辑器的全部快捷键（Enter 关闭 / F6 编译 / F8 载入 / F9 导出），只让面板自身响应
+            // 文件选择面板打开时：吞掉编辑器的全部快捷键（Enter 关闭 / F6 编译 / F7 停止 / F8 载入 / F9 导出），只让面板自身响应
             if (IsCodeFilePickerOpen)
                 return;
             if ((Input.GetKeyDown(openKey) || Input.GetKeyDown(openKeyAlt)) && !IsInputFocused())
@@ -347,14 +367,22 @@ public class CodeEditorController : MonoBehaviour
                 CompileAndRun();
                 return;
             }
-            // F8：打开「载入代码文件」面板（与 Open code file 按钮同逻辑）
-            if (Input.GetKeyDown(KeyCode.F8))
+            // F7：停止运行（与「停止 (F7)」按钮同逻辑）
+            if (Input.GetKeyDown(KeyCode.F7))
+            {
+                StopRunner();
+                return;
+            }
+            // F8：打开「载入代码文件」面板（与 Open code file 按钮同逻辑）。
+            // 打包运行时 Ctrl+O 与 F8 同效（编辑器里 Ctrl+O 被 Unity 的 File > Open Project 先消费，脚本收不到）；
+            // 界面上的提示统一只写 F8，不把 Ctrl+O 露在按钮文字与悬停提示里。
+            if (Input.GetKeyDown(KeyCode.F8) || IsPackedEditorShortcut(KeyCode.O))
             {
                 OpenCodeFilePicker();
                 return;
             }
-            // F9：打开「导出到指定文件夹」面板（与 Export 按钮同逻辑）
-            if (Input.GetKeyDown(KeyCode.F9))
+            // F9：打开「导出到指定文件夹」面板（与 Export 按钮同逻辑）；打包运行时 Ctrl+S 与 F9 同效，提示同样统一只写 F9。
+            if (Input.GetKeyDown(KeyCode.F9) || IsPackedEditorShortcut(KeyCode.S))
             {
                 OpenCodeSavePicker();
                 return;
@@ -537,7 +565,7 @@ public class CodeEditorController : MonoBehaviour
     // 右侧为教学指导框预留的宽度（0 = 默认全宽代码区；当前上下分栏布局下恒为 0，保留接口兼容）
     private float rightReservedWidth;
 
-    // 底部为教学指导框预留的高度（0 = 默认铺满全屏；Level 1-2 / Level 2-1 教学时设为指导框高度）
+    // 底部为教学指导框预留的高度（0 = 默认铺满全屏；Level 1-3 / Level 2-2 教学时设为指导框高度）
     private float bottomReservedHeight;
 
     // 编辑器整体根节点（用于上下分栏时收窄高度）
@@ -702,8 +730,8 @@ public class CodeEditorController : MonoBehaviour
         SetCursorLocked(false);
         AppendError("");
         SetStatus(Localization.Pick(
-            "编辑器已打开（Esc / ✕ 关闭）｜右上灰色按钮「打开代码文件…」可选择磁盘上任意代码文件载入",
-            "Editor opened (Esc or ✕ to close) | the grey button at top-right opens a file browser to pick a code file"), false);
+            "编辑器已打开（Esc / ✕ 关闭）｜F6 编译运行 · F7 停止 · F8 载入 · F9 导出",
+            "Editor opened (Esc or ✕ to close) | F6 compile & run · F7 stop · F8 load · F9 export"), false);
         Debug.Log("[CodeEditor] 编辑器打开");
     }
 
@@ -904,7 +932,7 @@ public class CodeEditorController : MonoBehaviour
                 }
 
                 runnerActive = true;
-                SetStatus(Localization.Pick("编译成功，已启动运行（停止按钮可停止）", "Compiled OK, runner started (Stop to stop)"), false);
+                SetStatus(Localization.Pick("编译成功，已启动运行（F7 或「停止」按钮可停止）", "Compiled OK, runner started (F7 or Stop to stop)"), false);
                 AppendError("");
                 // 教学判定钩子：编译并成功启动运行（Level 1 - Part 2 语法教学最后一项任务据此判定）
                 if (OnCompiledSuccessfully != null)
@@ -1595,6 +1623,7 @@ public class CodeEditorController : MonoBehaviour
         GuardWindowTick();
     }
 
+
     private void GuardWindowTick()
     {
         if (lastGuardFrame == Time.frameCount)
@@ -1620,6 +1649,11 @@ public class CodeEditorController : MonoBehaviour
         // 真正开始打字了就立刻放手：Input.inputString 在中文输入法提交时是空的，
         // 只靠按键判定会漏掉，窗口内继续每帧压回旧光标，新敲的字会被「吞」在原地 —— 表现就是写不进去字。
         // 这里直接以目标块文本长度是否变化作为「已打字」的判据，最可靠。
+        // 按下 Ctrl+字母（复制 / 粘贴 / 剪切 / 撤销…）属于明确的键盘指令，必须立刻放手，
+        // 否则守卫会在同一帧的 LateUpdate 把刚做好的选区重新压成零长度选区。
+        bool ctrlCombo = (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) &&
+            (Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.V) ||
+             Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Y));
         bool textEdited = false;
         if (clickCaretFixTextLen >= 0 && clickCaretFixSeg >= 0 && clickCaretFixSeg < segments.Count)
         {
@@ -1627,7 +1661,7 @@ public class CodeEditorController : MonoBehaviour
             if (gf != null && gf.text != null && gf.text.Length != clickCaretFixTextLen)
                 textEdited = true;
         }
-        if (dragging || shift || keyboardTouched || textEdited ||
+        if (dragging || shift || keyboardTouched || ctrlCombo || textEdited ||
             Time.unscaledTime - clickCaretFixTime > ClickCaretFixWindow)
         {
             EndClickGuard();
@@ -3094,7 +3128,11 @@ public class CodeEditorController : MonoBehaviour
         int segIdx = IndexOfField(activeInput);
         if (segIdx > 0 && segIdx < segments.Count)
             line += segments[segIdx].startLine; // 全局行号
-        statusLineText.text = "语言 C#    行:" + line + "  列:" + col + "    " + BuildSegmentStatusTag() + lastStatus;
+        // 语言 / 行列随界面语言切换：英文界面下不能残留中文「语言 / 行 / 列」
+        statusLineText.text = Localization.Pick(
+            "语言 C#    行:" + line + "  列:" + col + "    ",
+            "Lang C#    Ln:" + line + "  Col:" + col + "    ")
+            + BuildSegmentStatusTag() + lastStatus;
         statusLineText.color = statusColor;
         statusLineText.font = UIFontHelper.LoadForText(statusLineText.text, statusLineText.fontSize);
     }
@@ -3108,7 +3146,7 @@ public class CodeEditorController : MonoBehaviour
         if (segments.Count <= 1)
             return string.Empty;
         StringBuilder sb = new StringBuilder(48);
-        sb.Append("段");
+        sb.Append(Localization.Pick("段", "Seg"));
         for (int i = 0; i < segments.Count; i++)
         {
             CodeSegment seg = segments[i];
@@ -3345,7 +3383,7 @@ public class CodeEditorController : MonoBehaviour
     }
     // ==================== 临时诊断区结束 ====================
 
-    // ==================== 打开已保存的代码（顶栏灰色按钮） ====================
+    // ==================== 打开已保存的代码（顶栏「载入 (F8)」按钮） ====================
 
     /// <summary>列出可能存有「已保存代码」的候选路径（按实际存在的文件优先，最后按写入时间取最新）。</summary>
     private static string[] GetSavedCodeCandidates()
@@ -3393,7 +3431,7 @@ public class CodeEditorController : MonoBehaviour
     }
 
     /// <summary>
-    /// 顶栏灰色按钮「打开已保存代码」：弹出自绘的文件选择面板（类似系统的打开对话框），
+    /// 顶栏「载入 (F8)」按钮：弹出自绘的文件选择面板（类似系统的打开对话框），
     /// 由用户自己在磁盘上逐级浏览目录、指定要载入的代码文件，不再做「自动找候选 + 二次确认」。
     /// </summary>
     private void OnOpenSavedCodeClicked()
@@ -4013,8 +4051,8 @@ public class CodeEditorController : MonoBehaviour
         if (System.IO.File.Exists(full) && string.Compare(pendingOverwritePath, full, true) != 0)
         {
             pendingOverwritePath = full;
-            SetButtonLabel(filePickerSaveBtn, Localization.Pick("确认覆盖", "Overwrite"));
-            SetStatus(Localization.Pick("该文件已存在：再点一次「确认覆盖」写入 ", "File exists: press Overwrite again to write ") + full, true);
+            SetButtonLabel(filePickerSaveBtn, Localization.Pick("确认覆盖?", "Overwrite?"));
+            SetStatus(Localization.Pick("该文件已存在：再点一次「确认覆盖?」写入 ", "File exists: press Overwrite? again to write ") + full, true);
             return;
         }
 
@@ -4162,31 +4200,36 @@ public class CodeEditorController : MonoBehaviour
         titleRt.anchorMin = new Vector2(0f, 0f);
         titleRt.anchorMax = new Vector2(1f, 1f);
         titleRt.offsetMin = new Vector2(20f, 0f);
-        titleRt.offsetMax = new Vector2(-620f, 0f);
+        titleRt.offsetMax = new Vector2(-670f, 0f);
 
-        // 右侧按钮：✕ / 停止 / 编译运行 (F6) / 导出 (F9) / 载入 (F8)（从右往左）
+        // 右侧按钮：✕ / 停止 (F7) / 编译运行 (F6) / 导出 (F9) / 载入 (F8)（从右往左）
         CreateButton("BtnClose", titleBarRt, "✕", Close, new Vector2(56f, 34f), new Vector2(-14f, 0f), new Vector2(1f, 0.5f), UITheme.PanelSunk);
-        CreateButton("BtnStop", titleBarRt, Localization.Pick("停止", "Stop"), StopRunner, new Vector2(76f, 34f), new Vector2(-80f, 0f), new Vector2(1f, 0.5f), UITheme.AlertDim);
-        CreateButton("BtnCompile", titleBarRt, Localization.Pick("编译运行 (F6)", "Compile & Run (F6)"), CompileAndRun, new Vector2(156f, 34f), new Vector2(-196f, 0f), new Vector2(1f, 0.5f), UITheme.WithAlpha(UITheme.Accent, 0.22f));
+        Button btnStop = CreateButton("BtnStop", titleBarRt, Localization.Pick("停止 (F7)", "Stop (F7)"), StopRunner, new Vector2(116f, 34f), new Vector2(-112f, 0f), new Vector2(1f, 0.5f), UITheme.AlertDim);
+        AttachHoverTip(btnStop != null ? btnStop.gameObject : null,
+            Localization.Pick("Tips：按 F7 或点此按钮结束当前运行的用户代码，炮台回到待命状态。", "Tips: press F7 (or this button) to stop the running user code and park the tower."));
+
+        Button btnCompile = CreateButton("BtnCompile", titleBarRt, Localization.Pick("编译运行 (F6)", "Compile & Run (F6)"), CompileAndRun, new Vector2(156f, 34f), new Vector2(-260f, 0f), new Vector2(1f, 0.5f), UITheme.WithAlpha(UITheme.Accent, 0.22f));
+        AttachHoverTip(btnCompile != null ? btnCompile.gameObject : null,
+            Localization.Pick("Tips：按 F6 或点此按钮编译当前代码并立即运行；编译失败会在下方逐条列出错误行。", "Tips: press F6 (or this button) to compile and run the current code; any error is listed with its line number below."));
 
         // 「导出 (F9)」：弹出文件夹选择面板，由用户指定保存目录 + 文件名后写盘（UTF-8 with BOM）。
         Button btnExport = CreateButton("BtnExport", titleBarRt,
             Localization.Pick("导出 (F9)", "Export (F9)"),
             OpenCodeSavePicker,
-            new Vector2(132f, 34f), new Vector2(-378f, 0f), new Vector2(1f, 0.5f),
+            new Vector2(132f, 34f), new Vector2(-416f, 0f), new Vector2(1f, 0.5f),
             UITheme.WithAlpha(UITheme.Accent, 0.14f));
         AttachHoverTip(btnExport != null ? btnExport.gameObject : null,
-            Localization.Pick("选择保存目录与文件名，把当前代码导出到磁盘（F9）", "Pick a folder and file name, then export the current code (F9)"));
+            Localization.Pick("Tips：按 F9 或点此按钮打开导出面板，先选目录再填文件名，即可把当前代码写入磁盘（UTF-8 with BOM）。", "Tips: press F9 (or this button) to open the export panel - pick a folder, type a file name, and the current code is written to disk (UTF-8 with BOM)."));
 
         // 「打开代码文件 (F8)」：弹出目录浏览面板，由用户自己选磁盘上任意代码文件载入。
         // 悬停时在底部状态栏给出提示；点文件即载入，载入前内容进 undo 栈（Ctrl+Z 可撤销）。
         Button btnOpenSaved = CreateButton("BtnOpenSaved", titleBarRt,
             Localization.Pick("打开代码文件 (F8)", "Open Code File (F8)"),
             OnOpenSavedCodeClicked,
-            new Vector2(156f, 34f), new Vector2(-524f, 0f), new Vector2(1f, 0.5f),
+            new Vector2(156f, 34f), new Vector2(-572f, 0f), new Vector2(1f, 0.5f),
             UITheme.WithAlpha(UITheme.TextMuted, 0.30f));
         AttachHoverTip(btnOpenSaved != null ? btnOpenSaved.gameObject : null,
-            Localization.Pick("按下可选择磁盘上任意位置的代码文件（.cs / .txt）（F8）", "Press to browse and pick a code file (.cs / .txt) anywhere on disk (F8)"));
+            Localization.Pick("Tips：按 F8 或点此按钮打开文件面板，可逐级浏览磁盘目录，选中 .cs 或 .txt 文件即载入编辑器；载入前的内容仍留在撤销栈里（Ctrl+Z 可回退）。", "Tips: press F8 (or this button) to open the file panel and browse your disk; picking a .cs or .txt file loads it into the editor, while the previous content stays in the undo stack (Ctrl+Z)."));
 
         // ---- 行号列视口（宽 70，RectMask2D 裁剪 + 背景；高度随窗口拉伸：上贴标题栏下缘、下贴底部横条） ----
         RectTransform lineViewportRt = CreateRect("LineViewport", editorRoot.transform, new Vector2(0f, 1f), Vector2.zero, new Vector2(70f, 868f), new Vector2(0f, 1f));

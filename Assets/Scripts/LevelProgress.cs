@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 关卡解锁进度（逐级解锁 + PlayerPrefs 持久化）：
@@ -8,7 +8,7 @@ using UnityEngine;
 ///
 /// 通关判定（由代码编辑器教学关在「全部任务完成」时上报）：
 ///   - Level 1 通关 = Level 1 - Part 2（C# 基础语法课，18 项任务）全部完成 → 解锁 Level 2；
-///   - Level 2 通关 = Level 2 - Part 1（炮台 API 课，13 项任务）全部完成 → 解锁 Level 3；
+///   - Level 2 通关 = Level 2 - Part 2（炮台 API 课，13 项任务）全部完成 → 解锁 Level 3；
 ///   - Level 3 为最后一关，通关后不再解锁新关卡（仅记录已完成）。
 /// </summary>
 public static class LevelProgress
