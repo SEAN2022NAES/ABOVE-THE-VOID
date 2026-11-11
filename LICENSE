@@ -1,21 +1,332 @@
-MIT License
+# ABOVE THE VOID · 双许可声明 / Dual License
 
-Copyright (c) 2026 Ma Yixiao
+Copyright (c) 2026 Ma Yixiao (Sean Ma). All rights reserved.
+版权所有 © 2026 Ma Yixiao (Sean Ma)。保留所有权利。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+本文件是「ABOVE THE VOID」（下称「本作品」）的完整许可条款，采用**非商业免费 + 商业需授权**的双许可模式。
+This file sets out the complete licence terms for ABOVE THE VOID (the "Work") under a **dual-licence model:
+free for non-commercial use, commercial use by written licence only**.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+> 重要提示 / Important notice
+> 本作品**不是**开源软件（不属于 OSI 认可的开源许可，也不属于自由软件许可）。未在本文件中被明示授予的权利，
+> 全部由版权人保留。**任何商业用途都必须事先取得版权人的书面授权。**
+> The Work is **not** open-source software (it is not released under an OSI-approved or free-software licence).
+> All rights not expressly granted in this file are reserved by the copyright holder.
+> **Any commercial use requires a prior written licence from the copyright holder.**
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+---
+
+## 1. 定义 / Definitions
+
+**1.1 本作品 / the Work**
+指 ABOVE THE VOID 项目的全部内容，包括但不限于源代码、着色器（Shader）、场景与项目配置、美术与音效资源、文档、
+以及上述内容的一切修改版、衍生作品和与之组合形成的更大作品。
+means the entire ABOVE THE VOID project: source code, shaders, scenes and project settings, art and audio assets,
+documentation, and any modified version, derivative work, or larger work into which any of the foregoing is incorporated.
+
+**1.2 版权人 / the Copyright Holder**
+指 Ma Yixiao（英文署名 Sean Ma，自然人作者）。就中国法而言，指本作品的著作权人。
+means Ma Yixiao (Sean Ma), the individual author and, under the Copyright Law of the People's Republic of China, the copyright owner.
+
+**1.3 非商业用途 / Non-Commercial Use**
+指**不以任何直接或间接获取经济利益为目的**的使用，具体范围见第 3 条。
+means use that is **not aimed at obtaining any direct or indirect economic benefit**, as further set out in Section 3.
+
+**1.4 商业用途 / Commercial Use**
+指第 6 条列举的一切使用行为，以及任何以营利为目的或与营利活动相关的使用。
+means any use listed in Section 6, and any use for profit or in connection with a profit-making activity.
+
+**1.5 分发 / Distribute**
+指以任何方式向第三方提供本作品或其副本，包括下载、网盘分享、镜像、随产品发布、随课程发放、捆绑安装等。
+means making the Work or any copy available to any third party by any means, including download, file sharing,
+mirroring, shipping with a product, handing out with a course, or bundling with an installer.
+
+**1.6 衍生作品 / Derivative Work**
+指基于本作品全部或实质性部分形成的任何作品，包括修改版、翻译版、移植版、重构版，以及把本作品的代码或资源
+嵌入其他项目后形成的作品。
+means any work based on the Work or a substantial part of it, including modifications, translations, ports,
+refactorings, and any work into which the Work's code or assets are embedded.
+
+---
+
+## 2. 默认权利状态 / Default Position
+
+**2.1** 本作品的著作权由版权人享有，**默认状态为「保留所有权利（All Rights Reserved）」**。本文件仅授予第 3 条明确
+列出的有限非商业许可，除此之外不授予任何明示或默示的权利，包括但不限于商标权、专利权、商业秘密及形象权。
+The copyright in the Work is owned by the Copyright Holder and the **default position is "All Rights Reserved"**.
+This file grants only the limited non-commercial licence expressly set out in Section 3; no other right, express
+or implied, is granted, including any right in trademarks, patents, trade secrets, or likeness.
+
+**2.2** 未取得第 8 条所述书面商业授权的任何商业用途，自始不构成有效许可，属于对著作权的侵犯。
+Any commercial use without the written licence described in Section 8 is not licensed at any time and constitutes
+an infringement of copyright.
+
+---
+
+## 3. 非商业许可授予 / Non-Commercial Licence Grant
+
+在遵守本文件全部条款的前提下，版权人授予你一项**全球范围、非独占、不可转让、不可再许可、免费**的许可，
+仅为**非商业用途**实施下列行为：
+
+Subject to full compliance with this file, the Copyright Holder grants you a **worldwide, non-exclusive,
+non-transferable, non-sublicensable, royalty-free** licence to do the following, **for Non-Commercial Use only**:
+
+1. **学习与研究**：在个人设备上下载、安装、运行、阅读、调试、分析本作品，用于学习引擎、坐标系统、相机控制、
+   方块系统、代码塔、运行时 C# 代码编辑器等实现原理。/
+   **Study and research**: download, install, run, read, debug and analyse the Work on your own devices in order
+   to learn how the engine, coordinate system, camera control, block system, code tower and runtime C# editor work.
+2. **教学**：在课堂、社团、公开课、线上课程中演示、讲解本作品，包括在**不收取任何费用**的前提下向学员分发副本。/
+   **Teaching**: demonstrate and explain the Work in classes, clubs, open lectures and online courses, including
+   distributing copies to students **free of charge**.
+3. **非盈利开源项目**：把本作品的代码或资源用于**不收任何费用、不含任何盈利入口**的个人或社区开源项目。/
+   **Non-profit open source**: use the Work's code or assets in personal or community open-source projects that
+   **charge no fee and contain no monetisation of any kind**.
+4. **修改与改进**：修改本作品、创作衍生作品，仅用于上述非商业目的。/
+   **Modification**: modify the Work and create Derivative Works, strictly for the non-commercial purposes above.
+5. **非商业分发**：在**完全免费、无任何对价、无广告、无赞助、无付费入口**的前提下，向他人分发本作品或其
+   未修改/已修改的副本（例如学习小组内部分享）。/
+   **Non-commercial distribution**: distribute the Work, modified or not, only where it is **entirely free of
+   charge, consideration, advertising, sponsorship and paid entry points** (for example sharing within a study group).
+
+---
+
+## 4. 非商业使用条件 / Conditions of the Non-Commercial Licence
+
+**4.1 署名（强制）**：你必须按第 7 条保留并展示版权声明与署名信息，不得删除、遮盖、篡改或弱化任何版权、
+许可与来源标注。
+**Attribution (mandatory)**: you must keep and display the copyright and attribution information as required by
+Section 7, and must not remove, obscure, alter or downplay any copyright, licence or provenance notice.
+
+**4.2 许可传递**：你分发本作品或衍生作品时，必须一并附带本文件（可为副本或指向本文件的链接），且不得对
+接收方授予比本文件更宽的权利。
+**Pass-through**: when you distribute the Work or a Derivative Work, you must include this file (a copy or a link
+to it) and must not grant the recipient any rights broader than those in this file.
+
+**4.3 修改标注**：你对本作品作出修改的，应在修改文件的显著位置注明「本文件基于 ABOVE THE VOID 修改」及修改日期。
+**Marking changes**: if you modify the Work, you must note, in a prominent place in each modified file,
+"Modified from ABOVE THE VOID" together with the date of modification.
+
+**4.4 不得暗示背书**：不得以任何方式暗示版权人为你的项目、课程、作品背书或提供担保。
+**No implied endorsement**: you must not suggest that the Copyright Holder endorses or warrants your project,
+course or work.
+
+**4.5 合法使用**：你不得利用本作品实施违反法律法规、侵犯他人权利或危害网络安全的行为。
+**Lawful use**: you must not use the Work to violate any law or regulation, infringe the rights of others, or
+compromise cybersecurity.
+
+---
+
+## 5. 明确禁止的行为 / Expressly Prohibited
+
+除取得第 8 条书面商业授权外，下列行为一律禁止：
+
+Unless licensed in writing under Section 8, the following are prohibited:
+
+1. 任何形式的商业利用（见第 6 条清单）。/ Any commercial exploitation (see the list in Section 6).
+2. 去除、隐藏、篡改版权声明、作者署名、许可文件或来源链接。/ Removing, hiding, altering or obscuring the
+   copyright notice, author attribution, licence file or source link.
+3. 把本作品或其衍生作品重新以其他许可（包括但不限于任何开源许可）发布，或声称本作品为他人作品。/
+   Re-releasing the Work or a Derivative Work under any other licence (including any open-source licence), or
+   claiming the Work as someone else's or your own original work.
+4. 单独或成规模提取本作品的源代码、着色器、资源，用于构建与本作品功能实质相同的竞品，或用于填充代码库、
+   素材库、数据集后对外提供。/ Extracting the source code, shaders or assets, individually or at scale, to build
+   a competing product that is substantially the same in function, or to populate a code library, asset library or
+   dataset offered to others.
+5. 用于训练、微调或评估以营利为目的的模型或服务。/ Using the Work to train, fine-tune or evaluate a model or
+   service operated for profit.
+6. 用于任何以直接或间接盈利为目的的赛事、活动、渠道分发或平台投稿（含平台的流量分成、创作激励计划）。/
+   Using the Work in any contest, event, channel distribution or platform submission that yields direct or
+   indirect profit (including platform revenue sharing and creator incentive programmes).
+7. 再许可（sublicence）、转让（assign）本许可，或把本作品作为服务对第三方开放（SaaS）。/
+   Sublicensing or assigning this licence, or making the Work available to third parties as a service (SaaS).
+
+---
+
+## 6. 「商业用途」的定义与清单 / Definition and List of Commercial Use
+
+**6.1** 「商业用途」指**任何直接或间接获取经济利益的使用**，不论是否实际盈利、不论主体是个人、个体户、
+公司、社会团体还是其他组织、不论是否以营利为登记目的。是否收费、是否盈利不影响定性。
+
+"Commercial Use" means **any use that obtains direct or indirect economic benefit**, whether or not a profit is
+actually made, whether the user is an individual, a sole trader, a company, an association or any other entity,
+and whether or not the entity is registered as for-profit. Neither charging a fee nor making a profit is required
+for a use to be commercial.
+
+**6.2 商业用途包括但不限于 / Commercial Use includes, without limitation:**
+
+| # | 场景 / Scenario | 说明 / Notes |
+|---|---|---|
+| 1 | **上架发行** / Publishing | 在 Steam、Epic、itch.io、App Store、Google Play、主机平台、微信小游戏、抖音小游戏、快应用、H5 平台等任何渠道发布含本作品全部或部分内容的游戏或应用。/ Releasing a game or app containing the Work, in whole or in part, on Steam, Epic, itch.io, the App Store, Google Play, consoles, WeChat mini-games, Douyin mini-games, quick apps, H5 platforms or any other channel. |
+| 2 | **付费获取** / Paid access | 付费下载、买断销售、抢先体验收费、付费解锁、会员专享、付费墙后的内容。/ Paid downloads, one-off sales, paid early access, paid unlocks, members-only content, content behind a paywall. |
+| 3 | **内购与订阅** / IAP and subscriptions | 应用内购买、虚拟货币、道具、皮肤、季卡、订阅制服务。/ In-app purchases, virtual currency, items, skins, season passes, subscription services. |
+| 4 | **广告与流量变现** / Advertising | 广告位、插屏、激励视频、开屏、买量投放后的变现、平台流量分成与创作激励计划。/ Ad slots, interstitials, rewarded videos, splash ads, monetisation of user-acquisition traffic, platform revenue sharing and creator incentive programmes. |
+| 5 | **公司内部生产使用** / Internal production use | 在公司、工作室或其他组织内部，把本作品或其代码、资源用于任何生产性工作（含内部工具、原型、演示、投标方案、员工培训教材）。/ Using the Work, its code or assets for any production work inside a company, studio or other organisation (including internal tools, prototypes, demos, bid proposals and staff training material). |
+| 6 | **外包与受托交付** / Contract and freelance delivery | 在受托项目中使用本作品并向客户交付，无论你本人是否另行收费。/ Using the Work in client work and delivering it, whether or not you charge separately for it. |
+| 7 | **二次销售与转售** / Resale | 销售、转售、租赁、捆绑销售本作品或其衍生作品；把本作品作为商品、赠品或促销物的一部分。/ Selling, reselling, renting or bundling the Work or a Derivative Work; making it part of a product, gift or promotion. |
+| 8 | **SaaS 与在线服务** / SaaS and online services | 把本作品部署为网络服务、在线编辑器、云工具、API 后端，向用户收费或以其他方式变现。/ Deploying the Work as a web service, online editor, cloud tool or API backend, charged for or otherwise monetised. |
+| 9 | **收费教学** / Paid teaching | 收费课程、训练营、付费社群、付费教程、付费直播、以本作品为卖点的付费内容。/ Paid courses, bootcamps, paid communities, paid tutorials, paid livestreams, and paid content that uses the Work as a selling point. |
+| 10 | **商业孵化与投资** / Commercial incubation | 用于创业项目、商业计划、融资演示、孵化器与加速器项目。/ Use in start-ups, business plans, investor pitches, incubators and accelerators. |
+| 11 | **硬件与设备预装** / Pre-installation | 预装或随硬件、设备、开发板、教育套件出厂交付。/ Pre-installing or shipping with hardware, devices, development boards or education kits. |
+| 12 | **素材与数据集** / Asset and dataset supply | 把本作品的代码或资源放入对外提供的素材库、模板库、代码库、数据集、课程包、AI 训练数据。/ Placing the Work's code or assets into an asset library, template store, code repository, dataset, course pack or AI training corpus offered to others. |
+| 13 | **品牌与宣传** / Branding and promotion | 在宣传物料、展会、广告、招聘、投标中以本作品作为能力证明并直接或间接获取商业利益。/ Using the Work as evidence of capability in marketing material, trade shows, advertising, recruiting or bidding, where commercial benefit is obtained directly or indirectly. |
+| 14 | **关联与变相使用** / Related and indirect use | 通过关联公司、第三方、代理、开源外壳、改名改包等方式规避本条款的间接或变相商业使用。/ Indirect or disguised commercial use through affiliates, third parties, agents, open-source wrappers, renaming or repackaging, in order to circumvent this section. |
+
+**6.3** 对是否构成商业用途存在疑问时，**一律推定构成商业用途**，须事先取得书面授权。
+Where it is unclear whether a use is commercial, it **shall be presumed commercial** and a written licence must be
+obtained in advance.
+
+---
+
+## 7. 署名要求 / Attribution Requirements
+
+**7.1** 任何非商业使用都必须以显著、清晰、完整的方式保留并展示下列信息：
+Every Non-Commercial Use must retain and display the following, prominently and completely:
+
+```
+ABOVE THE VOID — https://github.com/SEAN2022NAES/ABOVE-THE-VOID
+Copyright (c) 2026 Ma Yixiao (Sean Ma). All rights reserved.
+Licensed for non-commercial use only. Commercial use requires a written licence.
+```
+
+**7.2 展示位置（至少满足其一，分发场景须同时满足第 1 项）/ Placement (at least one; distribution requires item 1):**
+
+1. 源代码仓库根目录保留 `LICENSE` 与 `LICENSE-COMMERCIAL.md`，`README` 中保留「许可」章节；/
+   the repository root keeps `LICENSE` and `LICENSE-COMMERCIAL.md`, and the `README` keeps a licence section;
+2. 被修改的源文件头部保留版权与来源注释；/ each modified source file keeps a copyright and provenance header;
+3. 可运行的程序应在「关于 / About」或「版权 / Credits」界面展示上述版权行与仓库链接；/
+   a runnable build shows the copyright line and repository link in its About or Credits screen;
+4. 教学场景应在课件、讲义或课程说明页标注作者与仓库地址。/ teaching material states the author and repository.
+
+**7.3** 不得以「作者不详」「来源不明」「原创」等表述替代上述署名。
+The attribution above must not be replaced by statements such as "author unknown", "source unknown" or "original".
+
+---
+
+## 8. 商业授权 / Commercial Licensing
+
+**8.1** 任何商业用途必须事先取得版权人的**书面授权**（电子邮件形式的书面确认即可，正式商用建议签署书面许可协议）。
+Any Commercial Use requires a prior **written licence** from the Copyright Holder (written confirmation by e-mail
+is sufficient; a signed licence agreement is recommended for commercial deployment).
+
+**8.2** 授权范围、期限、地域、分发渠道、分成方式、费用与付款安排，按项目单独协商，不适用任何默认条款。
+The scope, term, territory, distribution channels, revenue share, fees and payment schedule are negotiated per
+project; no default terms apply.
+
+**8.3** 未取得书面授权的商业用途，**不构成任何许可**，版权人保留追究法律责任的一切权利。详见
+`LICENSE-COMMERCIAL.md`。
+Commercial use without a written licence **is not licensed in any way**, and the Copyright Holder reserves all
+remedies. See `LICENSE-COMMERCIAL.md`.
+
+---
+
+## 9. 终止 / Termination
+
+**9.1 自动终止**：你违反本文件任何条款（尤其是第 4、5、6 条）时，本文件授予你的全部许可**自动终止**，
+无需版权人另行通知。终止后你必须立即停止使用、复制、分发本作品及其衍生作品。
+**Automatic termination**: if you breach any term of this file (in particular Sections 4, 5 and 6), all licences
+granted to you **terminate automatically**, without further notice. You must then immediately stop using, copying
+and distributing the Work and any Derivative Work.
+
+**9.2 后果**：终止后继续使用、分发本作品，属于对著作权的侵犯；已分发的副本，你应在其能力范围内停止继续提供。
+**Consequences**: continued use or distribution after termination infringes copyright; for copies already
+distributed, you must stop making them available to the extent you are able to do so.
+
+**9.3 恢复**：版权人可自行决定以书面形式恢复许可，恢复条件（包括补正与追溯授权费用）由版权人确定。
+**Reinstatement**: the Copyright Holder may, at its sole discretion, reinstate the licence in writing, on terms it
+determines (including cure and retroactive licence fees).
+
+**9.4 存续条款**：第 1、5、6、10、11、12、13 条在本许可终止后继续有效。
+**Survival**: Sections 1, 5, 6, 10, 11, 12 and 13 survive termination.
+
+---
+
+## 10. 免责声明 / Disclaimer of Warranty
+
+**10.1** 本作品按**「现状」（AS IS）**提供，不附带任何明示或默示的担保，包括但不限于适销性、特定用途适用性、
+不侵权、无错误、无中断、无病毒的担保。
+The Work is provided **"AS IS"**, without any express or implied warranty, including any warranty of
+merchantability, fitness for a particular purpose, non-infringement, freedom from errors, uninterrupted operation
+or freedom from viruses.
+
+**10.2** 你自行承担使用本作品的全部风险，包括但不限于数据丢失、设备损坏、项目延误、第三方索赔及合规风险。
+You bear all risk arising from use of the Work, including data loss, device damage, project delay, third-party
+claims and compliance risk.
+
+**10.3** 版权人无义务提供技术支持、更新、错误修复或迁移协助。
+The Copyright Holder has no obligation to provide technical support, updates, bug fixes or migration assistance.
+
+---
+
+## 11. 责任限制 / Limitation of Liability
+
+在适用法律允许的最大范围内，版权人不对任何间接、附带、特殊、惩罚性或后果性损害承担责任，包括但不限于
+利润损失、收入损失、商誉损失、数据丢失、业务中断，无论其基于合同、侵权（含过失）、严格责任或其他原因，
+亦不论版权人是否已被告知该等损害的可能性。就中国法项下的直接损失，版权人的累计赔偿责任以你为取得本许可
+实际支付的金额（非商业使用为人民币 0 元）为上限；法律强制性规定不得排除的赔偿责任除外。
+
+To the maximum extent permitted by applicable law, the Copyright Holder is not liable for any indirect,
+incidental, special, punitive or consequential damages, including lost profits, lost revenue, loss of goodwill,
+data loss or business interruption, whether based in contract, tort (including negligence), strict liability or
+otherwise, and whether or not advised of the possibility of such damages. For direct damages under PRC law, the
+Copyright Holder's aggregate liability is capped at the amount you actually paid for this licence (nil for
+Non-Commercial Use), except where mandatory law provides otherwise.
+
+---
+
+## 12. 权利保留、解释权与许可变更 / Reservation, Interpretation and Changes
+
+**12.1** 本文件未明示授予的一切权利均由版权人保留。
+All rights not expressly granted in this file are reserved by the Copyright Holder.
+
+**12.2** 本文件的解释权归版权人所有；对条款含义存在争议时，以版权人的书面解释为准，但不得排除法律的强制性规定。
+The Copyright Holder reserves the right to interpret this file. In case of dispute over its meaning, the
+Copyright Holder's written interpretation prevails, without prejudice to mandatory provisions of law.
+
+**12.3** 版权人有权**随时变更**本许可条款（包括收紧或放宽非商业范围、调整署名要求、调整商业授权条件）。
+变更自新版 `LICENSE` 文件提交至仓库之日起生效，适用于该日期之后的使用行为，**不溯及**变更前已依当时条款
+合法完成的使用；但已构成侵权的行为不因变更而免责。
+The Copyright Holder may **change these terms at any time** (including narrowing or widening the non-commercial
+scope, adjusting attribution requirements, or adjusting commercial licensing conditions). A change takes effect
+on the date the new `LICENSE` is committed to the repository and applies to use from that date onward; it does not
+retroactively affect use lawfully completed under the previous terms, but no change excuses an act that was
+already infringing.
+
+**12.4** 你以任何方式使用本作品，即视为已阅读、理解并接受本文件全部条款。
+By using the Work in any way, you are deemed to have read, understood and accepted all terms of this file.
+
+---
+
+## 13. 其他 / Miscellaneous
+
+**13.1 适用法律与争议解决**：本文件适用中华人民共和国法律（不含冲突法规则）。因本文件产生的争议，双方应
+先友好协商；协商不成的，提交版权人住所地有管辖权的人民法院诉讼解决。
+**Governing law and disputes**: this file is governed by the laws of the People's Republic of China (excluding
+conflict-of-law rules). Disputes shall first be resolved through good-faith negotiation; failing that, they shall
+be submitted to the competent people's court at the Copyright Holder's domicile.
+
+**13.2 可分性**：本文件任何条款被认定无效或不可执行的，该条款在最小必要范围内被调整或剔除，其余条款继续有效。
+**Severability**: if any provision is held invalid or unenforceable, it shall be modified or severed to the
+minimum extent necessary and the remaining provisions remain in force.
+
+**13.3 完整协议**：本文件与 `LICENSE-COMMERCIAL.md` 构成关于本作品许可的完整约定，取代此前的任何口头或书面陈述
+（包括本项目早期版本附带的 MIT 许可）。
+**Entire agreement**: this file together with `LICENSE-COMMERCIAL.md` is the entire agreement on licensing of the
+Work and supersedes any prior oral or written statement, including the MIT licence shipped with earlier versions
+of this project.
+
+**13.4 语言**：本文件以中文和英文书写，两种文本具有同等效力；如中英文本存在歧义或冲突，以**中文文本**为准。
+**Language**: this file is written in Chinese and English, both texts being equally authentic; in case of
+ambiguity or conflict, the **Chinese text** prevails.
+
+---
+
+## 14. 商业合作联系 / Commercial Contact
+
+商业授权咨询请通过下列方式联系（请勿在公开场合索要或发布私人联系方式）：
+For commercial licensing enquiries, please use the following contact:
+
+- 联系人 / Contact: Ma Yixiao (Sean Ma)
+- 邮箱 / E-mail: `[联系方式占位符]`
+- 仓库 / Repository: https://github.com/SEAN2022NAES/ABOVE-THE-VOID
+
+详见 `LICENSE-COMMERCIAL.md` / See `LICENSE-COMMERCIAL.md` for details.
