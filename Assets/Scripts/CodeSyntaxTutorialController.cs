@@ -1,3 +1,4 @@
+﻿using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -14,9 +15,11 @@ using UnityEngine.UI;
 ///   - 每一项任务的完成条件都相同：① 编辑器里的代码命中该任务的语法 ② 本次任务期间点过【编译运行 (F6)】
 ///     并且**编译通过的那份代码本身**满足该语法（防止先写后编译 / 先编译后补写蒙混过关）；
 ///     任务卡常驻显示「① 语法 / ② 编译」两条勾选状态，未编译时明确提示「点标题栏【编译运行 (F6)】验证」；
-///   - 说明分页（专为零基础）：每个任务都有「第 1 页 = 写法 / 示例」「第 2 页 = 手把手细节」两页，
-///     任务卡右上角「‹ 细节 1/2 ›」可来回翻；第 2 页整段通栏放大指导框（DetailPageRatio），
-///     内容 = ① 一步一步怎么做（按哪个键、写在哪）② 逐符号读懂它 ③ 三个必踩的坑 + 正确做法；
+///   - 说明分页（专为零基础）：每个任务都有「第 1 页 = 写法 / 示例」「第 2 页 = 手把手细节」「第 3 页 = 代码动画」，
+///     任务卡右上角「‹ 细节 1/3 ›」可来回翻；第 2、3 页整段通栏放大指导框（DetailPageRatio），
+///     第 2 页内容 = ① 一步一步怎么做（按哪个键、写在哪）② 逐符号读懂它 ③ 三个必踩的坑 + 正确做法；
+///     第 3 页内容 = 示例代码每 1.8 秒高亮前进一行 + 左栏用大白话讲「这一刻这行在干什么」，
+///     把静态代码演成一段可看的过程（数据从哪来、条件真假、循环跑了几圈、最后打印出什么）；
 ///   - 判定机制：结构类用正则解析编辑器文本（先剥离注释与字符串字面量，避免注释 / 字符串误判），
 ///     编译类用 CodeEditorController.OnCompiledSuccessfully 事件，不依赖运行时反射；
 ///   - 离开 / 重进关卡都会重置进度（Begin 每次从第 1 项开始并重建进度格）。
@@ -43,7 +46,112 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         public string BodyEn;
         public string Page2Zh;     // 第 2 页：零基础手把手细节（为 null 表示本任务只有一页）
         public string Page2En;
+        public AnimStep[] Anim;    // 第 3 页：代码动画（逐行高亮 + 旁白，为 null 表示本任务没有动画页）
+        public MemScene Mem;       // 第 3 页：内存可视化场景（有它就走图形页，优先于 Anim）
         public TaskMatch Match;
+    }
+
+    // ================== 第 3 页：内存可视化（manim 风格）的数据结构 ==================
+
+    /// <summary>
+    /// 一个变量在内存里占的那一段：栈 / 堆上的连续若干字节。
+    /// 类型只是画在标签上的说明，真正决定宽度的是 Bytes 里写了几个字节 ——
+    /// char / bool 占 1 格，int / float 占 4 格，数组 / List / string 的变量名本身只占 4 格引用（门牌号），
+    /// 它指向的那段数据另用一个变量表示（Type 写 "堆 · int[3]" 之类），这样「引用」和「数据」不会混在一起。
+    /// </summary>
+    private class MemVar
+    {
+        public string Name;    // 变量名（画在行首）
+        public string Type;    // 类型（int / char / float / bool / string / int[] / List<int> …）
+        public string Bytes;   // 每个字节的十六进制值，空格分隔；"??" 表示这一格还没被写
+        public string Note;    // 这一行下面的一行小字（讲清这段内存为什么长这样），可为空
+        public string Badge;   // 行首小徽章（"锁" / "引用" / "栈帧" / "丢弃"），可为空
+        public bool Ghost;     // true = 灰虚线：代码里写了、但内存里根本没有它（注释 / 方法定义）
+        // ---- 英文模式专用文案（Localization.IsChinese = false 时优先用这几项，留空则回落到中文） ----
+        public string NameEn;  // 变量名的英文写法（如 "hp（参数）" → "hp (param)"）
+        public string TypeEn;  // 类型名牌的英文写法（如 "堆 · int[3]" → "heap · int[3]"）
+        public string NoteEn;  // 行说明的英文版
+        public string BadgeEn; // 行首徽章的英文版（如 "锁" → "CONST"）
+
+        /// <summary>给这段内存补一份英文文案（不传的那项继续用中文，避免漏写就空掉）。</summary>
+        internal MemVar En(string note, string name = null, string type = null, string badge = null)
+        {
+            NoteEn = note;
+            if (!string.IsNullOrEmpty(name))
+                NameEn = name;
+            if (!string.IsNullOrEmpty(type))
+                TypeEn = type;
+            if (!string.IsNullOrEmpty(badge))
+                BadgeEn = badge;
+            return this;
+        }
+    }
+
+    /// <summary>内存可视化的一步：内存里已经有前 Reveal 个变量、正在写第 Write 个，配一句旁白。</summary>
+    private class MemStep
+    {
+        public string Expr;    // 这一步在执行的代码（画在舞台下方的执行台上）
+        public string ExprEn;  // 同一行代码的英文版（英文模式用；代码里的注释跟着语言走，留空则回落到 Expr）
+        public string Zh;      // 中文旁白
+        public string En;      // 英文旁白
+        public int Reveal;     // 到这一步为止，内存里有几个变量（1-based 个数，0 = 什么都没分配）
+        public int Write;      // 这一步正在往里写字节的变量下标（-1 = 只在读 / 只作判断）
+        public int[] PatchVar;      // 这一步要改写哪几段内存的值（演示「同一格的值被改了」，如 for 里的 i）
+        public string[] PatchBytes; // 改写后的字节串，与 PatchVar 一一对应
+
+        /// <summary>补一份英文代码行（只换注释里的语言，代码本身不动）。链式写法：MS(...).Code("// remaining hp")</summary>
+        internal MemStep Code(string exprEn)
+        {
+            ExprEn = exprEn;
+            return this;
+        }
+    }
+
+    /// <summary>
+    /// 舞台上的一行 = 一个变量（或一段数据）：行首徽章 + 类型名牌 + 变量名 + 若干字节格 + 行下一行小字。
+    /// 所有子件在 BuildMemStage 里一次建好并塞进池子，播放时只改颜色 / 文字 / 位置，绝不动态建 UI。
+    /// </summary>
+    private class MemRowUI
+    {
+        public RectTransform Root;                 // 整块（行内容 + 下方小字）
+        public Image FrameBg;                      // 整块底色（栈帧 / 幽灵行用）
+        public Text Badge;                         // 行首徽章（锁 / 引用 / 栈帧）
+        public Image TypeBg;                       // 类型名牌底色
+        public Text TypeText;                      // 类型名牌文字（int / char …）
+        public Text NameText;                      // 变量名
+        public Text NoteText;                      // 行下小字
+        public RectTransform[] CellRt;             // 本行字节格
+        public Image[] CellBg;
+        public Text[] CellAddr;
+        public Text[] CellVal;
+        public Vector2[] CellPos;                  // 格子目标位置（补间用）
+    }
+
+    /// <summary>一段内存戏：变量表 + 分步脚本。</summary>
+    private class MemScene
+    {
+        public MemVar[] Vars;
+        public MemStep[] Steps;
+    }
+
+    /// <summary>
+    /// 代码动画的一个步骤：把示例代码里的某一行高亮，并配一句「这一行在干什么」。
+    /// 行不用写死下标，只给该行里的一段特征文字（Key），由 FindAnimLine 去示例代码里定位 ——
+    /// 以后改示例代码不会因为行号错位而高亮到别的行。
+    /// </summary>
+    private class AnimStep
+    {
+        public string Key;   // 该步骤要演示的代码行特征子串
+        public string KeyEn; // 英文示例代码里的特征子串（Key 本身是中文注释时用，如 "// 计算剩余血量" → "// remaining hp"）
+        public string Zh;    // 中文旁白
+        public string En;    // 英文旁白
+
+        /// <summary>补一份英文定位子串：Key 里带中文注释时，英文模式要在英文示例代码里找得到这一行。</summary>
+        internal AnimStep KeyIn(string keyEn)
+        {
+            KeyEn = keyEn;
+            return this;
+        }
     }
 
     public static CodeSyntaxTutorialController Instance { get; private set; }
@@ -77,6 +185,20 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private const float ReferenceHeight = 1080f;         // Canvas 参考分辨率高（取不到父级高度时的回退值）
     private const float SplitRatio = 0.5f;               // 上下对半平分：上方代码区 50%、下方指导框 50%，固定不随窗口 / 文案变化
     private const float DetailPageRatio = 0.66f;
+    private const float AnimStepInterval = 1.8f;      // 第 3 页代码动画：旧版自动推进的节拍（现已改手动，仅保留作补间基准）
+    private const float MemStepInterval = 4.2f;       // 第 3 页内存可视化：一步的补间时长上限（不再自动跳步，靠 ↓ 手动推进）
+    private const float MemFadeTime = 0.45f;          // 新变量「滑进来」的时长（这一步前 0.45 秒内做淡入 + 位移）
+    private const float MemCellGapX = 8f;             // 相邻字节格的水平间距
+    private const float MemRowGapY = 14f;             // 相邻变量块之间的垂直间距
+    private const int MemRowPool = 4;                 // 预建的行数（一个场景最多同时摊开 4 段内存）
+    private const int MemCellPerRow = 12;             // 每行最多几格（数组 int[3] = 12 字节，是最长的一段）
+    private const float MemStageTopInset = 108f;      // 舞台顶边内缩：让开任务名那一行
+    private const float MemStageBottomInset = 26f;    // 舞台底边内缩：一条呼吸位
+    private const float MemStageSideInset = 26f;      // 舞台左右内缩
+    private const float MemHeaderH = 40f;             // 顶部说明条高度（留两行：小端那句要写清楚，一行放不下）
+    private const float MemExprH = 34f;               // 执行台（当前代码行）高度
+    private const float MemNoteH = 56f;               // 底部旁白高度
+    private const float MemNoteGapY = 6f;             // 旁白与执行台之间的间距
     private const float MinHintHeight = 200f;         // 提示区最小高度（拖到底也不会消失）
     private const float MinCodeHeight = 180f;         // 代码区最小高度（拖动分割线时的下限保护）
     private const float DragHandleHeight = 12f;       // 蓝色分割线的拖动热区高度（跨在线上，好抓）         // 第 2 页（手把手细节）指导框占比：文字量大，临时把指导框放大到 68%，翻回第 1 页自动复原
@@ -101,6 +223,20 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private Text taskNameText;         // 当前任务名
     private Text bodyText;             // 左栏：目标 / 提示 / 判定 + 完成条件状态
     private Text sampleText;           // 右栏：写法 / 示例代码（无写法段时隐藏，左栏自动通栏）
+
+    // ---- 第 3 页：内存可视化舞台（整块正文区改成图形演示，manim 风格） ----
+    private RectTransform memRoot;      // 舞台根节点（覆盖整个正文区）
+    private Text memHeaderText;         // 顶部说明：一格 = 1 字节 / 右高左低（小端）
+    private Text memExprText;           // 执行台：当前这一行代码
+    private Text memNoteText;           // 旁白：这一步在干什么
+    private Text memFootText;           // 顶部右侧：第几步 / 循环提示
+    private RectTransform memExprRt;    // 执行台那条深色带（底部整块要跟着内容走，得能改它的位置）
+    private Text memKeyHintText;        // 执行台右侧：按下 ↓ 观看下一个（代码区握焦点时改成 ↓ 代码模式）
+    private string memKeyHintCache = "";// 键位提示文案缓存，避免逐帧改文字
+    private MemRowUI[] memRows;         // 行池（每个变量/每段数据一块）
+    private int memBuiltStep = -1;      // 上一次重建舞台时的步骤号（变了才重排文字）
+    private int memBuiltIndex = -1;     // 上一次重建舞台时的任务号
+    private float memBuiltH = -1f;      // 上一次重建舞台时的可用高度（拖动分割线后要重排）
     private Image columnDivider;       // 左 / 右分栏之间的竖分隔线
     private bool columnHasSample;      // 当前任务是否有右侧示例代码（决定是否分栏）
     private Text flashText;            // 「任务完成 ✔」短暂提示
@@ -128,7 +264,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private float flashTimer;          // 「任务完成」提示倒计时（真实时间）
     private string hintCache = "";     // 提示条文案缓存，避免逐帧改文字
     private int statusCache = -1;      // 任务卡状态缓存（1=语法命中 2=编译通过），避免逐帧重建正文
-    private int guidePage;             // 当前任务正在看的说明页（0 = 第 1 页 写法/示例，1 = 第 2 页 手把手细节）
+    private int guidePage;             // 当前任务正在看的说明页（0 = 第 1 页 写法/示例，1 = 第 2 页 手把手细节，2 = 第 3 页 代码动画）
+    private float animTimer;           // 代码动画计时（真实时间，编辑器打开时 timeScale = 0）
+    private int animStep;              // 代码动画当前步骤（0-based，超过步数自动回 0 循环）
     private float manualSplitOffset;  // 手动拖动蓝色分割线的偏移（UI 像素，>0 = 提示区更高 / 代码区更矮）
     private Image accentLine;         // 面板顶部那条蓝色分割线（拖动把手悬停时提亮）
     private SplitDragHandle splitDragHandle;
@@ -329,6 +467,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             if (flashTimer <= 0f && flashText != null)
                 flashText.text = "";
         }
+
+        // ← / → 翻页、↑ / ↓ 走步骤：键盘就能把整段教学看完，不用去点小三角
+        HandlePageNavKey();
+        AdvanceAnim();
 
         SyncVisibility();
 
@@ -595,6 +737,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
         CurrentIndex = index;
         guidePage = 0; // 换任务回到第 1 页
+        ResetAnim();   // 动画也从头开演
 
         // 编译快照属于上一个任务，跳转后必须清零：否则新任务会被旧代码误判成「已编译通过」
         compiledThisTask = false;
@@ -619,12 +762,17 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
     // ================== 说明分页（第 2 页：零基础手把手细节） ==================
 
-    /// <summary>某个任务有几页说明：第 2 页文案非空即为 2 页，否则 1 页。</summary>
+    /// <summary>某个任务有几页说明：有第 3 页动画即 3 页，否则有第 2 页文案即 2 页，都没有则 1 页。</summary>
     private int PageCountOf(int index)
     {
         if (tasks == null || index < 0 || index >= tasks.Length)
             return 1;
         TaskDef t = tasks[index];
+        bool hasThird = (t.Anim != null && t.Anim.Length > 0)
+            || (t.Mem != null && t.Mem.Vars != null && t.Mem.Vars.Length > 0
+                && t.Mem.Steps != null && t.Mem.Steps.Length > 0);
+        if (hasThird)
+            return 3;
         bool hasSecond = !string.IsNullOrEmpty(t.Page2Zh) || !string.IsNullOrEmpty(t.Page2En);
         return hasSecond ? 2 : 1;
     }
@@ -637,10 +785,11 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (guidePage <= 0 || CurrentIndex < 0 || CurrentIndex >= tasks.Length)
             return;
         guidePage--;
+        ResetAnim();
         RefreshText();
     }
 
-    /// <summary>翻到下一页（手把手细节页）。</summary>
+    /// <summary>翻到下一页（手把手细节页 / 代码动画页）。</summary>
     private void NextPage()
     {
         if (!Active || finished || tasks == null)
@@ -650,7 +799,923 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (guidePage >= PageCountOf(CurrentIndex) - 1)
             return;
         guidePage++;
+        ResetAnim();
         RefreshText();
+    }
+
+    /// <summary>代码动画从头开始（换任务 / 换页时调用，避免停在上一个任务的中途）。</summary>
+    private void ResetAnim()
+    {
+        animTimer = 0f;
+        animStep = 0;
+        memBuiltIndex = -1;    // 内存舞台也从头演：强制下一帧重排
+        memBuiltStep = -1;
+    }
+
+    // ================== 第 3 页：代码动画（逐行高亮 + 旁白） ==================
+
+    /// <summary>本任务是否有第 3 页代码动画。</summary>
+    private bool HasAnimPage(int index)
+    {
+        return tasks != null && index >= 0 && index < tasks.Length
+            && tasks[index].Anim != null && tasks[index].Anim.Length > 0;
+    }
+
+    /// <summary>
+    /// 从任务正文里抽出「示例代码行」：第 1 页写法段的代码统一缩进 4 个空格，
+    /// 目标 / 提示 / 判定那几段顶格写 —— 所以「缩进 ≥ 4 空格」就是代码行，不用另存一份代码。
+    /// 固定读中文正文（两套语言的示例代码完全一致），避免切语言后动画行对不上。
+    /// </summary>
+    private static string[] ExampleCodeLines(TaskDef task, bool zh)
+    {
+        if (task == null)
+            return new string[0];
+        // 代码里的注释也要跟着语言走：英文模式读 BodyEn 的缩进行（两套示例代码行序、缩进完全一致），
+        // 万一某个任务没写英文正文，再回落到中文正文，绝不出现空白页。
+        if (!zh && !string.IsNullOrEmpty(task.BodyEn))
+        {
+            string[] en = IndentedCodeLines(task.BodyEn);
+            if (en.Length > 0)
+                return en;
+        }
+        if (string.IsNullOrEmpty(task.BodyZh))
+            return new string[0];
+        return IndentedCodeLines(task.BodyZh);
+    }
+
+    /// <summary>抽出「缩进 ≥ 4 空格」的行 —— 任务正文里代码行的统一约定。</summary>
+    private static string[] IndentedCodeLines(string body)
+    {
+        string[] raw = body.Replace("\r\n", "\n").Split('\n');
+        List<string> code = new List<string>(raw.Length);
+        for (int i = 0; i < raw.Length; i++)
+        {
+            string line = raw[i];
+            if (line.StartsWith("    ", System.StringComparison.Ordinal))
+                code.Add(line.Substring(4).TrimEnd());
+        }
+        return code.ToArray();
+    }
+
+    /// <summary>按特征子串在示例代码里找行；找不到就退回第 1 行（宁可高亮错行也不整页空掉）。</summary>
+    private static int FindAnimLine(string[] lines, string key, string keyEn = null)
+    {
+        if (lines == null || lines.Length == 0)
+            return 0;
+        int hit = FindLineByKey(lines, key);
+        if (hit >= 0)
+            return hit;
+        hit = FindLineByKey(lines, keyEn);   // 中文 Key 在英文示例代码里找不到时换英文子串
+        if (hit >= 0)
+            return hit;
+        return 0;
+    }
+
+    private static int FindLineByKey(string[] lines, string key)
+    {
+        if (lines == null || lines.Length == 0 || string.IsNullOrEmpty(key))
+            return -1;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].IndexOf(key, System.StringComparison.Ordinal) >= 0)
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>右栏：示例代码全文，当前执行的那一行用 ► 加高亮色标出来（每步重新生成一次即「动画」）。</summary>
+    private string BuildAnimCode(int index, bool zh)
+    {
+        string[] lines = ExampleCodeLines(tasks[index], zh);
+        if (lines.Length == 0)
+            return string.Empty;
+
+        AnimStep[] anim = tasks[index].Anim;
+        int step = Mathf.Clamp(animStep, 0, anim.Length - 1);
+        int hl = FindAnimLine(lines, anim[step].Key, anim[step].KeyEn);
+
+        StringBuilder sb = new StringBuilder(lines.Length * 48 + 96);
+        sb.Append(zh ? "【示例代码 · ► 就是现在执行到的那一行】\n\n" : "[Sample code - ► marks the line running now]\n\n");
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string no = (i + 1).ToString("00") + "  ";
+            if (i == hl)
+            {
+                sb.Append("<color=#5FD7FF><b>► ").Append(no).Append(lines[i]).Append("</b></color>\n");
+            }
+            else
+            {
+                sb.Append("  ").Append(no).Append(lines[i]).Append('\n');
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>左栏：动画旁白 —— 进度点 + 这一步在干什么 + 循环播放说明。</summary>
+    private string BuildAnimGuide(int index, bool zh)
+    {
+        AnimStep[] anim = tasks[index].Anim;
+        int step = Mathf.Clamp(animStep, 0, anim.Length - 1);
+        AnimStep cur = anim[step];
+
+        StringBuilder sb = new StringBuilder(420);
+        sb.Append(zh
+            ? "【这一页：代码动画 —— 让这段代码自己跑一遍】\n本页不用你敲代码，眼睛跟着右栏的 ► 走就行。"
+            : "[THIS PAGE: CODE ANIMATION - watch the code run itself]\nNothing to type here: just follow ► on the right.");
+
+        sb.Append("\n\n").Append(zh ? "进度 " : "Step ")
+          .Append(step + 1).Append('/').Append(anim.Length).Append("   ");
+        for (int i = 0; i < anim.Length; i++)
+            sb.Append(i <= step ? "●" : "○");
+
+        sb.Append("\n\n").Append(zh ? "▶ 这一步在做什么：\n" : "▶ What happens here:\n");
+        sb.Append(zh ? cur.Zh : cur.En);
+
+        sb.Append(zh
+            ? "\n\n（不会自动播放：按 ↓ 一步一步看，走到底再按一次回到第一步。想重看：翻回第 1 页再翻回本页即可。）"
+            : "\n(No auto-play: press ↓ to step through; after the last step it wraps to the first. To replay, flip back to page 1 and return here.)");
+        return sb.ToString();
+    }
+
+    // ================== 第 3 页：内存可视化舞台（manim 风格） ==================
+
+    /// <summary>本任务是否有内存可视化页（有它就用图形舞台，优先于旧的逐行高亮）。</summary>
+    private bool HasMemPage(int index)
+    {
+        return tasks != null && index >= 0 && index < tasks.Length
+            && tasks[index].Mem != null
+            && tasks[index].Mem.Vars != null && tasks[index].Mem.Vars.Length > 0
+            && tasks[index].Mem.Steps != null && tasks[index].Mem.Steps.Length > 0;
+    }
+
+    /// <summary>一段内存占几个字节（= 这一行要画几个格子）。</summary>
+    private static int CountBytes(MemVar v)
+    {
+        if (v == null || string.IsNullOrEmpty(v.Bytes))
+            return 1;
+        string[] parts = v.Bytes.Split(' ');
+        int n = 0;
+        for (int i = 0; i < parts.Length; i++)
+            if (!string.IsNullOrEmpty(parts[i]))
+                n++;
+        return Mathf.Max(1, n);
+    }
+
+    /// <summary>
+    /// 建内存舞台：顶部一行说明 + 中间一行行变量（每行 = 徽章 / 类型名牌 / 变量名 / 字节格 / 行下小字）
+    /// + 底部「当前执行的那行代码」与「这一拍在干什么」。
+    /// 整块正文区都归舞台，所有子件一次建好塞进池子，播放时只改颜色 / 文字 / 位置。
+    /// </summary>
+    private void BuildMemStage(RectTransform panelRt)
+    {
+        RectTransform root = CreateRect("MemStage", panelRt, new Vector2(0.5f, 0.5f), Vector2.zero,
+            new Vector2(0f, 0f), new Vector2(0.5f, 0.5f));
+        root.anchorMin = Vector2.zero;
+        root.anchorMax = Vector2.one;
+        root.pivot = new Vector2(0.5f, 0.5f);
+        // 内存页整块都是图，不需要给「写法 / 示例代码」留位，所以上下留白比文字栏窄一点：
+        // 上边到任务名那一行下面（-108，任务名占到 -124），下边只留一条呼吸位。
+        // 多出来的这几十像素正好让 4 行变量也放得下「行下小字」。
+        root.offsetMin = new Vector2(MemStageSideInset, MemStageBottomInset);
+        root.offsetMax = new Vector2(-MemStageSideInset, -MemStageTopInset);
+        memRoot = root;
+
+        // ---- 顶部：左边一句「怎么读这张图」，右边步数 ----
+        memHeaderText = CreateText("MemHeader", root, "", 17, UITheme.TextMuted, TextAnchor.MiddleLeft);
+        RectTransform hdr = memHeaderText.rectTransform;
+        hdr.anchorMin = new Vector2(0f, 1f);
+        hdr.anchorMax = new Vector2(1f, 1f);
+        hdr.pivot = new Vector2(0f, 1f);
+        hdr.anchoredPosition = Vector2.zero;
+        hdr.sizeDelta = new Vector2(-190f, MemHeaderH);
+        memHeaderText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        memHeaderText.verticalOverflow = VerticalWrapMode.Truncate;
+        memHeaderText.resizeTextForBestFit = true;
+        memHeaderText.resizeTextMinSize = 12;
+        memHeaderText.resizeTextMaxSize = 17;
+
+        memFootText = CreateText("MemFoot", root, "", 16, UITheme.TextDim, TextAnchor.MiddleRight);
+        RectTransform ftr = memFootText.rectTransform;
+        ftr.anchorMin = new Vector2(1f, 1f);
+        ftr.anchorMax = new Vector2(1f, 1f);
+        ftr.pivot = new Vector2(1f, 1f);
+        ftr.anchoredPosition = Vector2.zero;
+        ftr.sizeDelta = new Vector2(180f, MemHeaderH);
+        memFootText.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+        // ---- 中间：行池 ----
+        memRows = new MemRowUI[MemRowPool];
+        for (int i = 0; i < MemRowPool; i++)
+            memRows[i] = BuildMemRow(root, i);
+
+        // ---- 底部：旁白（最底） ----
+        memNoteText = CreateText("MemNote", root, "", 19, UITheme.TextBody, TextAnchor.UpperLeft);
+        RectTransform nr = memNoteText.rectTransform;
+        nr.anchorMin = new Vector2(0f, 1f);
+        nr.anchorMax = new Vector2(1f, 1f);
+        nr.pivot = new Vector2(0f, 1f);
+        nr.anchoredPosition = new Vector2(0f, 0f);   // 真实位置由 PlaceMemBottom 按内容高度摆
+        nr.sizeDelta = new Vector2(0f, MemNoteH);
+        memNoteText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        memNoteText.verticalOverflow = VerticalWrapMode.Truncate;
+        memNoteText.lineSpacing = 1.08f;
+        memNoteText.resizeTextForBestFit = true;
+        memNoteText.resizeTextMinSize = 12;
+        memNoteText.resizeTextMaxSize = 19;
+
+        // ---- 底部：执行台（旁白上方一条深色带，写「正在跑的那行代码」） ----
+        RectTransform exprRt = CreateRect("MemExprBg", root, new Vector2(0.5f, 1f), Vector2.zero,
+            new Vector2(0f, MemExprH), new Vector2(0.5f, 1f));
+        exprRt.anchorMin = new Vector2(0f, 1f);
+        exprRt.anchorMax = new Vector2(1f, 1f);
+        exprRt.pivot = new Vector2(0.5f, 1f);
+        exprRt.anchoredPosition = new Vector2(0f, 0f);   // 真实位置由 PlaceMemBottom 按内容高度摆
+        exprRt.sizeDelta = new Vector2(0f, MemExprH);
+        memExprRt = exprRt;
+        Image exprBg = exprRt.gameObject.AddComponent<Image>();
+        exprBg.sprite = WhiteSprite();
+        exprBg.color = UITheme.WithAlpha(UITheme.CodeBg, 0.96f);
+        exprBg.raycastTarget = false;
+
+        memExprText = CreateText("MemExpr", exprRt, "", 19, UITheme.Accent, TextAnchor.MiddleLeft);
+        RectTransform er = memExprText.rectTransform;
+        er.anchorMin = Vector2.zero;
+        er.anchorMax = Vector2.one;
+        er.offsetMin = new Vector2(14f, 0f);
+        er.offsetMax = new Vector2(-340f, 0f);   // 右侧让出键位提示的位置，代码行不会压到提示上
+        memExprText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        memExprText.verticalOverflow = VerticalWrapMode.Truncate;
+        memExprText.resizeTextForBestFit = true;
+        memExprText.resizeTextMinSize = 12;
+        memExprText.resizeTextMaxSize = 19;
+
+        // 执行台右侧的键位提示（多步任务才出现）：告诉玩家「按下 ↓ 观看下一个」；
+        // 玩家点回代码区、输入框握了焦点之后，↓ 归代码用，提示随之改成「↓ 代码模式」。
+        memKeyHintText = CreateText("MemKeyHint", exprRt, "", 17, UITheme.TextMuted, TextAnchor.MiddleRight);
+        RectTransform kh = memKeyHintText.rectTransform;
+        kh.anchorMin = new Vector2(1f, 0f);
+        kh.anchorMax = new Vector2(1f, 1f);
+        kh.pivot = new Vector2(1f, 0.5f);
+        kh.anchoredPosition = new Vector2(-14f, 0f);
+        kh.sizeDelta = new Vector2(320f, 0f);
+        memKeyHintText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        memKeyHintText.verticalOverflow = VerticalWrapMode.Truncate;
+        memKeyHintText.resizeTextForBestFit = true;
+        memKeyHintText.resizeTextMinSize = 12;
+        memKeyHintText.resizeTextMaxSize = 17;
+
+        memRoot.gameObject.SetActive(false);
+    }
+
+    /// <summary>建一行：整块底 + 徽章 + 类型名牌 + 变量名 + 12 个字节格 + 行下小字。全部一次建好，之后只改内容。</summary>
+    private MemRowUI BuildMemRow(RectTransform parent, int idx)
+    {
+        MemRowUI row = new MemRowUI();
+
+        RectTransform root = CreateRect("MemRow" + idx, parent, new Vector2(0f, 1f), Vector2.zero,
+            new Vector2(0f, 88f), new Vector2(0f, 1f));
+        root.anchorMin = new Vector2(0f, 1f);
+        root.anchorMax = new Vector2(1f, 1f);
+        root.pivot = new Vector2(0f, 1f);
+        row.Root = root;
+
+        RectTransform frame = CreateRect("Frame", root, new Vector2(0f, 1f), Vector2.zero,
+            new Vector2(0f, 88f), new Vector2(0f, 1f));
+        frame.anchorMin = new Vector2(0f, 0f);
+        frame.anchorMax = new Vector2(1f, 1f);
+        frame.pivot = new Vector2(0f, 1f);
+        frame.offsetMin = new Vector2(-8f, -2f);
+        frame.offsetMax = new Vector2(8f, 2f);
+        Image fbg = frame.gameObject.AddComponent<Image>();
+        fbg.sprite = WhiteSprite();
+        fbg.color = UITheme.WithAlpha(UITheme.PanelDeep, 0f);
+        fbg.raycastTarget = false;
+        row.FrameBg = fbg;
+
+        row.Badge = CreateText("Badge", root, "", 13, UITheme.PanelDeep, TextAnchor.MiddleCenter);
+        row.Badge.horizontalOverflow = HorizontalWrapMode.Wrap;
+        row.Badge.resizeTextForBestFit = true;
+        row.Badge.resizeTextMinSize = 10;
+        row.Badge.resizeTextMaxSize = 13;
+
+        RectTransform typeBgRt = CreateRect("TypeBg", root, new Vector2(0f, 1f), Vector2.zero,
+            new Vector2(90f, 26f), new Vector2(0f, 1f));
+        Image typeBg = typeBgRt.gameObject.AddComponent<Image>();
+        typeBg.sprite = WhiteSprite();
+        typeBg.color = UITheme.WithAlpha(UITheme.Accent, 0.16f);
+        typeBg.raycastTarget = false;
+        row.TypeBg = typeBg;
+
+        row.TypeText = CreateText("TypeText", typeBgRt, "", 14, UITheme.Accent, TextAnchor.MiddleCenter);
+        row.TypeText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        row.TypeText.verticalOverflow = VerticalWrapMode.Truncate;
+        row.TypeText.resizeTextForBestFit = true;
+        row.TypeText.resizeTextMinSize = 10;
+        row.TypeText.resizeTextMaxSize = 14;
+
+        row.NameText = CreateText("Name", root, "", 18, UITheme.TextPrimary, TextAnchor.MiddleLeft);
+        row.NameText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        row.NameText.verticalOverflow = VerticalWrapMode.Truncate;
+        row.NameText.resizeTextForBestFit = true;
+        row.NameText.resizeTextMinSize = 11;
+        row.NameText.resizeTextMaxSize = 18;
+
+        row.CellRt = new RectTransform[MemCellPerRow];
+        row.CellBg = new Image[MemCellPerRow];
+        row.CellAddr = new Text[MemCellPerRow];
+        row.CellVal = new Text[MemCellPerRow];
+        row.CellPos = new Vector2[MemCellPerRow];
+        for (int i = 0; i < MemCellPerRow; i++)
+        {
+            RectTransform cr = CreateRect("Cell" + i, root, new Vector2(0f, 1f), Vector2.zero,
+                new Vector2(64f, 64f), new Vector2(0f, 1f));
+            Image cbg = cr.gameObject.AddComponent<Image>();
+            cbg.sprite = WhiteSprite();
+            cbg.color = UITheme.WithAlpha(UITheme.PanelRaised, 0.92f);
+            cbg.raycastTarget = false;
+
+            Text addr = CreateText("Addr", cr, "", 10, UITheme.TextDim, TextAnchor.MiddleCenter);
+            RectTransform ar = addr.rectTransform;
+            ar.anchorMin = new Vector2(0f, 1f);
+            ar.anchorMax = new Vector2(1f, 1f);
+            ar.pivot = new Vector2(0.5f, 1f);
+            ar.anchoredPosition = new Vector2(0f, -1f);
+            ar.sizeDelta = new Vector2(-2f, 13f);
+            addr.horizontalOverflow = HorizontalWrapMode.Wrap;
+            addr.verticalOverflow = VerticalWrapMode.Truncate;
+            addr.resizeTextForBestFit = true;
+            addr.resizeTextMinSize = 8;
+            addr.resizeTextMaxSize = 10;
+
+            Text val = CreateText("Val", cr, "", 22, UITheme.TextPrimary, TextAnchor.MiddleCenter);
+            RectTransform vr = val.rectTransform;
+            vr.anchorMin = Vector2.zero;
+            vr.anchorMax = Vector2.one;
+            vr.pivot = new Vector2(0.5f, 0.5f);
+            vr.offsetMin = new Vector2(1f, 2f);
+            vr.offsetMax = new Vector2(-1f, -14f);
+            val.horizontalOverflow = HorizontalWrapMode.Wrap;
+            val.verticalOverflow = VerticalWrapMode.Truncate;
+            val.resizeTextForBestFit = true;
+            val.resizeTextMinSize = 9;
+            val.resizeTextMaxSize = 22;
+
+            row.CellRt[i] = cr;
+            row.CellBg[i] = cbg;
+            row.CellAddr[i] = addr;
+            row.CellVal[i] = val;
+            row.CellPos[i] = Vector2.zero;
+            cr.gameObject.SetActive(false);
+        }
+
+        row.NoteText = CreateText("Note", root, "", 20, UITheme.TextBody, TextAnchor.MiddleLeft);
+        row.NoteText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        row.NoteText.verticalOverflow = VerticalWrapMode.Truncate;
+        row.NoteText.resizeTextForBestFit = true;
+        row.NoteText.resizeTextMinSize = 12;
+        row.NoteText.resizeTextMaxSize = 20;
+
+        root.gameObject.SetActive(false);
+        return row;
+    }
+
+    /// <summary>
+    /// 按当前步骤重排舞台：决定这一拍内存里有几段、每段占几格、每格写什么值。
+    /// 只在步骤变化（或面板高度变了）时调用，平时只做补间，避免每帧重设文字。
+    /// 每一步都可以用 Patch 改写某段内存的字节 —— 所以「for 里 i 从 0 变到 1 变到 2」是真的同一格在变，不是新开一段。
+    /// </summary>
+    private void RebuildMemStage(int index, int step)
+    {
+        if (!HasMemPage(index) || memRoot == null || memRows == null)
+            return;
+
+        MemScene scene = tasks[index].Mem;
+        int n = Mathf.Clamp(step, 0, scene.Steps.Length - 1);
+        MemStep cur = scene.Steps[n];
+        bool zh = Localization.IsChinese;
+
+        // 刚 SetActive 的那一帧，自身 rect 有时还没算出宽高：退而用宿主面板的实测尺寸，
+        // 实在拿不到才用半屏常量。宁可先按小的排，也不能按大的排 —— 排大了行会压到底部说明上。
+        RectTransform memHost = memRoot.parent as RectTransform;
+        float availW = memRoot.rect.width;
+        float availH = memRoot.rect.height;
+        if (availW < 120f)
+            availW = (memHost != null && memHost.rect.width >= 120f ? memHost.rect.width : ReferenceWidth) - 52f;
+        if (availH < 120f)
+            availH = (memHost != null && memHost.rect.height >= 120f
+                ? memHost.rect.height
+                : SplitHalfHeight()) - GuideBodyTopInset - GuideBodyBottomInset;
+
+        int reveal = Mathf.Clamp(cur.Reveal, 0, Mathf.Min(scene.Vars.Length, MemRowPool));
+        int rows = Mathf.Max(1, reveal);
+
+        // 排版用的高度：面板被蓝色长条拖矮时，内容不往上吸，仍按「基准高度」这块地排，
+        // 于是底部的执行台 / 旁白顺着往下走出画面，而不是钉在原地看着字被越挤越窄。
+        float flowH = Mathf.Max(availH, MemStageBaselineHeight());
+        PlaceMemBottom(flowH);
+
+        // 底部固定占位：旁白 + 执行台；其余高度留给行区
+        float bottomH = MemNoteH + MemNoteGapY + MemExprH + 12f;
+        float rowsArea = Mathf.Max(90f, flowH - MemHeaderH - 10f - bottomH);
+        float gap = MemRowGapY;
+        // 均分 + 先收行间距、再收行高：任何情况下 totalH 都不会超过 rowsArea，
+        // 于是行永远不会压到底部的执行台 / 旁白上（旧写法把 blockH 抬到 56 又保底 gap，反而整体溢出）。
+        float blockH = Mathf.Min((rowsArea - gap * (rows - 1)) / rows, 122f);
+        if (blockH < 56f)
+        {
+            gap = rows > 1 ? 6f : 0f;
+            blockH = Mathf.Max(34f, (rowsArea - gap * (rows - 1)) / rows);
+        }
+        float totalH = rows * blockH + gap * (rows - 1);
+        float firstTop = -MemHeaderH - 10f - Mathf.Max(0f, (rowsArea - totalH) * 0.5f);
+
+        // 左侧标签列：徽章 / 类型名牌 / 变量名，窗口窄时按比例收
+        float leftW = Mathf.Min(330f, Mathf.Max(210f, availW * 0.44f));
+        float badgeW = leftW >= 300f ? 54f : 42f;
+        float typeW = Mathf.Clamp(leftW * 0.30f, 62f, 98f);
+        float nameW = Mathf.Max(60f, leftW - badgeW - typeW - 6f);
+        float cellX = badgeW + typeW + nameW + 8f;
+
+        int maxBytes = 1;
+        for (int i = 0; i < reveal; i++)
+            if (scene.Vars[i] != null)
+                maxBytes = Mathf.Max(maxBytes, Mathf.Clamp(CountBytes(scene.Vars[i]), 1, MemCellPerRow));
+        float span = Mathf.Max(100f, availW - cellX - 4f);
+        float cellW = Mathf.Clamp((span - MemCellGapX * (maxBytes - 1)) / maxBytes, 16f, 88f);
+        // 格数多到摆不下时，先让变量名列让出宽度（名字可以截短，格子不能被挤出面板）
+        float needW = cellX + cellW * maxBytes + MemCellGapX * (maxBytes - 1);
+        if (needW > availW - 4f && nameW > 90f)
+        {
+            nameW -= Mathf.Min(nameW - 90f, needW - (availW - 4f));
+            cellX = badgeW + typeW + nameW + 8f;
+            span = Mathf.Max(100f, availW - cellX - 4f);
+            cellW = Mathf.Clamp((span - MemCellGapX * (maxBytes - 1)) / maxBytes, 16f, 88f);
+        }
+
+        // 行说明搬到了字节格右侧：先给它留出 300 的宽度，格子太宽时先收格子（格子最小 30 仍放得下 4 位十六进制）
+        float noteReserve = zh ? 300f : 400f;   // 英文行说明比中文长，右侧多留点宽度
+        bool anyNote = false;
+        for (int i = 0; i < reveal; i++)
+            if (scene.Vars[i] != null && !string.IsNullOrEmpty(mNoteText(scene.Vars[i], zh)))
+                anyNote = true;
+        if (anyNote)
+        {
+            float cellByNote = (availW - cellX - 12f - noteReserve - MemCellGapX * (maxBytes - 1)) / maxBytes;
+            if (cellByNote >= 30f)
+                cellW = Mathf.Min(cellW, cellByNote);
+        }
+        // 行说明统一从「最宽那一行的格子右边缘」开始，几行说明才会左对齐成一条竖线，不会参差不齐
+        float noteX = cellX + maxBytes * (cellW + MemCellGapX) + 12f;
+
+        // 先算好每一步实际要显示的字节（本步 Patch 会覆盖原始值）
+        string[][] bytes = new string[reveal][];
+        for (int i = 0; i < reveal; i++)
+        {
+            MemVar mv = scene.Vars[i];
+            int cnt = mv == null ? 1 : Mathf.Clamp(CountBytes(mv), 1, MemCellPerRow);
+            bytes[i] = new string[cnt];
+            string[] parts = mv == null || string.IsNullOrEmpty(mv.Bytes)
+                ? new string[0] : mv.Bytes.ToUpperInvariant().Split(' ');
+            for (int b = 0; b < cnt; b++)
+                bytes[i][b] = b < parts.Length && !string.IsNullOrEmpty(parts[b]) ? parts[b] : "??";
+        }
+        if (cur.PatchVar != null && cur.PatchBytes != null)
+        {
+            int pk = Mathf.Min(cur.PatchVar.Length, cur.PatchBytes.Length);
+            for (int k = 0; k < pk; k++)
+            {
+                int vi = cur.PatchVar[k];
+                if (vi < 0 || vi >= reveal)
+                    continue;
+                string[] parts = string.IsNullOrEmpty(cur.PatchBytes[k])
+                    ? new string[0] : cur.PatchBytes[k].ToUpperInvariant().Split(' ');
+                for (int b = 0; b < bytes[vi].Length; b++)
+                    bytes[vi][b] = b < parts.Length && !string.IsNullOrEmpty(parts[b]) ? parts[b] : "??";
+            }
+        }
+
+        // 行池显隐
+        for (int i = 0; i < MemRowPool; i++)
+        {
+            if (memRows[i] != null && memRows[i].Root != null && memRows[i].Root.gameObject.activeSelf != (i < reveal))
+                memRows[i].Root.gameObject.SetActive(i < reveal);
+        }
+
+        int addr = 0x100;   // 地址只是示意：真实地址由系统决定，这里从 0x100 起按字节往上数
+        for (int vi = 0; vi < reveal; vi++)
+        {
+            MemRowUI row = memRows[vi];
+            MemVar mv = scene.Vars[vi] ?? new MemVar();
+            if (row == null || row.Root == null)
+                continue;
+
+            int cnt = bytes[vi].Length;
+            // 行说明从「格子下方的一行小字」改成「格子右侧的一段大字」：行高不再分给小字，
+            // 右侧原本空着的区域正好用来放大字号（14 → 20），再也不会看不清。
+            float cellH = Mathf.Max(28f, blockH - 4f);
+            float noteLeft = noteX;
+            // 英文模式优先用英文文案，没写就回落到中文，绝不出现空白
+            string badgeText = mBadgeText(mv, zh);
+            string typeText = mTypeText(mv, zh);
+            string nameText = mNameText(mv, zh);
+            string noteText = mNoteText(mv, zh);
+            bool hasNote = !string.IsNullOrEmpty(noteText) && availW - noteLeft - 6f >= 120f;
+
+            row.Root.anchoredPosition = new Vector2(0f, firstTop - vi * (blockH + gap));
+            row.Root.sizeDelta = new Vector2(0f, blockH);
+            row.Root.localScale = Vector3.one;
+
+            // 整块底：幽灵行（代码里有、内存里没有）给一点深色，让它看起来「虚」
+            if (row.FrameBg != null)
+                row.FrameBg.color = mv.Ghost
+                    ? UITheme.WithAlpha(UITheme.PanelDeep, 0.28f)   // 压淡一点就够：「虚」交给虚线格表达，不牺牲字的可读性
+                    : UITheme.WithAlpha(UITheme.PanelDeep, 0f);
+
+            // 徽章
+            if (row.Badge != null)
+            {
+                bool hasBadge = !string.IsNullOrEmpty(badgeText);
+                if (row.Badge.gameObject.activeSelf != hasBadge)
+                    row.Badge.gameObject.SetActive(hasBadge);
+                if (hasBadge)
+                {
+                    RectTransform br = row.Badge.rectTransform;
+                    br.anchorMin = new Vector2(0f, 0f);
+                    br.anchorMax = new Vector2(0f, 0f);
+                    br.pivot = new Vector2(0f, 0f);
+                    br.anchoredPosition = new Vector2(0f, cellH * 0.5f - 10f);
+                    br.sizeDelta = new Vector2(badgeW - 8f, 20f);
+                    SetLabel(row.Badge, badgeText);
+                    row.Badge.color = UITheme.Purple;   // 幽灵行（注释 / 方法定义）文字同样正常亮度，只是格子画成虚线
+                }
+            }
+
+            // 类型名牌
+            if (row.TypeBg != null)
+            {
+                RectTransform tr = row.TypeBg.rectTransform;
+                tr.anchorMin = new Vector2(0f, 0f);
+                tr.anchorMax = new Vector2(0f, 0f);
+                tr.pivot = new Vector2(0f, 0f);
+                tr.anchoredPosition = new Vector2(badgeW, cellH * 0.5f - 13f);
+                tr.sizeDelta = new Vector2(typeW - 8f, 26f);
+                row.TypeBg.color = UITheme.WithAlpha(UITheme.Accent, mv.Ghost ? 0.10f : 0.16f);
+            }
+            if (row.TypeText != null)
+            {
+                SetLabel(row.TypeText, typeText ?? "");
+                row.TypeText.color = UITheme.Accent;
+            }
+
+            // 变量名
+            if (row.NameText != null)
+            {
+                RectTransform nr2 = row.NameText.rectTransform;
+                nr2.anchorMin = new Vector2(0f, 0f);
+                nr2.anchorMax = new Vector2(0f, 0f);
+                nr2.pivot = new Vector2(0f, 0f);
+                nr2.anchoredPosition = new Vector2(badgeW + typeW, cellH * 0.5f - 12f);
+                nr2.sizeDelta = new Vector2(nameW, 24f);
+                SetLabel(row.NameText, nameText ?? "");
+                row.NameText.color = UITheme.TextPrimary;
+            }
+
+            // 字节格
+            for (int b = 0; b < MemCellPerRow; b++)
+            {
+                bool show = b < cnt;
+                if (row.CellRt[b] == null)
+                    continue;
+                if (row.CellRt[b].gameObject.activeSelf != show)
+                    row.CellRt[b].gameObject.SetActive(show);
+                if (!show)
+                    continue;
+
+                Vector2 pos = new Vector2(cellX + b * (cellW + MemCellGapX), 0f);
+                row.CellPos[b] = pos;
+                row.CellRt[b].anchoredPosition = pos;
+                row.CellRt[b].sizeDelta = new Vector2(cellW, cellH);
+                row.CellRt[b].localScale = Vector3.one;
+
+                string hex = bytes[vi][b];
+                bool unknown = hex == "??";
+                if (row.CellAddr[b] != null)
+                    row.CellAddr[b].text = mv.Ghost ? "—" : "0x" + (addr + b).ToString("X3");
+                if (row.CellVal[b] != null)
+                {
+                    SetLabel(row.CellVal[b], unknown ? (mv.Ghost ? "--" : "??") : hex);
+                    row.CellVal[b].color = mv.Ghost ? UITheme.TextBody
+                        : (unknown ? UITheme.WithAlpha(UITheme.TextDim, 0.6f) : UITheme.TextPrimary);
+                }
+                if (row.CellBg[b] != null)
+                    row.CellBg[b].color = mv.Ghost
+                        ? UITheme.WithAlpha(UITheme.TextDim, 0.10f)
+                        : UITheme.WithAlpha(UITheme.PanelRaised, 0.92f);
+            }
+            if (!mv.Ghost)
+                addr += cnt;
+
+            // 行说明：贴在字节格右侧、垂直居中，字号 20（自适应最多 20 / 最少 13）
+            if (row.NoteText != null)
+            {
+                if (row.NoteText.gameObject.activeSelf != hasNote)
+                    row.NoteText.gameObject.SetActive(hasNote);
+                if (hasNote)
+                {
+                    RectTransform nrt = row.NoteText.rectTransform;
+                    nrt.anchorMin = new Vector2(0f, 0f);
+                    nrt.anchorMax = new Vector2(1f, 0f);
+                    nrt.pivot = new Vector2(0f, 0f);
+                    nrt.anchoredPosition = new Vector2(noteLeft, 2f);
+                    nrt.sizeDelta = new Vector2(-(noteLeft + 6f), Mathf.Max(24f, cellH - 4f));
+                    SetLabel(row.NoteText, noteText);
+                    row.NoteText.color = UITheme.TextSub;
+                }
+            }
+        }
+
+        // 顶部说明与步数
+        if (memHeaderText != null)
+            SetLabel(memHeaderText, zh
+                ? "一格 = 1 字节；int 占 4 格、char 占 1 格，地址从 0x100 起递增。\n3 写成 0x00000003，小端存放 = 低字节在低地址，所以从 0x100 往高读是 03 00 00 00"
+                : "1 box = 1 byte. int = 4 boxes, char = 1, addresses grow from 0x100.\n3 is 0x00000003; little-endian keeps the low byte at the low address, so reading up from 0x100 gives 03 00 00 00.");
+        if (memFootText != null)
+            SetLabel(memFootText, (zh ? "第 " : "Step ") + (n + 1) + "/" + scene.Steps.Length + (zh ? " 步" : ""));
+        if (memExprText != null)
+        {
+            // 代码行里的注释同样跟语言走：英文模式优先用 ExprEn，没写才回落到中文原行
+            string expr = (!zh && !string.IsNullOrEmpty(cur.ExprEn)) ? cur.ExprEn : cur.Expr;
+            SetLabel(memExprText, string.IsNullOrEmpty(expr) ? "" : "▶  " + expr);
+        }
+        if (memNoteText != null)
+            SetLabel(memNoteText, zh ? cur.Zh : cur.En);
+        RefreshMemKeyHint(zh, scene.Steps.Length);
+    }
+
+    /// <summary>
+    /// 执行台右侧的键位提示：多步任务才提示「按下 ↓ 观看下一个」；
+    /// 玩家点回代码区（输入框握住焦点）之后，↓ 归代码用，提示改成「↓ 代码模式」，绝不抢键。
+    /// </summary>
+    private void RefreshMemKeyHint(bool zh, int stepCount)
+    {
+        if (memKeyHintText == null)
+            return;
+
+        bool codeMode = editor != null && editor.IsOpen && editor.IsCodeInputFocused;
+        string s;
+        if (stepCount <= 1)
+            s = string.Empty;
+        else if (codeMode)
+            s = zh ? "↓ 代码模式（移动光标）" : "↓ caret mode";
+        else
+            s = zh ? "↑↓ 看步骤   ←→ 翻页" : "↑↓ steps   ←→ pages";
+
+        bool show = !string.IsNullOrEmpty(s);
+        if (s == memKeyHintCache && memKeyHintText.gameObject.activeSelf == show)
+            return;
+        memKeyHintCache = s;
+        if (memKeyHintText.gameObject.activeSelf != show)
+            memKeyHintText.gameObject.SetActive(show);
+        if (show)
+        {
+            SetLabel(memKeyHintText, s);
+            memKeyHintText.color = codeMode ? UITheme.TextMuted : UITheme.Accent;
+        }
+    }
+
+    /// <summary>
+    /// 内存页的手动步进：↓ 下一步、↑ 上一步（到底 / 到顶循环）。
+    /// 只在「代码输入框没有焦点」时归教学卡用；玩家一旦点回代码区，本方法直接返回 ——
+    /// 上下键完全交回代码编辑器移动光标，不会被拿去看动画。
+    /// </summary>
+    private void HandleMemStepKey()
+    {
+        if (!Active || finished || tasks == null)
+            return;
+        if (guidePage < 2)
+            return;
+        int index = CurrentIndex;
+        if (!HasMemPage(index))
+            return;
+        if (editor == null || !editor.IsOpen)
+            return;
+        if (editor.IsCodeInputFocused)
+            return;                      // 代码区握着焦点：上下键是光标，不是翻页
+
+        bool next = Input.GetKeyDown(KeyCode.DownArrow);
+        bool prev = Input.GetKeyDown(KeyCode.UpArrow);
+        if (!next && !prev)
+            return;
+
+        int count = tasks[index].Mem.Steps.Length;
+        if (count <= 1)
+            return;
+
+        // ↓ 往后、↑ 往前，都在首尾循环，不用记「到底了没」
+        animStep = next ? (animStep + 1) % count : (animStep - 1 + count) % count;
+        animTimer = 0f;                  // 手动翻过之后重新计时，别刚翻完又被自动推进
+        RebuildMemStage(index, animStep);
+        AnimateMemStage(1f, index, animStep);
+    }
+
+    /// <summary>
+    /// 补间：新出现的一段从右侧滑进来，正在被写入的那几个字节脉动发光 ——
+    /// 让「内存里多出了一段」「这一格的值被改写了」这两件事都是看得见的。
+    /// 全程只改颜色 / 位置 / 缩放，不碰文字，开销极小。
+    /// </summary>
+    private void AnimateMemStage(float t, int index, int step)
+    {
+        if (!HasMemPage(index) || memRoot == null || memRows == null || tasks[index].Mem == null)
+            return;
+
+        MemScene scene = tasks[index].Mem;
+        int n = Mathf.Clamp(step, 0, scene.Steps.Length - 1);
+        MemStep cur = scene.Steps[n];
+        int reveal = Mathf.Clamp(cur.Reveal, 0, Mathf.Min(scene.Vars.Length, MemRowPool));
+        int prevReveal = n > 0 ? Mathf.Clamp(scene.Steps[n - 1].Reveal, 0, Mathf.Min(scene.Vars.Length, MemRowPool)) : 0;
+
+        float fade = Mathf.Clamp01(t * MemStepInterval / Mathf.Max(0.05f, MemFadeTime));
+        fade = fade * fade * (3f - 2f * fade);                       // smoothstep：起步柔和、落位干脆
+        float pulse = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 5.2f);
+
+        for (int vi = 0; vi < reveal; vi++)
+        {
+            MemRowUI row = memRows[vi];
+            if (row == null || row.Root == null || !row.Root.gameObject.activeSelf)
+                continue;
+
+            bool isNew = vi >= prevReveal;
+            if (row.Root != null)
+                row.Root.anchoredPosition = new Vector2(isNew ? (1f - fade) * 34f : 0f, row.Root.anchoredPosition.y);
+
+            bool writing = vi == cur.Write;
+            int cnt = row.CellRt == null ? 0 : row.CellRt.Length;
+            for (int b = 0; b < cnt; b++)
+            {
+                if (row.CellRt[b] == null || !row.CellRt[b].gameObject.activeSelf)
+                    continue;
+                if (row.CellBg[b] == null)
+                    continue;
+                if (writing)
+                {
+                    float glow = 0.16f + 0.30f * pulse;
+                    row.CellBg[b].color = UITheme.WithAlpha(UITheme.Accent, glow);
+                    if (row.CellVal[b] != null)
+                        row.CellVal[b].color = UITheme.AccentSoft;
+                }
+                else
+                {
+                    MemVar mv = scene.Vars[vi];
+                    bool ghost = mv != null && mv.Ghost;
+                    row.CellBg[b].color = ghost
+                        ? UITheme.WithAlpha(UITheme.TextDim, 0.10f)
+                        : UITheme.WithAlpha(UITheme.PanelRaised, 0.92f);
+                    if (row.CellVal[b] != null)
+                        row.CellVal[b].color = ghost ? UITheme.TextBody : UITheme.TextPrimary;
+                }
+            }
+        }
+    }
+
+    /// <summary>第 3 页（内存页）每帧驱动：按真实时间推进步骤，并做补间；编辑器打开时 timeScale=0，所以用 unscaledDeltaTime。</summary>
+    private void AnimMemFrame()
+    {
+        int index = CurrentIndex;
+        if (!HasMemPage(index) || memRoot == null)
+            return;
+
+        MemScene scene = tasks[index].Mem;
+        int count = scene.Steps.Length;
+        if (count <= 0)
+            return;
+
+        // 不自动播放：步骤只由玩家按 ↓ 手动推进（HandleMemStepKey）。
+        // 这里只让计时器跑到满格后停住，好让「新行滑入 / 写入字节脉动」这一段补间自己播完一遍。
+        animTimer = Mathf.Min(animTimer + Time.unscaledDeltaTime, MemStepInterval);
+
+        int step = Mathf.Clamp(animStep, 0, count - 1);
+        float h = memRoot.rect.height;
+        if (memBuiltIndex != index || memBuiltStep != step || Mathf.Abs(memBuiltH - h) > 1f)
+            RebuildMemStage(index, step);
+
+        AnimateMemStage(Mathf.Clamp01(animTimer / MemStepInterval), index, step);
+
+        // 焦点会在「代码区 ↔ 教学卡」之间随时切换，键位提示跟着变：
+        // 在代码区就写「↓ 代码模式」，在教学卡上才写「按下 ↓ 观看下一个」。
+        RefreshMemKeyHint(Localization.IsChinese, count);
+    }
+
+    /// <summary>
+    /// 第 3 页的时间驱动入口。两种第 3 页都从这里走：
+    /// 有内存可视化场景（Mem）→ 走图形舞台 AnimMemFrame（它自己管步骤与补间）；
+    /// 否则回落到旧的「逐行高亮 + 旁白」。
+    /// </summary>
+    private void AdvanceAnim()
+    {
+        if (!Active || finished || guidePage < 2 || tasks == null)
+            return;
+        if (CurrentIndex < 0 || CurrentIndex >= tasks.Length)
+            return;
+
+        if (HasMemPage(CurrentIndex))
+        {
+            HandleMemStepKey();   // 先吃 ↓ 手动步进（玩家在代码区时它自己会让开，把 ↓ 交回代码编辑器）
+            AnimMemFrame();
+            return;
+        }
+
+        // 旧的「逐行高亮」页同样改成手动：↓ 一步一步看，绝不偷偷自动播
+        HandleAnimStepKey();
+    }
+
+    /// <summary>
+    /// 旧「逐行高亮」页的手动步进：↓ 下一步、↑ 上一步（首尾循环）。
+    /// 只在代码区没握焦点时归教学卡用；玩家点回代码区之后本方法直接返回，上下键完全交回代码编辑器移动光标。
+    /// </summary>
+    private void HandleAnimStepKey()
+    {
+        if (!Active || finished || tasks == null || guidePage < 2)
+            return;
+        int index = CurrentIndex;
+        if (index < 0 || index >= tasks.Length)
+            return;
+        AnimStep[] anim = tasks[index].Anim;
+        if (anim == null || anim.Length < 2)
+            return;
+        if (editor == null || !editor.IsOpen || editor.IsCodeInputFocused)
+            return;
+
+        bool next = Input.GetKeyDown(KeyCode.DownArrow);
+        bool prev = Input.GetKeyDown(KeyCode.UpArrow);
+        if (!next && !prev)
+            return;
+
+        animStep = next ? (animStep + 1) % anim.Length : (animStep - 1 + anim.Length) % anim.Length;
+        animTimer = 0f;
+        RefreshAnimFrame();
+    }
+
+    /// <summary>
+    /// ← / → 翻页：左退回上一页、右进到下一页（第 3 页的细节页也算一页）。
+    /// 代码区握着焦点时不抢键 —— 那时光标要在代码里左右移动。
+    /// </summary>
+    private void HandlePageNavKey()
+    {
+        if (!Active || finished || tasks == null)
+            return;
+        if (CurrentIndex < 0 || CurrentIndex >= tasks.Length)
+            return;
+        if (editor != null && editor.IsOpen && editor.IsCodeInputFocused)
+            return;
+
+        if (Input.GetKeyDown(KeyCode.LeftArrow))
+            PrevPage();
+        else if (Input.GetKeyDown(KeyCode.RightArrow))
+            NextPage();
+    }
+
+    /// <summary>只重画两栏文案（不动布局 / 字号），够动画用且开销小。</summary>
+    private void RefreshAnimFrame()
+    {
+        if (tasks == null)
+            return;
+        int index = CurrentIndex;
+        if (index < 0 || index >= tasks.Length || !HasAnimPage(index))
+            return;
+
+        bool zh = Localization.IsChinese;
+        if (bodyText != null)
+            bodyText.text = BuildGuideBody(index, zh, BuildAnimGuide(index, zh));
+        if (sampleText != null)
+            sampleText.text = BuildAnimCode(index, zh);
+    }
+
+    private static string mNoteText(MemVar v, bool zh)
+    {
+        if (v == null)
+            return null;
+        return (!zh && !string.IsNullOrEmpty(v.NoteEn)) ? v.NoteEn : v.Note;
+    }
+
+    private static string mNameText(MemVar v, bool zh)
+    {
+        if (v == null)
+            return null;
+        return (!zh && !string.IsNullOrEmpty(v.NameEn)) ? v.NameEn : v.Name;
+    }
+
+    private static string mTypeText(MemVar v, bool zh)
+    {
+        if (v == null)
+            return null;
+        return (!zh && !string.IsNullOrEmpty(v.TypeEn)) ? v.TypeEn : v.Type;
+    }
+
+    private static string mBadgeText(MemVar v, bool zh)
+    {
+        if (v == null)
+            return null;
+        return (!zh && !string.IsNullOrEmpty(v.BadgeEn)) ? v.BadgeEn : v.Badge;
     }
 
     /// <summary>刷新翻页条：该任务有多页时才显示，并按当前页码更新文字与按钮可点状态（index = -1 表示隐藏）。</summary>
@@ -836,6 +1901,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         int completed = CurrentIndex + 1;
         CurrentIndex++;
         guidePage = 0; // 新任务从第 1 页开始
+        ResetAnim();   // 动画也从头开演
 
         // 断点续玩：章节（任务）推进即把「关卡 + 分区 + 章节」写入存档并 Save()
         //   · 语法课（Course.Grammar）= Level 1 - Part 3，API 课（Course.Api）= Level 2 - Part 2；
@@ -963,6 +2029,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         RefreshTextCore();
         RefreshFonts();
+        // 切语言后内存页必须重排：行说明 / 类型名牌都是按语言取的，不重置就会停在旧语言上
+        memBuiltIndex = -1;
+        memBuiltStep = -1;
+        memKeyHintCache = null;
         // 文案变化后重新排版：面板高度仍是固定半屏（不随文案变），只按新文案重算正文自适应字号
         ApplySplitLayout();
     }
@@ -1090,6 +2160,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
                       : "✔ Course finished (" + doneCount + "/" + TaskCount + ")");
             if (bodyText != null)
             {
+                if (!bodyText.gameObject.activeSelf)
+                    bodyText.gameObject.SetActive(true);   // 内存页隐藏过，结业文案要能看见
                 bodyText.text = CurrentCourse == Course.Api
                     ? (zh
                         ? "你已经用到了全部炮台 API：GetAllObjects、TowerObjectInfo 的 Index / Type / HP / Position /\n"
@@ -1116,6 +2188,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             }
             if (sampleText != null)
                 sampleText.text = string.Empty;
+            if (memRoot != null && memRoot.gameObject.activeSelf)
+                memRoot.gameObject.SetActive(false);   // 全部完成：内存舞台也让位给结业文案
             RefreshPageNav(-1); // 全部完成：没有分页可翻
             LayoutGuideColumns();
             return;
@@ -1132,7 +2206,26 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             {
                 string guidePart;
                 string samplePart = string.Empty;
-                if (guidePage > 0)
+                bool memPage = guidePage >= 2 && HasMemPage(index);
+                if (memPage)
+                {
+                    // 第 3 页 = 内存可视化：整块正文区交给图形舞台（行 / 字节格 / 地址 / 执行台 / 旁白），
+                    // 文字栏一律清空，翻到本页时动画从头开演。
+                    guidePart = string.Empty;
+                    samplePart = string.Empty;
+                    animStep = 0;
+                    animTimer = 0f;
+                    memBuiltIndex = -1;
+                    memBuiltStep = -1;
+                    memBuiltH = -1f;
+                }
+                else if (guidePage >= 2 && HasAnimPage(index))
+                {
+                    // 第 3 页 = 代码动画：右栏放示例代码（当前执行行高亮），左栏放旁白 + 进度点
+                    guidePart = BuildAnimGuide(index, zh);
+                    samplePart = BuildAnimCode(index, zh);
+                }
+                else if (guidePage > 0)
                 {
                     // 第 2 页 = 零基础手把手细节（怎么一步步做出来 / 常见写错的样子）：
                     // 整段放左栏通栏显示，不配示例代码（示例已经在第 1 页右侧）
@@ -1142,9 +2235,28 @@ public class CodeSyntaxTutorialController : MonoBehaviour
                 {
                     SplitTaskBody(zh ? tasks[index].BodyZh : tasks[index].BodyEn, out guidePart, out samplePart);
                 }
-                bodyText.text = BuildGuideBody(index, zh, guidePart);
+                // 第 3 页（内存页）整块交给图形舞台：连 BuildGuideBody 那条尾巴（【蓝色长条】拖动提示 /
+                // ① 语法 / ② 编译 状态）一并不要 —— 它们是给文字页看的，留在图上就是压字。
+                // 文字对象直接隐藏，不只是清空文本：避免任何残留排版参与遮挡。
+                bodyText.text = memPage ? string.Empty : BuildGuideBody(index, zh, guidePart);
+                if (bodyText.gameObject.activeSelf == memPage)
+                    bodyText.gameObject.SetActive(!memPage);
                 if (sampleText != null)
                     sampleText.text = samplePart;
+
+                // 舞台随页面显隐：只有「第 3 页 + 本任务有内存场景」时才露面
+                if (memRoot != null)
+                {
+                    if (memRoot.gameObject.activeSelf != memPage)
+                        memRoot.gameObject.SetActive(memPage);
+                    if (memPage)
+                    {
+                        int ms = Mathf.Clamp(animStep, 0, tasks[index].Mem.Steps.Length - 1);
+                        RebuildMemStage(index, ms);
+                        AnimateMemStage(1f, index, ms);   // 首帧直接落位，不要从全透明开始
+                    }
+                }
+
                 LayoutGuideColumns();
             }
             RefreshPageNav(index);
@@ -1227,18 +2339,21 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         {
             sb.Append(zh
                 ? "\n\n【蓝色长条】按住本卡顶部的蓝色长条上下拖动，可随时调整「提示区 / 代码区」的高度，字号不变。"
-                : "\n\n【Blue bar】Drag the blue bar at the top of this card up or down to resize the hint area and the code area. The font size stays the same.");
+                : "\n\n[Blue bar] Drag the blue bar at the top of this card up or down to resize the hint area and the code area. The font size stays the same.");
         }
 
         // 第 1 页底部提示「还有一页手把手细节」：完全不懂代码的人通常不会主动去点右上角的翻页箭头，
-        // 所以在第 1 页明确告诉他下一步该翻页（第 2 页是逐步操作 + 常见写错的样子）。
+        // 所以在第 1 页明确告诉他下一步该翻页（第 2 页是逐步操作 + 常见写错的样子，第 3 页是代码动画）。
         if (guidePage == 0 && PageCountOf(index) > 1)
         {
+            int pageCount = PageCountOf(index);
             sb.Append(zh
-                ? "\n\n【不会写？】点本卡右上角「‹ 细节 1/2 ›」翻到第 2 页：\n"
-                  + "那里写着一共几步、每一步敲什么、写在哪一行，以及三个最常见的写错方式。"
-                : "\n\n【Stuck?】Click \"‹ Detail 1/2 ›\" at the top right of this card to open page 2:\n"
-                  + "it lists every step, what to type, where to type it, and the three most common mistakes.");
+                ? "\n\n【不会写？】点本卡右上角「‹ 细节 1/" + pageCount + " ›」，或直接按键盘 ← / → 前后翻页：\n"
+                  + "第 2 页写着一共几步、每一步敲什么、写在哪一行，以及三个最常见的写错方式。"
+                  + (pageCount >= 3 ? "\n再按一次 → 还有第 3 页【内存可视化】：把 int / float / bool / char 在内存里怎么摆、每格到底是什么字节，一格一格画给你看。" : "")
+                : "\n\n[Stuck?] Click \"‹ Detail 1/" + pageCount + " ›\" at the top right of this card, or just press ← / → on the keyboard to flip pages:\n"
+                  + "Page 2 lists every step, what to type, where to type it, and the three most common mistakes."
+                  + (pageCount >= 3 ? "\nPress → once more for the memory view: it draws how ints, floats, bools and chars are actually laid out in memory, byte by byte." : ""));
         }
 
         sb.Append(zh ? "\n\n—— 本任务完成条件（两项都满足才算完成）——\n" : "\n\n—— Complete when BOTH are satisfied ——\n");
@@ -1744,6 +2859,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             (raw, code) => ReStringFormat.IsMatch(code));
 
         AppendGrammarDetailPages(list); // 每项任务补「第 2 页」手把手细节（任务卡右上角翻页查看）
+        AppendGrammarAnimPages(list);   // 每项任务再补「第 3 页」代码动画（高亮逐行走，演代码在干什么）
+        AppendGrammarMemPages(list);    // 语法课的第 3 页升级为「内存可视化」：画出 char / int 在内存里到底怎么摆
         return list;
     }
 
@@ -2261,6 +3378,595 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "- Long sentences with many values are cleaner with {0} than with +.";
     }
 
+    // ================== 第 3 页：语法课代码动画数据 ==================
+
+    /// <summary>建一个动画步骤（Key = 该行特征子串，用于在示例代码里定位要亮起来的行）。</summary>
+    private static AnimStep AS(string key, string zh, string en)
+    {
+        AnimStep s = new AnimStep();
+        s.Key = key;
+        s.Zh = zh;
+        s.En = en;
+        return s;
+    }
+
+    // ================== 第 3 页（语法课）：内存可视化场景数据 ==================
+
+    /// <summary>
+    /// 造一段内存：type = 类型名（画成名牌）、name = 变量名、bytes = 每个字节的十六进制（空格分隔，"??" = 还没写）。
+    /// note = 这一行下面的小字（讲清这段内存为什么长这样）；badge = 行首徽章（锁 / 引用 / 栈帧 / 丢弃）；
+    /// ghost = true 表示「代码里有、内存里没有」（注释、方法定义），画成灰色虚线块，也不占地址。
+    /// </summary>
+    private static MemVar MV(string type, string name, string bytes, string note = null,
+        string badge = null, bool ghost = false)
+    {
+        MemVar v = new MemVar();
+        v.Type = type;
+        v.Name = name;
+        v.Bytes = bytes;
+        v.Note = note;
+        v.Badge = badge;
+        v.Ghost = ghost;
+        return v;
+    }
+
+    /// <summary>造一步：这一拍在跑哪行代码、内存里已有几个变量、正在写第几个（-1 = 只读）、配什么旁白。</summary>
+    private static MemStep MS(string expr, int reveal, int write, string zh, string en)
+    {
+        MemStep s = new MemStep();
+        s.Expr = expr;
+        s.Reveal = reveal;
+        s.Write = write;
+        s.Zh = zh;
+        s.En = en;
+        return s;
+    }
+
+    /// <summary>造一步，并顺带改写某几段内存的字节 —— 用来演示「同一格的值被改了」（for 里的 i、Add 之后的 Count）。</summary>
+    private static MemStep MS(string expr, int reveal, int write, string zh, string en,
+        int[] patchVar, string[] patchBytes)
+    {
+        MemStep s = MS(expr, reveal, write, zh, en);
+        s.PatchVar = patchVar;
+        s.PatchBytes = patchBytes;
+        return s;
+    }
+
+    private static MemScene MSC(MemVar[] vars, MemStep[] steps)
+    {
+        MemScene s = new MemScene();
+        s.Vars = vars;
+        s.Steps = steps;
+        return s;
+    }
+
+    /// <summary>
+    /// 给语法课 18 项任务配「内存可视化」场景。每一章按它自己讲的东西来设计，不是套模板：
+    /// 注释 → 演示「代码里有、内存里没有」的虚行；变量与类型 → 同一台内存上 int/char/bool/float 的格数差；
+    /// const → 只读的那块；四则 / 关系 / 逻辑 → 结果落在哪几格、占几个字节；if / switch → 判断读哪里、哪个分支真的改了内存；
+    /// for / while / do-while → 同一块内存被反复改写（Patch）；数组 / List → 引用与数据分开、下标就是偏移；
+    /// 方法 / 返回值 → 栈帧的生死；字符串 → 引用 + 堆里的 UTF-16 字符格。
+    /// 字节值都是真值：int 3 = 03 00 00 00（小端），float 1.5f = 00 00 C0 3F，bool true = 01，char 'A' = 41。
+    /// </summary>
+    private static void AppendGrammarMemPages(TaskDef[] list)
+    {
+        // ---- 1 注释：写给人看的东西，一个字节都不占 ----
+        // 这一课只讲注释本身的功效：代码里有它、内存里没有它。所以故意不放任何变量行，
+        // 整页就一排虚线格 —— 玩家一眼就能看出「注释不占内存」这件事。
+        list[0].Mem = MSC(
+            new[]
+            {
+                MV("// 注释", "（整行）", "-- -- --",
+                    "注释只写给人看：编译时整行被扔掉，内存里连格子都不会划出来。", "丢弃", true).En("Comments are for humans only: the compiler throws the whole line away, so no box is ever allocated for it.", name: "(whole line)", badge: "DROP")
+            },
+            new[]
+            {
+                MS("// 计算剩余血量", 1, -1,
+                    "单行注释：// 后面的字编译器一律不看。上面那排虚线格就是它的下场 —— 代码里有，内存里没有。",
+                    "A line comment: everything after // is ignored. The dashed row above is where it lives — in the code, never in memory.").Code("// remaining hp"),
+                MS("/* 多行注释：说明一整段逻辑 */", 1, -1,
+                    "块注释 /* … */ 一样占 0 字节：写一行是 0，写一百行还是 0，内存里始终只有那排虚线。",
+                    "A block comment /* … */ is 0 bytes too: one line or a hundred, memory never grows a box.").Code("/* block comment: explain a whole chunk of logic */"),
+                MS("/// <summary>给方法写说明</summary>", 1, -1,
+                    "文档注释 /// 同样 0 字节，还能被编辑器提示读出来。注释越多，代码越好懂，内存一点没多。",
+                    "Doc comments /// cost 0 bytes and still show up in editor tooltips. More comments, no extra memory.").Code("/// <summary>describe the method</summary>")
+            });
+
+        // ---- 2 变量与类型：同一台内存上，不同宽度的四种类型 ----
+        list[1].Mem = MSC(
+            new[]
+            {
+                MV("int", "remainHp", "03 00 00 00", "int = 4 字节 = 32 位，装得下约 ±21 亿。").En("int = 4 bytes = 32 bits, holds about ±2.1 billion."),
+                MV("char", "grade", "41", "char = 1 字节，存的是编号不存字形：'A' 的编号 65 = 0x41。").En("char = 1 byte: it stores a code point, not a glyph - 'A' is 65 = 0x41."),
+                MV("bool", "alive", "01", "bool = 1 字节：true 就是 01，false 是 00。").En("bool = 1 byte: true is 01, false is 00."),
+                MV("float", "ratio", "00 00 C0 3F", "float = 4 字节，按 IEEE-754 存：1.5f 的位模式就是 00 00 C0 3F。").En("float = 4 bytes, IEEE-754: 1.5f is exactly 00 00 C0 3F.")
+            },
+            new[]
+            {
+                MS("int remainHp = 3;", 1, 0,
+                    "int 一律 4 格。数值 3 写成 0x00000003，落进内存是小端：从低地址 0x100 往高读就是 03 00 00 00 —— 低字节最先，不是按人写字的 00 00 00 03 排。",
+                    "int is always 4 boxes. The value 3 is 0x00000003 and lands little-endian: reading upward from 0x100 gives 03 00 00 00 — low byte first, not the 00 00 00 03 you would write on paper."),
+                MS("char grade = 'A';", 2, 1,
+                    "char 只占 1 格，里面不是字母 'A' 这个形状，而是它的编号 65（0x41）—— 字母靠一张表才变回字形。",
+                    "char takes 1 box holding the code 65 (0x41), not the letter's shape — a table turns it back into a glyph."),
+                MS("bool alive = true;", 3, 2,
+                    "bool 也只占 1 格：01 就是 true。C# 里它不能当数字用，省得你把 01 当 1 去算。",
+                    "bool also takes 1 box: 01 means true. C# refuses to treat it as a number, so you cannot do maths on it."),
+                MS("float ratio = 1.5f;", 4, 3,
+                    "float 又回到 4 格，但装法完全不同：符号位 + 指数 + 尾数，1.5f 恰好是 00 00 C0 3F。",
+                    "float is back to 4 boxes with a totally different layout — sign, exponent, mantissa — and 1.5f happens to be 00 00 C0 3F.")
+            });
+
+        // ---- 3 const：不是不占内存，是那块内存被标成只读 ----
+        list[2].Mem = MSC(
+            new[]
+            {
+                MV("const int", "MAX_HP", "64 00 00 00", "const 照样占 4 格，只是这块被标成只读 —— 改它编译就过不去。", "锁").En("const takes the same 4 boxes; they are just marked read-only - change it and the build fails.", badge: "CONST"),
+                MV("int", "hp", "64 00 00 00", "普通变量的 4 格一模一样，区别只在于随时可以改写。").En("An ordinary variable gets the same 4 boxes; the only difference is you can rewrite them any time.")
+            },
+            new[]
+            {
+                MS("const int MAX_HP = 100;", 1, 0,
+                    "const 的快照和普通 int 一模一样：4 格，100 = 64 00 00 00。它并不「不占内存」。",
+                    "A const looks identical to a plain int: 4 boxes, 100 = 64 00 00 00. It is not \"free\"."),
+                MS("int hp = 100;", 2, 1,
+                    "再开一块同样的 4 格装当前血量。两块值相同，权限不同。",
+                    "A second block of 4 boxes holds the current HP. Same value, different permission."),
+                MS("MAX_HP = 999;   // 编译错误", 2, -1,
+                    "这一行编译直接报错，内存里的 64 一个字节都没动 —— const 是编译期保护，不是运行时检查。",
+                    "This line fails to compile and not a byte changes: const is enforced at compile time, not at run time.").Code("MAX_HP = 999;   // compile error")
+            });
+
+        // ---- 4 算术运算：两个数被读进 CPU，算完再写回第三块内存 ----
+        list[3].Mem = MSC(
+            new[]
+            {
+                MV("int", "a", "07 00 00 00", "第一个操作数：7。").En("First operand: 7."),
+                MV("int", "b", "05 00 00 00", "第二个操作数：5。").En("Second operand: 5."),
+                MV("int", "sum", "0C 00 00 00", "结果 12 = 0x0C，高位三格补 0。加出来是几位就写几位，格子数不变。").En("Result 12 = 0x0C, the upper three boxes stay 0. Only as many digits as needed; the box count never changes.")
+            },
+            new[]
+            {
+                MS("int a = 7;", 1, 0, "a 占 4 格，值是 7。", "a takes 4 boxes holding 7."),
+                MS("int b = 5;", 2, 1, "b 再占 4 格，值是 5。两块内存互不相干。", "b takes another 4 boxes holding 5. The two blocks are independent."),
+                MS("int sum = a + b;", 3, 2,
+                    "CPU 把 a、b 各 4 格读进寄存器相加，再把 12 写进 sum 那 4 格 —— 原两块一个字节都没变。",
+                    "The CPU reads both 4-box blocks into registers, adds, and writes 12 into sum's 4 boxes — the originals are untouched.")
+            });
+
+        // ---- 5 关系运算：比较不会改原值，只多出 1 个字节的答案 ----
+        list[4].Mem = MSC(
+            new[]
+            {
+                MV("int", "score", "5A 00 00 00", "被比较的数：90 = 0x5A。").En("The value being compared: 90 = 0x5A."),
+                MV("bool", "pass", "01", "比较的答案是个 bool：只占 1 格。不是 4 格，也不会偷偷变成 int。").En("A comparison yields a bool: 1 box, not 4 - and it never silently turns into an int.")
+            },
+            new[]
+            {
+                MS("int score = 90;", 1, 0, "score 占 4 格，90 = 5A 00 00 00。", "score takes 4 boxes; 90 is 5A 00 00 00."),
+                MS("score >= 60", 1, -1,
+                    "这一步只在 CPU 里问了一句「90 >= 60 吗」，score 那 4 格一动没动。",
+                    "This step only asks the CPU \"is 90 >= 60?\" — score's 4 boxes stay as they are."),
+                MS("bool pass = score >= 60;", 2, 1,
+                    "答案 true 落进新开的 1 格里：01。关系运算的结果永远是 1 格。",
+                    "The answer true lands in one fresh box: 01. A comparison always yields a single box.")
+            });
+
+        // ---- 6 逻辑运算：条件再多，答案还是 1 格 ----
+        list[5].Mem = MSC(
+            new[]
+            {
+                MV("bool", "hasKey", "01", "第一个条件：01 = true。").En("First condition: 01 = true."),
+                MV("bool", "doorOpen", "00", "第二个条件：00 = false。").En("Second condition: 00 = false."),
+                MV("bool", "canEnter", "00", "&& 要求两边都真：右边是 00，所以答案也是 00。").En("&& needs both sides true: the right side is 00, so the answer is 00 too.")
+            },
+            new[]
+            {
+                MS("bool hasKey = true;", 1, 0, "第一个 bool：1 格，01。", "First bool: 1 box, 01."),
+                MS("bool doorOpen = false;", 2, 1, "第二个 bool：1 格，00。", "Second bool: 1 box, 00."),
+                MS("bool canEnter = hasKey && doorOpen;", 3, 2,
+                    "&& 只把两个 1 格合成 1 格：有一个是 00，结果就写 00。换成 || 则只要有一个 01 就是 01。",
+                    "&& folds two boxes into one: with a 00 on the right the answer is 00. Swap in || and a single 01 would win.")
+            });
+
+        // ---- 7 if：判断本身不占变量内存，改内存的是分支里的语句 ----
+        list[6].Mem = MSC(
+            new[]
+            {
+                MV("int", "hp", "00 00 00 00", "hp 现在是 0 —— 四个字节全是 00，这是真值 0，不是「没写」。").En("hp is 0 now - all four bytes are 00, a real zero, not 'nothing written'."),
+                MV("bool", "isDead", "01", "if 括号里的表达式最终还是算成一个 bool（这里占 1 格），真假才决定进不进分支。").En("Whatever if(...) evaluates, the result is a bool (1 box here); that decides whether the branch runs.")
+            },
+            new[]
+            {
+                MS("int hp = 0;", 1, 0, "先把 hp 设成 0：4 格全 00。", "Set hp to 0 first: all four boxes are 00."),
+                MS("if (hp <= 0)", 2, 1,
+                    "0 <= 0 成立，这个 true 会算进条件那 1 格里。注意：判断完 hp 的 4 格仍然全是 00。",
+                    "0 <= 0 holds, and that true fills the condition's single box. Note hp's 4 boxes are still all 00."),
+                MS("hp = 100;   // 分支里复活", 2, 0,
+                    "进了大括号才真正改内存：hp 那 4 格被改写成 64 00 00 00。真正动内存的是语句，不是 if 本身。",
+                    "Inside the braces memory actually changes: hp's 4 boxes become 64 00 00 00. Statements write memory, not if.",
+                    new[] { 0 }, new[] { "64 00 00 00" }).Code("hp = 100;   // revive inside the branch")
+            });
+
+        // ---- 8 if-else：两条分支只可能有一条碰内存 ----
+        list[7].Mem = MSC(
+            new[]
+            {
+                MV("float", "cooldown", "00 00 00 00", "冷却完了：0f 在内存里就是四格 00。").En("Cooldown over: 0f in memory is just four 00 boxes."),
+                MV("int", "shots", "00 00 00 00", "开火次数计数器，一开始是 0。").En("Shot counter, starting at 0.")
+            },
+            new[]
+            {
+                MS("float cooldown = tower.GetFireCooldown();", 2, 0,
+                    "冷却时间用 float 装（4 格），计数器用 int 装（4 格）—— 两块内存都已经划好。",
+                    "Cooldown is a float and the counter an int — both blocks are already reserved."),
+                MS("if (cooldown <= 0f)", 2, -1,
+                    "0 <= 0 成立，于是走 if 分支；else 那一段这次一次都不会执行，里面的语句也不会碰内存。",
+                    "0 <= 0 holds, so the if branch runs; the else branch never executes and never touches memory."),
+                MS("shots++;", 2, 1,
+                    "开火并把计数 +1：shots 那 4 格从 00 变成 01。反过来说，若条件不成立，这 4 格就一直保持 00。",
+                    "Fire and bump the counter: shots goes from 00 to 01. Had the condition failed, those 4 boxes would stay 00.",
+                    new[] { 1 }, new[] { "01 00 00 00" })
+            });
+
+        // ---- 9 switch：拿同一块内存的值去逐条比对 ----
+        list[8].Mem = MSC(
+            new[]
+            {
+                MV("int", "mode", "01 00 00 00", "switch 只认这一个值：mode = 1。").En("switch only looks at this one value: mode = 1."),
+                MV("int", "color", "00 00 00 00", "命中 case 1 之后才会被赋值的变量。").En("Only assigned once case 1 is hit.")
+            },
+            new[]
+            {
+                MS("int mode = 1;", 2, 0,
+                    "mode 占 4 格，值是 01。它会被反复读出来跟每个 case 比，但不会被改写。",
+                    "mode holds 01 in 4 boxes. It gets read against every case, but never written."),
+                MS("case 0:", 2, -1,
+                    "先跟 case 0 比：不相等，整段跳过 —— 这一句里没有任何语句去动内存。",
+                    "Compare against case 0 first: no match, the whole block is skipped — nothing writes memory."),
+                MS("case 1:  color = 3;  break;", 2, 1,
+                    "比到 case 1 命中，执行 color = 3（写成 03 00 00 00），遇 break 跳出，后面的 case / default 都不碰。",
+                    "case 1 matches, so color = 3 runs (03 00 00 00), break jumps out, and the later cases never touch memory.",
+                    new[] { 1 }, new[] { "03 00 00 00" })
+            });
+
+        // ---- 10 for：循环变量只有一块内存，每轮被就地改写 ----
+        list[9].Mem = MSC(
+            new[]
+            {
+                MV("int", "i", "00 00 00 00", "for 的循环变量只有这一块 4 格内存，三轮循环都是它，不会每轮新开。").En("The for variable is this single 4-box slot; all three rounds reuse it - no new memory per round."),
+                MV("int", "sum", "00 00 00 00", "累加结果也一直是这同一块。").En("The accumulator is that same slot too.")
+            },
+            new[]
+            {
+                MS("for (int i = 0; i < 3; i++)", 2, 0,
+                    "for 开始：先划两块内存（i 和 sum），i 清成 0。循环体还没跑，格子已经在了。",
+                    "The for loop starts by reserving both blocks and zeroing i. The body has not run yet, but the boxes exist."),
+                MS("i < 3  →  打印 i=0", 2, -1,
+                    "判断 0 < 3 成立，进循环体打印 i=0。打印只是读内存。",
+                    "0 < 3 holds, the body prints i=0. Printing only reads memory.").Code("i < 3  →  print i=0"),
+                MS("i++", 2, 0,
+                    "同一块 4 格被就地改写成 1（01 00 00 00）—— 内存没有变大，里面的值变了。",
+                    "The very same 4 boxes are overwritten with 1 — memory does not grow, the value changes.",
+                    new[] { 0 }, new[] { "01 00 00 00" }),
+                MS("i++", 2, 0,
+                    "第二轮回见：还是那 4 格，这次写成 2。",
+                    "Second round: still the same 4 boxes, this time holding 2.",
+                    new[] { 0 }, new[] { "02 00 00 00" }),
+                MS("i < 3  →  false", 2, 0,
+                    "第三轮后 i 变成 3，条件不成立，循环结束；这 4 格也随代码块结束一起被回收。",
+                    "After the third round i is 3, the condition fails, the loop ends, and those 4 boxes are released with the block.",
+                    new[] { 0 }, new[] { "03 00 00 00" })
+            });
+
+        // ---- 11 while：先判断再干活，条件读的是同一块内存 ----
+        list[10].Mem = MSC(
+            new[]
+            {
+                MV("int", "n", "03 00 00 00", "while 的条件读的就是这块：只要还 > 0 就继续。").En("The while condition reads exactly this slot: keep looping while it stays > 0.")
+            },
+            new[]
+            {
+                MS("int n = 3;", 1, 0, "先给 n 一个值：4 格，03 00 00 00。", "Give n a value first: 4 boxes, 03 00 00 00."),
+                MS("while (n > 0)", 1, -1,
+                    "每轮开头都重新读这块内存判断：3 > 0 成立，进循环体。判断本身不改它。",
+                    "Every round re-reads this block: 3 > 0 holds, so enter the body. The test itself writes nothing."),
+                MS("n--;", 1, 0,
+                    "循环体把它减 1，同一块 4 格变成 02 —— 这就是让循环最终能停下来的那一句。",
+                    "The body decrements it: the same 4 boxes become 02 — this is what eventually stops the loop.",
+                    new[] { 0 }, new[] { "02 00 00 00" }),
+                MS("while (n > 0)  →  false", 1, 0,
+                    "再减到 0，条件不成立，循环结束。忘记改这块内存就是死循环。",
+                    "Down to 0, the condition fails and the loop ends. Forgetting to change this block is how infinite loops happen.",
+                    new[] { 0 }, new[] { "00 00 00 00" })
+            });
+
+        // ---- 12 do-while：先干一次，再判断 ----
+        list[11].Mem = MSC(
+            new[]
+            {
+                MV("int", "d", "00 00 00 00", "do 先冲进循环体，所以这块一定会被改成 1，哪怕条件一开始就不成立。").En("A do loop runs its body first, so this slot always becomes 1 even when the condition was false from the start.")
+            },
+            new[]
+            {
+                MS("int d = 0;", 1, 0, "计数器先归零：4 格全 00。", "Zero the counter: 4 boxes, all 00."),
+                MS("do { d++; }", 1, 0,
+                    "do 的特点：不看条件先执行一次。d 那 4 格被无条件改写成 1。",
+                    "That is what do does: run once without checking. d's 4 boxes are overwritten with 1 unconditionally.",
+                    new[] { 0 }, new[] { "01 00 00 00" }),
+                MS("while (d < 3);", 1, -1,
+                    "最后才判断 1 < 3 成立，回头再干一次。注意条件后面那个分号，漏了编译器就报错。",
+                    "Only then the test 1 < 3, so go again. Do not drop that trailing semicolon or the compiler complains.")
+            });
+
+        // ---- 13 数组：变量只是门牌号，数据整排躺在另一块内存里 ----
+        list[12].Mem = MSC(
+            new[]
+            {
+                MV("int[]", "hits", "E8 2F 00 00", "变量本身只有 4 格：它存的是门牌号（引用），不是那三个 int。", "引用").En("The variable itself is only 4 boxes: it holds an address (a reference), not the three ints.", badge: "REF"),
+                MV("堆 · int[3]", "hits[0..2]", "02 00 00 00 00 00 00 00 00 00 00 00",
+                    "12 格 = 3 个 int 连续排：hits[0] 在第 1 格，hits[1] 偏移 +4，hits[2] 偏移 +8。").En("12 boxes = 3 ints back to back: hits[0] in the first box, hits[1] at +4, hits[2] at +8.", type: "heap · int[3]")
+            },
+            new[]
+            {
+                MS("int[] hits = new int[3];", 2, 0,
+                    "new 先在堆上划出 12 格（3 个 int），再把这 12 格的起始门牌号写进 hits 那 4 格里。",
+                    "new reserves 12 boxes on the heap, then stores the starting address in hits' 4 boxes."),
+                MS("hits[0] = 2;", 2, 1,
+                    "顺着门牌号找到那一段，把第 0 个 int 改成 2（02 00 00 00）。下标就是「第几块 4 格」。",
+                    "Follow the address and set element 0 to 2. An index is just \"which 4-box block\".",
+                    new[] { 1 }, new[] { "02 00 00 00 00 00 00 00 00 00 00 00" }),
+                MS("hits[3]   // 越界", 2, -1,
+                    "只有 0/1/2 三块 4 格。写 hits[3] 就跑到这段内存外面去了 —— 运行时会抛越界异常挡住你。",
+                    "Only blocks 0/1/2 exist. hits[3] steps outside this run of memory, and the runtime throws to stop you.").Code("hits[3]   // out of range")
+            });
+
+        // ---- 14 List：比数组多了 Count 这本账 ----
+        list[13].Mem = MSC(
+            new[]
+            {
+                MV("List<int>", "hpList", "E8 2F 00 00", "List 变量本身还是 4 格引用，指向它内部的数组和账本。", "引用").En("The List variable is still a 4-box reference pointing at its internal array and counters.", badge: "REF"),
+                MV("内部 int", "Count", "00 00 00 00", "Count 是另一个 int：Add 一次就从 0 变 1，取数量不用数元素。").En("Count is another int: one Add moves it 0 -> 1, so size costs no scan.", type: "inner int"),
+                MV("内部 int[2]", "hpList[0..1]", "00 00 00 00 00 00 00 00",
+                    "内部数组一开始容量小（这里 2 个 int = 8 格），装满会自动翻倍换更大的。").En("The internal array starts small (2 ints = 8 boxes) and doubles into a bigger one when full.", type: "inner int[2]")
+            },
+            new[]
+            {
+                MS("List<int> hpList = new List<int>();", 3, 0,
+                    "new 一个 List：内部数组先划一小段（8 格），Count 那 4 格写 0，hpList 只记门牌号。",
+                    "A new List reserves a small internal array (8 boxes), zeroes Count, and hpList keeps only the address."),
+                MS("hpList.Add(3);", 3, 2,
+                    "Add 干两件事：把 3 写进内部数组第 0 块（03 00 00 00），再把 Count 改成 1。所以亮的是两段内存。",
+                    "Add does two things: write 3 into block 0 and set Count to 1 — two blocks light up at once.",
+                    new[] { 1, 2 }, new[] { "01 00 00 00", "03 00 00 00 00 00 00 00" }),
+                MS("hpList.Count", 3, 1,
+                    "取数量读的就是 Count 那块 int（所以这一步亮的是它），O(1)；换成数组得自己维护一个计数变量。",
+                    "Reading Count is a single int read (that is why it lights up here), O(1); with a plain array you would maintain a counter yourself.")
+            });
+
+        // ---- 15 方法定义：不调用就不占内存，调一次开一层栈帧 ----
+        list[14].Mem = MSC(
+            new[]
+            {
+                MV("void", "ShowHp（定义）", "-- -- -- --", "方法定义不占数据内存：方法体躺在代码区，等被调用才在栈上开格子。", "代码区", true).En("A method definition takes no data memory: the body lives in the code area and only gets stack boxes when called.", name: "ShowHp (definition)", badge: "CODE"),
+                MV("int", "hp（参数）", "64 00 00 00", "调用时才给参数开 4 格，把实参 100 复制进去 —— 是复制，不是共享。", "栈帧").En("A parameter's 4 boxes are opened at call time and 100 is copied in - copied, not shared.", name: "hp (param)", badge: "FRAME")
+            },
+            new[]
+            {
+                MS("void ShowHp(int hp) { … }", 1, -1,
+                    "只是定义一个方法：一行数据内存都不占。上面那排虚线格提醒你 —— 它在代码区，不在数据区。",
+                    "Defining a method claims no data memory. The dashed row reminds you it lives in the code region."),
+                MS("ShowHp(100);", 2, 1,
+                    "调用发生：栈上新开一层栈帧，给 hp 划 4 格，把 100 复制进去。此时方法外的变量一点没动。",
+                    "The call opens a new stack frame, reserves 4 boxes for hp and copies 100 in. Outside variables are untouched."),
+                MS("方法返回", 1, -1,
+                    "方法一结束，这层栈帧整块销毁，hp 的 4 格随之消失 —— 局部变量为什么不能跨方法用，原因就在这。",
+                    "When the method ends the frame is destroyed and hp's 4 boxes vanish — that is why locals cannot leak out.").Code("method returns")
+            });
+
+        // ---- 16 返回值：值复制出来，方法内的内存照样销毁 ----
+        list[15].Mem = MSC(
+            new[]
+            {
+                MV("int", "v（参数）", "02 00 00 00", "调用时新开的参数格：把 2 复制进来。", "栈帧").En("A freshly opened parameter slot: 2 is copied into it.", name: "v (param)", badge: "FRAME"),
+                MV("int", "返回值", "04 00 00 00", "return 把结果放进这块，它是方法交给外面的唯一东西。", "栈帧").En("return puts the result in this box; it is the only thing handed back out.", name: "return value", badge: "FRAME"),
+                MV("int", "sum", "04 00 00 00", "调用者的变量。它比方法内的格子活得久，因为它在外面那一层。").En("The caller's variable. It outlives the boxes inside the method because it lives one level out.")
+            },
+            new[]
+            {
+                MS("int Twice(int v) { … }", 0, -1,
+                    "方法还没调用：内存里什么都没有（返回值也在等）。",
+                    "Not called yet: nothing is allocated, not even the return slot."),
+                MS("Twice(2)", 1, 0,
+                    "参数 v 先拿到 4 格，值 2。", "Parameter v gets its 4 boxes holding 2."),
+                MS("return v * 2;", 2, 1,
+                    "算出 4，放进「返回值」那 4 格。到这里方法内的内存还是活的。",
+                    "Compute 4 into the return slot. The method's own memory is still alive here."),
+                MS("int sum = Twice(2);", 3, 2,
+                    "外面把 4 复制进 sum，随后栈帧销毁：v 和返回值都没了，只剩 sum。",
+                    "Outside, 4 is copied into sum and the frame is destroyed — v and the return slot are gone, sum remains.")
+            });
+
+        // ---- 17 字符串拼接：每次 + 都在堆上造一段新字符，旧的就成垃圾 ----
+        list[16].Mem = MSC(
+            new[]
+            {
+                MV("int", "curHp", "03 00 00 00", "先有数字，才有得拼。").En("First the digits, then there is something to concatenate."),
+                MV("string", "msg", "E8 2F 00 00", "msg 只有 4 格：存门牌号。字符串本身在堆上，不在这 4 格里。", "引用").En("msg is only 4 boxes: an address. The characters live on the heap, not here.", badge: "REF"),
+                MV("堆 · char[]", "\"hp=3\"", "68 00 70 00 3D 00 33 00",
+                    "string 内部是 UTF-16：每个字符 2 字节。h=0068、p=0070、==003D、3=0033，正好 8 格。").En("Inside a string it is UTF-16: 2 bytes per char. h=0068, p=0070, = 003D, 3 = 0033 - 8 boxes.", type: "heap · char[]")
+            },
+            new[]
+            {
+                MS("int curHp = 3;", 1, 0, "数字先占 4 格：03 00 00 00。", "The number takes 4 boxes: 03 00 00 00."),
+                MS("string msg = \"hp=\" + curHp;", 3, 1,
+                    "字符串不可变：+ 会在堆上新造一段字符（h p = 3 各占 2 字节），再把门牌号写进 msg。原来那段没人动。",
+                    "Strings are immutable: + builds a brand-new char array in the heap, then stores its address in msg.",
+                    new[] { 2 }, new[] { "68 00 70 00 3D 00 33 00" }),
+                MS("tower.PrintLine(msg + \" / done\");", 3, -1,
+                    "再 + 一次又造一段更长的字符数组，刚才那 8 格立刻变成没人引用的垃圾，等 GC 回收。",
+                    "Another + builds an even longer array; the previous 8 boxes become garbage for the GC.")
+            });
+
+        // ---- 18 string.Format：按模板一趟拼好，中间垃圾更少 ----
+        list[17].Mem = MSC(
+            new[]
+            {
+                MV("int", "baseHp", "64 00 00 00", "参与格式化的值：100 = 64 00 00 00。").En("The value being formatted: 100 = 64 00 00 00."),
+                MV("string", "text", "F0 2F 00 00", "格式化完后 text 只拿到门牌号。", "引用").En("After formatting, text only receives an address.", badge: "REF"),
+                MV("堆 · char[]", "\"hp=100\"", "68 00 70 00 3D 00 31 00 30 00 30 00",
+                    "UTF-16 每字符 2 字节：h p = 1 0 0 共 6 个字符 = 12 格，正好排满这一行。").En("UTF-16, 2 bytes per char: h p = 1 0 0 is 6 chars = 12 boxes, filling this row exactly.", type: "heap · char[]")
+            },
+            new[]
+            {
+                MS("int baseHp = 100;", 1, 0, "先把要填进模板的值准备好：4 格。", "First prepare the value that fills the template: 4 boxes."),
+                MS("string.Format(\"hp={0}\", baseHp)", 3, 1,
+                    "Format 按模板一趟拼完：把 100 的十进制字符接在 \"hp=\" 后面，堆上新出 12 格；它不会为每个片段各造一段再相加。",
+                    "Format assembles the result in one pass: append \"100\" after \"hp=\", allocating 12 fresh char boxes instead of one per fragment."),
+                MS("text = 格式化结果", 3, -1,
+                    "text 拿到这段新字符的门牌号。模板里的 {0} 意思就是「把第 0 个参数塞到这个位置」。",
+                    "text receives the address of that new string. The {0} in the template means \"put argument 0 right here\".").Code("text = formatted result")
+            });
+    }
+
+    /// <summary>
+    /// 给语法课 18 个任务各配一段「代码动画」：每一步 = 高亮示例代码的某一行 + 一句人话解释它做什么。
+    /// 行用特征子串定位（见 FindAnimLine），所以以后改示例代码只要还留着这段特征文字就不会错位。
+    /// </summary>
+    private static void AppendGrammarAnimPages(TaskDef[] list)
+    {
+        list[0].Anim = new[]
+        {
+            AS("// 计算剩余血量", "先在代码上贴一张便条：// 后面这一行是写给人看的，电脑根本不执行。", "A sticky note for humans: everything after // is ignored by the computer.").KeyIn("// remaining hp"),
+            AS("int remainHp", "真正干活的是这行：造一个整数变量 remainHp，里面装 3。", "The real work: create an int variable remainHp holding 3."),
+            AS("/* 下面这行", "多行注释用 /* 开头，可以一直写到 */，中间跨几行都行。", "A block comment starts with /* and runs until */, over as many lines as you like.").KeyIn("/* this prints to the screen"),
+            AS("tower.PrintLine", "最后调用炮台的 PrintLine，把变量里的值打印到荧幕上。", "Finally PrintLine prints the variable's value to the screen.")
+        };
+
+        list[1].Anim = new[]
+        {
+            AS("int hp", "int 只能装整数：hp 里放进 100。", "int holds whole numbers only: hp gets 100."),
+            AS("float speed", "float 装小数，字面量后面必须带 f，写成 1.5 会报错。", "float holds decimals and needs the f suffix: 1.5 alone is an error."),
+            AS("bool ready", "bool 只有两个值 true / false，像一盏只能开或关的灯。", "bool has only true / false, like a switch that is either on or off."),
+            AS("string tag", "string 装文字，文字必须用双引号包起来。", "string holds text, and text must be wrapped in double quotes.")
+        };
+
+        list[2].Anim = new[]
+        {
+            AS("const int MaxBlocks", "const 表示这个数定死了：MaxBlocks = 400，之后谁想改就会编译报错。", "const freezes the value: change MaxBlocks later and the compiler refuses."),
+            AS("const float Pi", "同样是 const，只是类型换成 float，所以 3.14f 后面要带 f。", "Same const idea with the float type, hence the f on 3.14f.")
+        };
+
+        list[3].Anim = new[]
+        {
+            AS("int total", "* 优先级高于 +：先算 3 * 4 = 12，再加 2，total 得到 14。", "* binds tighter than +: 3 * 4 = 12 first, then + 2, so total is 14."),
+            AS("float halfTotal", "用 2f（浮点数）去除，小数不会丢；写成 2 就是整数除法，小数被砍掉。", "Dividing by 2f keeps the fraction; dividing by 2 would drop it."),
+            AS("int rest", "% 是取余数：14 % 5 余 4，rest 得到 4。", "% is the remainder: 14 % 5 leaves 4, so rest is 4.")
+        };
+
+        list[4].Anim = new[]
+        {
+            AS("int hpNow", "先备一个被比较的数：hpNow = 5。", "First a number to compare: hpNow = 5."),
+            AS("bool alive", "5 > 0 成立 → 得到 true，装进 alive。", "5 > 0 is true, so alive becomes true."),
+            AS("bool empty", "== 是「判断相等」而不是赋值：5 == 0 不成立 → false。", "== compares instead of assigning: 5 == 0 is false.")
+        };
+
+        list[5].Anim = new[]
+        {
+            AS("bool weaponReady", "先摆好两块原料：武器就绪 true。", "First ingredient: weaponReady is true."),
+            AS("bool canFire", "&& 要求两边都真：true && (5 > 0) → true，可以开炮。", "&& needs both true: true && (5 > 0) gives true, so it can fire."),
+            AS("bool needHeal", "|| 一边真就真，! 把 true 取反：(5 <= 0) || !true → false，不用治疗。", "|| needs one true, ! inverts: (5 <= 0) || !true is false, no healing needed.")
+        };
+
+        list[6].Anim = new[]
+        {
+            AS("int blockCount", "先问炮台：场上现在有几个方块，把数量装进 blockCount。", "Ask the tower how many blocks exist and store the count."),
+            AS("if (blockCount > 0)", "if 括号里必须是一个「是 / 否」的问题：现在有方块吗？", "The if condition must be a yes/no question: are there blocks?"),
+            AS("tower.PrintLine", "只有答案为「是」，才执行大括号里这句打印；为「否」就整段跳过。", "Only when the answer is yes does the print inside the braces run; otherwise the block is skipped.")
+        };
+
+        list[7].Anim = new[]
+        {
+            AS("float cd", "先读冷却：cd = 距离下次能开炮还剩多少秒。", "Read the cooldown: seconds left before the next shot."),
+            AS("if (cd <= 0f)", "cd 小于等于 0 → 条件成立，走进 if 分支。", "cd at or below zero means the if branch runs."),
+            AS("tower.FireAtPlane", "条件成立就开炮，冷却从头开始算。", "When it holds, the tower fires and the cooldown restarts."),
+            AS("else", "条件不成立时走 else：只打印 cooling down，绝不开炮。", "Otherwise the else branch only prints \"cooling down\" and never fires.")
+        };
+
+        list[8].Anim = new[]
+        {
+            AS("int mode", "先有一个待判断的数：mode = 1。", "A value to test: mode = 1."),
+            AS("switch (mode)", "switch 拿着 mode 的值，从上往下挨个和 case 比。", "switch takes mode and compares it against each case in order."),
+            AS("case 1:", "值等于 1 → 命中这一支，执行它后面那句打印；末尾的 break 表示到此结束，不加会顺着往下串。", "The value is 1, so this case runs its print; the trailing break stops it from falling through."),
+            AS("default:", "所有 case 都不匹配时，才轮到 default 收尾。", "If no case matches, default catches the rest.")
+        };
+
+        list[9].Anim = new[]
+        {
+            AS("for (int i = 0", "初始化：i 从 0 开始，然后才判断 i < 3。", "Init: i starts at 0, then i < 3 is checked."),
+            AS("tower.PrintLine", "条件成立才进循环体，打印当前 i。", "Only when the condition holds does the body print i."),
+            AS("i++", "一轮结束 i 加 1：0 → 1 → 2，再判断 3 < 3 不成立，循环结束，一共跑 3 次。", "After each round i increments: 0, 1, 2, then 3 < 3 fails and the loop ends after three rounds.")
+        };
+
+        list[10].Anim = new[]
+        {
+            AS("int wi = 0", "先造循环变量 wi = 0。", "Create the loop variable wi = 0."),
+            AS("while (wi < 3)", "每轮开头先问一次：wi 还小于 3 吗？", "Each round starts by asking: is wi still below 3?"),
+            AS("wi++", "循环体里把 wi 加 1 —— 这句千万别漏，否则 wi 永远是 0，死循环。", "Increment wi inside the body - skip this and wi stays 0 forever: an infinite loop.")
+        };
+
+        list[11].Anim = new[]
+        {
+            AS("int di = 0", "di 从 0 开始。", "di starts at 0."),
+            AS("do", "do 的意思是先干一次再谈条件：循环体至少执行一遍。", "do means act first, ask later: the body always runs at least once."),
+            AS("} while (di < 3);", "最后才判断 di < 3；注意结尾这个分号，漏了直接报错。", "Only at the end is di < 3 checked - and that trailing semicolon is required.")
+        };
+
+        list[12].Anim = new[]
+        {
+            AS("int[] hits", "造一个能装 3 个整数的格子柜，名字叫 hits。", "Build a cabinet that holds 3 ints, named hits."),
+            AS("hits[0] = 2", "往第 0 号格子放 2。下标从 0 开始，长度 3 的合法下标只有 0/1/2。", "Put 2 into slot 0. Indexes start at 0, so a length of 3 allows 0/1/2 only."),
+            AS("hits[0]={0}", "读第 0 号格子里的值打印出来 → 荧幕上出现 2。", "Read slot 0 and print it - 2 shows up on screen.")
+        };
+
+        list[13].Anim = new[]
+        {
+            AS("List<int> hpList", "List 是会自动变长的柜子，先造一个空的。", "List is a cabinet that grows by itself: start with an empty one."),
+            AS("hpList.Add(3)", "往里塞一个 3，柜子自己长高，不用你操心长度。", "Add a 3 and the list grows; you never manage its length."),
+            AS("hpList.Count", "Count 是现在装了几个 → 打印 1。", "Count is how many items are inside - it prints 1.")
+        };
+
+        list[14].Anim = new[]
+        {
+            AS("void ShowHp", "定义一台小机器：名字叫 ShowHp，进货口收一个整数 hp。定义的时候什么都不执行。", "Define a little machine named ShowHp that takes one int. Defining runs nothing."),
+            AS("tower.PrintLine", "机器内部的动作：把收到的 hp 打印出来。", "Inside the machine: print the hp it received."),
+            AS("ShowHp(3);", "真正调用时才跑起来：3 从进货口进去，荧幕打印 hp=3。", "Only the call runs it: 3 goes in, hp=3 is printed.")
+        };
+
+        list[15].Anim = new[]
+        {
+            AS("int Twice", "定义一台机器：收一个 int，吐回一个 int。", "Define a machine that takes an int and hands one back."),
+            AS("return v * 2", "return 就是「交货」：把 v * 2 算好递回去。", "return is the hand-over: compute v * 2 and give it back."),
+            AS("int sum = Twice(2)", "调用 Twice(2) → 拿到 4，装进变量 sum。", "Call Twice(2) - it returns 4, stored in sum."),
+            AS("sum={0}", "最后把 sum 打印出来 → 荧幕上出现 sum=4。", "Print sum, and the screen shows sum=4.")
+        };
+
+        list[16].Anim = new[]
+        {
+            AS("int curHp", "先有一个数 curHp = 3。", "Start with a number: curHp = 3."),
+            AS("string msg =", "+ 把文字和数字粘在一起，数字会自动变成文字 → \"hp=3\"。", "+ glues text and numbers; the number turns into text, giving \"hp=3\"."),
+            AS("tower.PrintLine(msg", "再在后面拼一段 \" / done\" → \"hp=3 / done\"，然后打印。", "Append \" / done\", giving \"hp=3 / done\", then print it.")
+        };
+
+        list[17].Anim = new[]
+        {
+            AS("int baseHp", "先备好要填进句子的数：baseHp = 3。", "Prepare the value that will go into the sentence: baseHp = 3."),
+            AS("string.Format(", "模板里的 {0} {1} 是空位，按顺序取后面传进来的参数填进去。", "The {0} {1} slots are filled in order by the arguments after the comma."),
+            AS("{1:F1}", ":F1 会作用在这个空位上吗？会 —— {1:F1} 表示取第 2 个参数并保留 1 位小数 → 1.5。", ":F1 formats that slot: {1:F1} takes the second argument with one decimal, giving 1.5."),
+            AS("tower.PrintLine(msgFmt)", "最后得到 \"hp=3, half=1.5\"，打印出来。", "The result is \"hp=3, half=1.5\", which gets printed.")
+        };
+    }
+
     // ================== 任务表（炮台 API 调用 13 项） ==================
 
     private static TaskDef[] apiTasks;
@@ -2536,7 +4242,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "    {\n"
             + "        if (o.Type == \"ATTACK\" && o.Position.x > 0f)\n"
             + "        {\n"
-            + "            tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z);   // 目标坐标即法向量\n"
+            + "            // 目标坐标即法向量\n"
+            + "            tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z);\n"
             + "            break;\n"
             + "        }\n"
             + "    }\n\n"
@@ -2548,7 +4255,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "    {\n"
             + "        if (o.Type == \"ATTACK\" && o.Position.x > 0f)\n"
             + "        {\n"
-            + "            tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z);   // target position is the normal\n"
+            + "            // target position is the normal\n"
+            + "            tower.FireAtPlane(o.Position.x, o.Position.y, o.Position.z);\n"
             + "            break;\n"
             + "        }\n"
             + "    }\n\n"
@@ -3125,6 +4833,10 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         sampleText.lineSpacing = GuideBodyLineSpacing;
         sampleText.raycastTarget = false;
 
+        // 第 3 页的内存可视化舞台：与两栏文字同层，覆盖整块正文区，平时隐藏、只在内存页露面。
+        // 必须建在 bodyText / sampleText 之后才会盖在文字上面（同级 UICanvas 里后面的更靠前）。
+        BuildMemStage(panelRt);
+
         // 左 / 右分栏竖分隔线（贯穿正文区，用暗色细线，不抢文字）
         GameObject dividerGo = new GameObject("ColumnDivider", typeof(RectTransform));
         RectTransform dividerRt = dividerGo.GetComponent<RectTransform>();
@@ -3209,6 +4921,29 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     {
         return guidePage > 0 && !finished && tasks != null
             && CurrentIndex >= 0 && CurrentIndex < tasks.Length && PageCountOf(CurrentIndex) > 1;
+    }
+
+    /// <summary>
+    /// 舞台的「基准高度」＝提示区不拖动时的高度减去上下内缩。
+    /// 拖矮面板时内容仍按这个高度排，底部那块才会顺着往下走、移出视野。
+    /// </summary>
+    private float MemStageBaselineHeight()
+    {
+        return Mathf.Max(120f, SplitBaseHeight() - (MemStageTopInset + MemStageBottomInset));
+    }
+
+    /// <summary>
+    /// 把「执行台 + 旁白」这一整块摆到内容的自然底部（layoutH 从舞台顶边往下量）。
+    /// 面板被拖矮 → layoutH 不变，这一块就落到面板下沿之外（走出去）；
+    /// 面板被拖高 → layoutH 跟着变大，这一块仍贴着真正的底边，不会悬在半空。
+    /// </summary>
+    private void PlaceMemBottom(float layoutH)
+    {
+        float noteTop = layoutH - MemNoteH;
+        if (memNoteText != null)
+            memNoteText.rectTransform.anchoredPosition = new Vector2(0f, -noteTop);
+        if (memExprRt != null)
+            memExprRt.anchoredPosition = new Vector2(0f, -(noteTop - MemNoteGapY - MemExprH));
     }
 
     /// <summary>提示区基准高度（不含手动拖动偏移）：第 1 页 = 工作区一半，第 2 页 = DetailPageRatio。</summary>

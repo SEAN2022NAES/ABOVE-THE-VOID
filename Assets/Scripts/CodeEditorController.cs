@@ -155,6 +155,12 @@ public class CodeEditorController : MonoBehaviour
     public bool IsOpen => editorRoot != null && editorRoot.activeSelf;
 
     /// <summary>
+    /// 代码输入框当前是否握着键盘焦点。教学卡（第 3 页内存可视化）据此决定 ↓ 键归谁：
+    /// 玩家在代码区时 ↓ 一律是「移动光标」的代码模式，教学卡不得抢键去翻下一步。
+    /// </summary>
+    public bool IsCodeInputFocused => IsInputFocused();
+
+    /// <summary>
     /// 主页是否正在显示（Home 面板可见）。主页状态下 Enter 一律屏蔽：不打开编辑器、不触发任何交互。
     /// 主页引用按需缓存（主页对象常驻，只需查找一次）。
     /// </summary>
@@ -222,6 +228,53 @@ public class CodeEditorController : MonoBehaviour
         Debug.Log("[CodeEditor] 已恢复出厂设置：代码清回初始示例模板");
     }
 
+    /// <summary>
+    /// 关卡切换收尾（LevelDirector.JumpTo / MainMenuController.StartLevel 调用）：把编辑器恢复到「本关初始状态」，
+    /// 保证进入任意关卡时都不继承上一关的代码残留。
+    ///   · 必须停 runner：上一关编译成功的 Run() 会每帧驱动炮台，不停就会在新关卡里继续自动开火
+    ///     （典型症状：Level 3 - Part 1 编译运行后跳回 Level 1 - Part 1，手动激光一下没打，炮台自己在打方块）；
+    ///   · 代码文本 / 已提交文本 / 撤销重做栈 / 光标 / defaultCodeFilled 一并清空，
+    ///     使再次打开编辑器时回到「首次打开自动填默认示例」的初始状态（而不是带着上一关的代码）；
+    ///   · 编辑器若还开着，强制关闭并恢复 timeScale，避免带着上一关的暂停状态进场。
+    /// 幂等，可重复调用；编辑器 UI 尚未构建时只复位标志位。
+    /// </summary>
+    public void ResetForLevelChange()
+    {
+        // 1) 先停 runner：这是「代码跨关仍然生效」的直接原因，必须是本方法的第一步
+        StopRunner();
+
+        // 2) 收尾界面状态（含 timeScale / 鼠标锁 / 进场提示）
+        if (IsOpen)
+            CloseAndForceResume();
+        else
+            HideEnterPrompt();
+        wasPausedBeforeOpen = false;
+        wasFrozenBeforeOpen = false;
+        // 这次关卡切换通常由一次 Enter（指令框确认）触发，先屏蔽到按键抬起，避免同一次 Enter 又打开编辑器
+        suppressOpenUntilRelease = true;
+
+        // 3) 内容与撤销栈清回出厂空白：defaultCodeFilled=false 让下次 Open() 重新填入默认示例
+        defaultCodeFilled = false;
+        lastCommittedText = string.Empty;
+        lastCaretPos = -1;
+        undoList.Clear();
+        redoList.Clear();
+
+        if (inputField != null)
+        {
+            SetFullCode(string.Empty, 0);
+            AppendError("");
+            RefreshCodeView();
+            if (codeRt != null)
+            {
+                ApplyScrollY(0f);
+                UpdateScrollBars();
+            }
+        }
+
+        Debug.Log("[CodeEditor] 关卡切换：编辑器已复位（runner 停止、代码清空、撤销栈清空）");
+    }
+
     // ---------------- 高亮配色 ----------------
     private const string C_KEYWORD = UITheme.HexKeyword;  // 关键字青
     private const string C_STRING = UITheme.HexString;   // 字符串绿
@@ -265,6 +318,14 @@ public class CodeEditorController : MonoBehaviour
         EnsureEventSystem();
         BuildUI();
         editorRoot.SetActive(false);
+        // 主页切语言时编辑器早已构建完，标题栏 / 按钮文案不会自己变，必须订阅后重排一次
+        Localization.OnLanguageChanged -= RefreshTitleBarChrome;
+        Localization.OnLanguageChanged += RefreshTitleBarChrome;
+    }
+
+    private void OnDestroy()
+    {
+        Localization.OnLanguageChanged -= RefreshTitleBarChrome;
     }
 
     private void Start()
@@ -3441,6 +3502,17 @@ public class CodeEditorController : MonoBehaviour
 
     // ==================== 代码文件选择面板（自绘目录浏览器） ====================
 
+    // ---- 标题栏（语言切换后需要重排：语言在主页切换时编辑器早就 BuildUI 完了，文案与按钮宽度都不会自己变） ----
+    private Text titleBarTitleText;                          // 标题「炮台代码编辑器 / Tower Code Editor」
+    private Button titleBtnStop;                             // 停止 (F7)
+    private Button titleBtnCompile;                          // 编译运行 (F6)
+    private Button titleBtnExport;                           // 导出 (F9)
+    private Button titleBtnOpen;                             // 打开代码文件 (F8)
+    private const float TitleBarRightPadding = 14f;          // 最右边 ✕ 距窗口右缘
+    private const float TitleBarCloseWidth = 56f;            // ✕ 按钮固定宽
+    private const float TitleBarGap = 12f;                   // 按钮之间的横向间隔
+    private const float TitleBarLabelPadding = 30f;          // 按钮文字左右各留 15px
+
     /// <summary>文件面板的两种用途：载入（浏览磁盘选文件）/ 保存（导出到指定目录 + 文件名）。</summary>
     private enum FilePickerMode { Open, Save }
 
@@ -4076,6 +4148,88 @@ public class CodeEditorController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 按当前语言重排标题栏：4 个功能按钮 + 标题。
+    ///   - 文案中英各一套（中文模式必须显示中文，而不是构建时那份英文）；
+    ///   - 每个按钮宽度按文案实际量出来的 preferredWidth + 左右各 15px，中英文切换后不会出现文字挤出 / 空荡；
+    ///   - 从右往左依次排布，按钮之间固定 12px 间隔，标题按剩余宽度收右边距。
+    /// </summary>
+    private void RefreshTitleBarChrome()
+    {
+        if (titleBarTitleText == null)
+            return;
+
+        bool zh = Localization.IsChinese;
+
+        titleBarTitleText.text = zh ? "炮台代码编辑器" : "Tower Code Editor";
+        titleBarTitleText.font = UIFontHelper.LoadForText(titleBarTitleText.text, titleBarTitleText.fontSize);
+
+        ApplyChromeButton(titleBtnStop, zh ? "停止 (F7)" : "Stop (F7)",
+            zh ? "Tips：按 F7 或点此按钮结束当前运行的用户代码，炮台回到待命状态。"
+               : "Tips: press F7 (or this button) to stop the running user code and park the tower.");
+        ApplyChromeButton(titleBtnCompile, zh ? "编译运行 (F6)" : "Compile & Run (F6)",
+            zh ? "Tips：按 F6 或点此按钮编译当前代码并立即运行；编译失败会在下方逐条列出错误行。"
+               : "Tips: press F6 (or this button) to compile and run the current code; any error is listed with its line number below.");
+        ApplyChromeButton(titleBtnExport, zh ? "导出 (F9)" : "Export (F9)",
+            zh ? "Tips：按 F9 或点此按钮打开导出面板，先选目录再填文件名，即可把当前代码写入磁盘（UTF-8 with BOM）。"
+               : "Tips: press F9 (or this button) to open the export panel - pick a folder, type a file name, and the current code is written to disk (UTF-8 with BOM).");
+        ApplyChromeButton(titleBtnOpen, zh ? "打开代码文件 (F8)" : "Open Code File (F8)",
+            zh ? "Tips：按 F8 或点此按钮打开文件面板，可逐级浏览磁盘目录，选中 .cs 或 .txt 文件即载入编辑器；载入前的内容仍留在撤销栈里（Ctrl+Z 可回退）。"
+               : "Tips: press F8 (or this button) to open the file panel and browse your disk; picking a .cs or .txt file loads it into the editor, while the previous content stays in the undo stack (Ctrl+Z).");
+
+        // 从右往左：✕ 按钮中点固定在 -TitleBarRightPadding，其后 4 个按钮按各自文案宽度 + 12px 间隔依次右对齐
+        float cursor = -(TitleBarRightPadding + TitleBarCloseWidth * 0.5f) - TitleBarGap;
+        cursor = LayoutChromeButton(titleBtnStop, cursor);
+        cursor = LayoutChromeButton(titleBtnCompile, cursor);
+        cursor = LayoutChromeButton(titleBtnExport, cursor);
+        cursor = LayoutChromeButton(titleBtnOpen, cursor);
+
+        // 标题只允许占到最左按钮左侧 20px，避免长文案顶到按钮
+        RectTransform titleRt = titleBarTitleText.rectTransform;
+        Vector2 offsetMax = titleRt.offsetMax;
+        offsetMax.x = cursor - 20f;
+        titleRt.offsetMax = offsetMax;
+    }
+
+    /// <summary>写按钮文案（含字体 / 不换行）并同步悬停提示，宽度在 LayoutChromeButton 里算。</summary>
+    private static void ApplyChromeButton(Button btn, string label, string tip)
+    {
+        if (btn == null)
+            return;
+        Text text = btn.GetComponentInChildren<Text>();
+        if (text != null)
+        {
+            text.text = label;
+            // 文案全部单行显示：宽度由下面按实际字宽给足，不允许自动换行 / 截断
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.font = UIFontHelper.LoadForText(label, text.fontSize);
+        }
+        HoverTip hover = btn.GetComponent<HoverTip>();
+        if (hover != null)
+            hover.tip = tip;
+    }
+
+    /// <summary>按文案实际宽度设置按钮尺寸，并把它的右边缘贴在 rightEdge 上；返回下一个按钮可用的右边缘。</summary>
+    private static float LayoutChromeButton(Button btn, float rightEdge)
+    {
+        if (btn == null)
+            return rightEdge;
+        RectTransform rt = btn.GetComponent<RectTransform>();
+        Text text = btn.GetComponentInChildren<Text>();
+        float labelWidth = 0f;
+        if (text != null)
+        {
+            labelWidth = text.preferredWidth;
+            if (labelWidth <= 0f)
+                labelWidth = text.text != null ? text.text.Length * text.fontSize * 0.62f : 0f;
+        }
+        float width = Mathf.Ceil(Mathf.Max(72f, labelWidth + TitleBarLabelPadding));
+        rt.sizeDelta = new Vector2(width, rt.sizeDelta.y);
+        rt.anchoredPosition = new Vector2(rightEdge - width * 0.5f, rt.anchoredPosition.y);
+        return rightEdge - width - TitleBarGap;
+    }
+
     /// <summary>给按钮挂一个悬停提示：鼠标进入时把提示写到底部状态栏，离开时清空。</summary>
     private void AttachHoverTip(GameObject target, string tip)
     {
@@ -4196,6 +4350,7 @@ public class CodeEditorController : MonoBehaviour
         titleBarBg.color = UITheme.PanelRaised; // #2D2D30
 
         Text title = CreateText("Title", titleBarRt, Localization.Pick("炮台代码编辑器", "Tower Code Editor"), titleFontSize, UITheme.TextPrimary, TextAnchor.MiddleLeft);
+        titleBarTitleText = title;
         RectTransform titleRt = title.rectTransform;
         titleRt.anchorMin = new Vector2(0f, 0f);
         titleRt.anchorMax = new Vector2(1f, 1f);
@@ -4205,10 +4360,12 @@ public class CodeEditorController : MonoBehaviour
         // 右侧按钮：✕ / 停止 (F7) / 编译运行 (F6) / 导出 (F9) / 载入 (F8)（从右往左）
         CreateButton("BtnClose", titleBarRt, "✕", Close, new Vector2(56f, 34f), new Vector2(-14f, 0f), new Vector2(1f, 0.5f), UITheme.PanelSunk);
         Button btnStop = CreateButton("BtnStop", titleBarRt, Localization.Pick("停止 (F7)", "Stop (F7)"), StopRunner, new Vector2(116f, 34f), new Vector2(-112f, 0f), new Vector2(1f, 0.5f), UITheme.AlertDim);
+        titleBtnStop = btnStop;
         AttachHoverTip(btnStop != null ? btnStop.gameObject : null,
             Localization.Pick("Tips：按 F7 或点此按钮结束当前运行的用户代码，炮台回到待命状态。", "Tips: press F7 (or this button) to stop the running user code and park the tower."));
 
         Button btnCompile = CreateButton("BtnCompile", titleBarRt, Localization.Pick("编译运行 (F6)", "Compile & Run (F6)"), CompileAndRun, new Vector2(156f, 34f), new Vector2(-260f, 0f), new Vector2(1f, 0.5f), UITheme.WithAlpha(UITheme.Accent, 0.22f));
+        titleBtnCompile = btnCompile;
         AttachHoverTip(btnCompile != null ? btnCompile.gameObject : null,
             Localization.Pick("Tips：按 F6 或点此按钮编译当前代码并立即运行；编译失败会在下方逐条列出错误行。", "Tips: press F6 (or this button) to compile and run the current code; any error is listed with its line number below."));
 
@@ -4218,6 +4375,7 @@ public class CodeEditorController : MonoBehaviour
             OpenCodeSavePicker,
             new Vector2(132f, 34f), new Vector2(-416f, 0f), new Vector2(1f, 0.5f),
             UITheme.WithAlpha(UITheme.Accent, 0.14f));
+        titleBtnExport = btnExport;
         AttachHoverTip(btnExport != null ? btnExport.gameObject : null,
             Localization.Pick("Tips：按 F9 或点此按钮打开导出面板，先选目录再填文件名，即可把当前代码写入磁盘（UTF-8 with BOM）。", "Tips: press F9 (or this button) to open the export panel - pick a folder, type a file name, and the current code is written to disk (UTF-8 with BOM)."));
 
@@ -4228,8 +4386,12 @@ public class CodeEditorController : MonoBehaviour
             OnOpenSavedCodeClicked,
             new Vector2(156f, 34f), new Vector2(-572f, 0f), new Vector2(1f, 0.5f),
             UITheme.WithAlpha(UITheme.TextMuted, 0.30f));
+        titleBtnOpen = btnOpenSaved;
         AttachHoverTip(btnOpenSaved != null ? btnOpenSaved.gameObject : null,
             Localization.Pick("Tips：按 F8 或点此按钮打开文件面板，可逐级浏览磁盘目录，选中 .cs 或 .txt 文件即载入编辑器；载入前的内容仍留在撤销栈里（Ctrl+Z 可回退）。", "Tips: press F8 (or this button) to open the file panel and browse your disk; picking a .cs or .txt file loads it into the editor, while the previous content stays in the undo stack (Ctrl+Z)."));
+
+        // 构建完立刻按当前语言排一次：文案、字体、按钮宽度与间隔都由它统一算
+        RefreshTitleBarChrome();
 
         // ---- 行号列视口（宽 70，RectMask2D 裁剪 + 背景；高度随窗口拉伸：上贴标题栏下缘、下贴底部横条） ----
         RectTransform lineViewportRt = CreateRect("LineViewport", editorRoot.transform, new Vector2(0f, 1f), Vector2.zero, new Vector2(70f, 868f), new Vector2(0f, 1f));

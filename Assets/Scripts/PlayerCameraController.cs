@@ -101,6 +101,10 @@ public class PlayerCameraController : MonoBehaviour
     // 外部模态占用（如指令框打开）：占用期间视角 / 移动 / 暂停键均让渡给外部组件
     private bool externalBlock;
 
+    // 纯阅读模态（如序章讲解页 / 方块图鉴页）：只禁视角 / 移动 / E / Q / F1，保留 ESC 暂停，
+    // 配合外部组件释放鼠标，避免「鼠标在面板上移动、背后的镜头却跟着乱转」
+    private bool viewBlocked;
+
     // 暂停键抑制截止时间（Time.unscaledTime 基准）：模态 UI（代码编辑器 / 指令框）用 ESC 关闭后，
     // 同一次 ESC 不应再触发暂停，故在此时间点之前忽略 pauseKey
     private float pauseInputSuppressedUntil;
@@ -197,11 +201,16 @@ public class PlayerCameraController : MonoBehaviour
     private void Update()
     {
         // V 键放大视场角：输入采样 + 逐帧平滑过渡（放在最前，保证暂停 / 编辑器打开时也把动画走完，不会卡在半途）
-        UpdateZoomInput(!externalBlock && Mode != GameMode.Paused);
+        UpdateZoomInput(!externalBlock && !viewBlocked && Mode != GameMode.Paused);
         UpdateFieldOfViewSmoothing();
 
         // 外部模态占用（指令框等）：视角 / 移动 / 暂停键全部让渡给外部组件
         if (externalBlock)
+            return;
+
+        // 纯阅读模态（序章讲解页 / 方块图鉴页等）：释放鼠标后禁止鼠标再转朝向，E / Q / F1 也一并失效；
+        // 但保留 ESC 暂停（暂停键不在这里读，由 EscapeRouter 走 HandleEscapePauseRequest），玩家随时能退回主页。
+        if (viewBlocked && Mode != GameMode.Paused)
             return;
 
         // 暂停键（ESC）不在这里读取：统一由 EscapeRouter 做唯一优先级判定后再回调 HandleEscapePauseRequest()，
@@ -272,7 +281,7 @@ public class PlayerCameraController : MonoBehaviour
     {
         Mode = modeBeforePause;            // 恢复暂停前的模式（Normal / Spirit / Frozen）
         Time.timeScale = timeFrozen ? 0f : 1f; // 若处于时间冻结则保持冻结（正交标记，不依赖 Mode）
-        SetCursorLocked(true);
+        SetCursorLocked(!viewBlocked);     // 纯阅读模态（序章 / 图鉴）恢复后仍把鼠标留在面板上
         if (settingsPanel != null)
             settingsPanel.HidePanel();
         Debug.Log("[PlayerCameraController] 恢复游戏（当前模式：" + Mode + "）");
@@ -565,6 +574,18 @@ public class PlayerCameraController : MonoBehaviour
         externalBlock = blocked;
     }
 
+    /// <summary>是否处于「纯阅读」模态（序章讲解页 / 图鉴页）：视角与移动失效，但 ESC 暂停仍然可用。</summary>
+    public bool ViewBlocked => viewBlocked;
+
+    /// <summary>
+    /// 设置纯阅读模态：置 true 后鼠标不再转动视角、WASD / E / Q / F1 全部失效（ESC 暂停保留）。
+    /// 调用方（讲解页）负责同时释放鼠标；退出时置 false 并把鼠标重新锁回。
+    /// </summary>
+    public void SetViewBlocked(bool blocked)
+    {
+        viewBlocked = blocked;
+    }
+
     /// <summary>外部组件（如指令框）要求取消暂停：若当前处于暂停则恢复。</summary>
     public void ResumeExternal()
     {
@@ -633,6 +654,7 @@ public class PlayerCameraController : MonoBehaviour
     public void ResetToLevelStart()
     {
         externalBlock = false;
+        viewBlocked = false;
         timeFrozen = false;
         strictAxisMovement = false;
         Mode = GameMode.Normal;

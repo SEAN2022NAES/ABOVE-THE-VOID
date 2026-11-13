@@ -140,7 +140,8 @@ public class CommandConsoleController : MonoBehaviour
         // 且当前关卡允许手动激光（Level 3 完整玩法关闭，改由代码编辑器 / 炮台接管）时有效
         if (ManualLaserEnabled && !IsOpen && Input.GetMouseButtonDown(0))
         {
-            bool blocked = playerController != null && playerController.ExternalBlock;
+            bool blocked = playerController != null &&
+                (playerController.ExternalBlock || playerController.ViewBlocked); // 主页 / 序章讲解页等模态时不发激光
             bool paused = playerController != null &&
                 playerController.Mode == PlayerCameraController.GameMode.Paused;
             if (!blocked && !paused)

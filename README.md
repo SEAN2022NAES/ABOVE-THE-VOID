@@ -11,12 +11,44 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.3**
+Current version: **v0.2.4**
 
 > **Licence / 许可**：Non-commercial use (study, teaching, research, non-profit open source) is free with
 > attribution and no monetisation of any kind; **commercial use requires a prior written licence**.
 > See [LICENSE](LICENSE) and [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). © 2026 Ma Yixiao (Sean Ma). All rights reserved.
 > **非商业用途免费（须署名、禁任何盈利场景），商业用途必须事先取得书面授权。** 详见下方「12. License / 许可」。
+
+### v0.2.4
+
+**Typography / 字体**
+
+- Added `NotoSansMonoCJKsc-Regular.otf` (SIL OFL 1.1, 44 810 code points — exactly the coverage of the existing `NotoSansCJKsc-Regular.otf`, so no character that used to render now falls back) so Chinese can also be set in a monospaced face.
+- `UIFontHelper.LoadForText` is now the single entry point for every font request and picks the face from the text itself: no CJK → `JetBrains Mono`; CJK mixed with Latin letters or digits → the monospaced CJK face; pure CJK → the proportional CJK face (`ContainsLatinLetter` / `ContainsLatinOrDigit` / `LoadChineseMono`). Every runtime-built text now goes through it, so ASCII embedded in a Chinese sentence keeps its column width.
+
+**Code editor**
+
+- The title bar re-labels itself on a language switch: the title, Stop (F7), Compile (F6), Open (F8), Export (F9) and the close button are all refreshed by `RefreshTitleBarChrome`, subscribed in `Awake` and released in `OnDestroy`.
+- Chrome buttons are placed by measured width (`preferredWidth` plus a 12 px gap, right to left from ✕), so a longer English or Chinese label can no longer overlap its neighbour.
+- Added `ResetForLevelChange()`: leaving a level clears the code text, the compiled runner, the undo stack and the `defaultCodeFilled` flag, so a `Run()` written for one level no longer keeps driving the turret in the next one. `LevelDirector.JumpTo` and the main-menu level entries both call it before any course starts.
+
+**Grammar course — memory visualisation**
+
+- A task can now carry a third page describing what the code does to memory: `MemScene` / `MemStep` / `MemVar` draw each variable as a labelled row, one cell per byte, with the little-endian order spelled out in the header, in-place value patches (a `for` counter changing mid-loop), ghost rows for code that allocates nothing, and badges for const / reference / stack frame / discarded.
+- The stage steps by hand (↓) instead of auto-advancing, animates a new row in, re-lays itself after the editor splitter is dragged, and follows the language switch with English type names, notes and badges.
+- Tasks without a memory scene keep the code-animation page, which also moved from auto-advance to manual stepping (the timer now only drives the tween).
+
+**Reading pages (prologue and block guide)**
+
+- Both paged readers take over the camera while open: `PlayerCameraController.SetViewBlocked` frees the cursor and disables look / WASD / E / Q / F1 while keeping ESC pause, so the camera no longer spins behind the panel as the pointer moves over it.
+- `S` skips either course from any page, matching the on-panel skip button.
+- Body text auto-fits: both readers step the font size down from a maximum to a floor until the longest page fits its box, so no page overflows on a shorter window.
+- Block guide: the text column sits to the right of the cube viewport on fixed insets, and each face carries a single outward-facing label instead of a mirrored duplicate on the inner wall.
+
+**Fixes**
+
+- The pause panel now uses sorting order 260, above the block guide and the task cards, so pressing ESC inside a guide actually shows the pause panel instead of hiding it behind the guide.
+- Returning to the main menu now ends the prologue and block-guide panels first — their sorting order (210) is above the menu (100), which previously left the menu invisible behind a guide.
+- The command console no longer fires its laser while a reading page or the main menu holds the view.
 
 ### v0.2.3
 

@@ -70,6 +70,13 @@ public static class LevelDirector
         BlockIntroController.End();
         CodeSyntaxTutorialController.End();
 
+        // 代码编辑器复位（必须在下面各教学 Begin() 之前）：离开上一关时把代码文本、编译结果（runner）、
+        // 撤销栈、defaultCodeFilled 全部清回本关初始状态。
+        // 之前没有任何收尾，导致 Level 3 - Part 1 编译运行后跳进 Level 1 - Part 1，上一关的 Run() 仍在每帧驱动炮台。
+        CodeEditorController levelEditor = Object.FindObjectOfType<CodeEditorController>();
+        if (levelEditor != null)
+            levelEditor.ResetForLevelChange();
+
         // 隐藏主页（若主页仍显示，如开发者指令在主页面板输入时）
         MainMenuController menu = Object.FindObjectOfType<MainMenuController>();
         if (menu != null)

@@ -169,6 +169,13 @@ public class MainMenuController : MonoBehaviour
         BlockIntroController.End();
         CodeSyntaxTutorialController.End();
 
+        // 代码编辑器复位：主页直接进入关卡（Level 1 - Part 1 / Level 3 - Part 1）不走 LevelDirector.JumpTo，
+        // 必须在这里同样收尾，否则上一关编译成功的 runner 会继续每帧驱动炮台（代码跨关仍然生效）。
+        // 位置在各教学 Begin/Tutorial 启动之前，保证教学能自己重新设置编辑器内容。
+        CodeEditorController menuEditor = FindObjectOfType<CodeEditorController>();
+        if (menuEditor != null)
+            menuEditor.ResetForLevelChange();
+
         if (playerController != null)
             playerController.SetExternalBlock(false); // 解除输入占用
 
@@ -240,6 +247,11 @@ public class MainMenuController : MonoBehaviour
     {
         if (root == null)
             return;
+
+        // 关键：先收掉可能仍在显示的教学 / 图鉴面板。这些面板的 Canvas sortingOrder（210）高于主页（100），
+        // 不收起会把主页整个盖住 —— 表现为「关卡里按 ESC → 点 Main Menu，却回不到主页（画面还是图鉴）」。
+        CodeIntroTutorialController.End();
+        BlockIntroController.End();
 
         // 终止教学（隐藏面板 + 清场）
         TutorialController tutorial = FindObjectOfType<TutorialController>();

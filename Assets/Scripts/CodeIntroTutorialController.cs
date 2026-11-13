@@ -7,7 +7,8 @@ using UnityEngine.UI;
 ///   · 面向完全不懂代码的玩家：先讲「为什么不要再用手一个一个点」，再讲「把规则交给电脑」，
 ///     最后看一眼真实代码长什么样、接下来两门课怎么学；
 ///   · 多页阅读（4 页），底部 ‹ 上一页 / 下一页 › 可来回翻，最后一页「开始语法课」直接进 Level 1 - Part 3；
-///   · 键盘 ← → 也能翻页；「跳过序章」按钮直接进语法课；
+///   · 键盘 ← → 也能翻页；「跳过序章 (S)」按钮 / S 键直接进语法课；
+///   · 读字期间释放鼠标并冻结视角（鼠标移动不会转动背后场景的朝向），ESC 暂停仍然可用；
 ///   · 本关不打开代码编辑器、不出方块，纯粹读字。
 /// 章节跳转：/level 1 2 n 可直接翻到第 n 页（见 LevelDirector）。
 /// </summary>
@@ -49,6 +50,63 @@ public class CodeIntroTutorialController : MonoBehaviour
     private Text prevLabel;
     private Text nextLabel;
     private Text skipLabel;
+    private PlayerCameraController playerController; // 读字期间接管视角：释放鼠标、禁止鼠标转朝向
+    private const KeyCode SkipKey = KeyCode.S;       // 跳过序章的快捷键（与按钮同效）
+
+    // ---- 正文字号自适应（修复换字体后的文字溢出）----
+    // 正文框是「固定高度 + verticalOverflow = Overflow」，字号原先写死 26。
+    // 字体从 msyh / Consolas 换成 Noto Sans CJK SC / JetBrains Mono 后：
+    //   · 同一字号的字形宽度增约 9%（CJK 全角宽度不变，但西文 / 数字变宽，混排断行位置随之变化）；
+    //   · 行高从雅黑的 1.32em 涨到 Noto 的 1.45em（+9.6%，1.35f 行距下 26 号每行从 46.4px 变 50.8px）。
+    // 两者叠加使 4 页正文里有 3 页超出正文框（第 2/3 页 +222px、第 4 页 +171px），文字直接压到页脚提示、
+    // 按钮上并越过面板下边界。这里改为按正文框真实尺寸挑字号：在 [BodyFontMin, BodyFontMax] 内取
+    // 「4 页中文 + 4 页英文都放得下」的最大字号，翻页时字号统一、不跳变；不改文案、不改流程。
+    private const int BodyFontMax = 26;
+    private const int BodyFontMin = 17;
+    private const float BodyFitPadding = 6f; // 留余量：避免字形取整 / 行高取整后正好压线
+    private int bodyFontSize = BodyFontMax;
+
+    /// <summary>
+    /// 按正文框真实宽高，选出能容纳「全部 4 页中文 + 4 页英文」的最大正文字号；都放不下时按可读性下限兜底。
+    /// 直接量 bodyText 自身的 Text.preferredHeight，度量与运行时渲染完全同源（换字体、换分辨率都不会再估偏）。
+    /// </summary>
+    private int FitBodyFontSize()
+    {
+        if (bodyText == null)
+            return BodyFontMax;
+
+        Rect bodyArea = bodyText.rectTransform.rect;
+        if (bodyArea.width <= 1f || bodyArea.height <= 1f)
+            return BodyFontMax; // 布局尚未就绪：保持默认字号
+
+        float limit = bodyArea.height - BodyFitPadding;
+        for (int size = BodyFontMax; size > BodyFontMin; size--)
+        {
+            if (AllPagesFit(size, limit))
+                return size;
+        }
+        return BodyFontMin;
+    }
+
+    /// <summary>4 页中文 + 4 页英文是否都能在 limit 高度内放下（翻页时字号统一，不跳变）。</summary>
+    private bool AllPagesFit(int fontSize, float limit)
+    {
+        for (int i = 0; i < PageCount; i++)
+        {
+            if (!PageFits(BodiesZh[i], fontSize, limit) || !PageFits(BodiesEn[i], fontSize, limit))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>把文案临时灌进 bodyText 量一次实际排版高度（字号 + 字体与 Refresh / SetLabel 保持一致）。</summary>
+    private bool PageFits(string content, int fontSize, float limit)
+    {
+        bodyText.fontSize = fontSize;
+        bodyText.font = UIFontHelper.LoadForText(content, fontSize);
+        bodyText.text = content;
+        return bodyText.preferredHeight <= limit;
+    }
 
     private static readonly string[] TitlesZh =
     {
@@ -168,12 +226,20 @@ public class CodeIntroTutorialController : MonoBehaviour
         if (!Active)
             return;
 
+        // 暂停（ESC 打开设置面板）期间不响应翻页 / 跳过按键，避免暂停时还把序章切走
+        if (playerController == null)
+            playerController = FindObjectOfType<PlayerCameraController>();
+        if (playerController != null && playerController.Mode == PlayerCameraController.GameMode.Paused)
+            return;
+
         // 键盘也能来回翻页（← 上一页 / → 下一页），不用鼠标点
         if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.PageUp))
             PrevPage();
         else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.PageDown)
                  || Input.GetKeyDown(KeyCode.Space))
             NextPage();
+        else if (Input.GetKeyDown(SkipKey))
+            SkipPrologue(); // S：直接跳过序章进语法课（与「跳过序章」按钮同效）
     }
 
     // ================== 对外接口 ==================
@@ -192,6 +258,7 @@ public class CodeIntroTutorialController : MonoBehaviour
         if (inst.root != null && !inst.root.activeSelf)
             inst.root.SetActive(true);
         inst.Refresh();
+        inst.EnterReadingMode(); // 读字期间释放鼠标，且鼠标不再转动背后场景的朝向
         Debug.Log("[CodeIntroTutorial] 编程序章开始：第 " + (inst.CurrentPage + 1) + "/" + PageCount + " 页。");
     }
 
@@ -201,6 +268,7 @@ public class CodeIntroTutorialController : MonoBehaviour
         if (Instance == null)
             return;
         Instance.Active = false;
+        Instance.ExitReadingMode(); // 交还鼠标、解除视角封锁（跳关 / 回主页的调用方随后还会再锁一次鼠标）
         if (Instance.root != null && Instance.root.activeSelf)
             Instance.root.SetActive(false);
     }
@@ -236,6 +304,43 @@ public class CodeIntroTutorialController : MonoBehaviour
         Refresh();
     }
 
+    /// <summary>跳过序章（S 键或「跳过序章」按钮）：不看讲解、直接进 Level 1 - Part 3 语法课。</summary>
+    private void SkipPrologue()
+    {
+        if (!Active || transitioning)
+            return;
+        GoGrammarCourse();
+    }
+
+    // ================== 阅读态：释放鼠标 + 冻结视角 ==================
+
+    /// <summary>
+    /// 进入阅读态：把鼠标放出来（可以自由点按钮 / 翻页），同时通知 PlayerCameraController
+    /// 进入「纯阅读」封锁——鼠标再怎么动也不会转动背后场景的朝向，WASD / E / Q / F1 一并失效。
+    /// 注意保留 ESC 暂停（PlayerCameraController 只在 reading 封锁下跳过视角与移动，不吞暂停键），
+    /// 玩家读的时候随时可以按 ESC 唤出暂停面板退回主页。
+    /// </summary>
+    private void EnterReadingMode()
+    {
+        if (playerController == null)
+            playerController = FindObjectOfType<PlayerCameraController>();
+        if (playerController != null)
+            playerController.SetViewBlocked(true);
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+    }
+
+    /// <summary>退出阅读态：解除视角封锁、把鼠标重新锁回（后续跳关 / 回主页的调用方还会再锁一次，幂等）。</summary>
+    private void ExitReadingMode()
+    {
+        if (playerController == null)
+            playerController = FindObjectOfType<PlayerCameraController>();
+        if (playerController != null)
+            playerController.SetViewBlocked(false);
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = true;
+    }
+
     /// <summary>
     /// 进入 Level 1 - Part 3 语法课。过渡方式与 Level 1 - Part 1 → Part 2 完全一致：
     /// 黑幕淡出到全黑 → 在全黑那一帧执行 LevelDirector.JumpTo（内部会 End() 收尾并清场）→ 黑幕淡入，
@@ -267,17 +372,19 @@ public class CodeIntroTutorialController : MonoBehaviour
 
         SetLabel(pageTagText, (zh ? "序章 " : "Prologue ") + (page + 1) + "/" + PageCount);
         SetLabel(titleText, zh ? TitlesZh[page] : TitlesEn[page]);
+        if (bodyText != null)
+            bodyText.fontSize = bodyFontSize; // 先定字号，SetLabel 才会按该字号加载对应字形
         SetLabel(bodyText, zh ? BodiesZh[page] : BodiesEn[page]);
         SetLabel(footerText, zh
-            ? "键盘 ← → 也能翻页　·　读完最后一页即可进入语法课"
-            : "Keyboard arrows also page through · finish the last page to start the syntax course");
+            ? "键盘 ← → 也能翻页　·　按 S 跳过序章　·　读完最后一页即可进入语法课"
+            : "Keyboard arrows also page through · press S to skip the prologue · finish the last page to start the syntax course");
 
         SetLabel(prevLabel, zh ? "‹ 上一页" : "‹ Back");
         // 最后一页的「下一页」变成入口按钮，明确告诉玩家下一步去哪
         SetLabel(nextLabel, page >= PageCount - 1
             ? (zh ? "开始语法课 ›" : "Start the course ›")
             : (zh ? "下一页 ›" : "Next ›"));
-        SetLabel(skipLabel, zh ? "跳过序章" : "Skip prologue");
+        SetLabel(skipLabel, zh ? "跳过序章 (S)" : "Skip prologue (S)");
 
         if (prevBtn != null)
             prevBtn.interactable = page > 0;
@@ -310,9 +417,10 @@ public class CodeIntroTutorialController : MonoBehaviour
         scrim.color = UITheme.WithAlpha(UITheme.Void, 0.62f);
         scrim.raycastTarget = true; // 吞掉点击，避免误触背后的界面
 
-        // 阅读面板
+        // 阅读面板（高度由 820 → 900：换字体后正文行高 +9.6%，正文区从 540 撑到 620，
+        // 配合正文自适应字号可让 4 页都完整放得下，同时仍在 1080 参考高度内留出上下各 90 的边距）
         RectTransform panelRt = CreateRect("IntroPanel", canvasGo.transform, new Vector2(0.5f, 0.5f),
-            Vector2.zero, new Vector2(1680f, 820f), new Vector2(0.5f, 0.5f));
+            Vector2.zero, new Vector2(1680f, 900f), new Vector2(0.5f, 0.5f));
         panelRoot = panelRt.gameObject;
         Image panelImg = panelRoot.AddComponent<Image>();
         panelImg.sprite = WhiteSprite();
@@ -363,6 +471,13 @@ public class CodeIntroTutorialController : MonoBehaviour
         bodyText.verticalOverflow = VerticalWrapMode.Overflow;
         bodyText.lineSpacing = 1.35f;
 
+        // 正文自适应字号：正文框是固定高度 + Overflow，字号写死 26 时第 2~4 页会直接压到页脚提示与按钮上、
+        // 并越过面板下边界（详见 FitBodyFontSize 注释）。这里在正文框真实高度内挑一个「4 页都放得下」的字号。
+        bodyFontSize = FitBodyFontSize();
+        bodyText.fontSize = bodyFontSize;
+        Debug.Log("[CodeIntroTutorial] 正文自适应字号：" + bodyFontSize + "（正文框 "
+            + Mathf.RoundToInt(bodyText.rectTransform.rect.width) + "×" + Mathf.RoundToInt(bodyText.rectTransform.rect.height) + "）");
+
         // 操作提示（键盘 ← → 也能翻页）：放在右下按钮组【上方】一行，避免与按钮横向重叠压住文字
         footerText = CreateText("Footer", panelRt, "", 18, UITheme.TextMuted, TextAnchor.MiddleLeft);
         RectTransform footerRt = footerText.rectTransform;
@@ -373,20 +488,44 @@ public class CodeIntroTutorialController : MonoBehaviour
         footerRt.sizeDelta = new Vector2(-300f, 28f);
 
         // 右下按钮组：‹ 上一页 / 下一页 › / 跳过序章
+        // 三个按钮的间距必须一致：之前是各自写死 x 坐标（-330 / -120 / 150），
+        // 结果 上一页↔下一页只隔 15px、下一页↔跳过序章只隔 5px，三个挤成一坨，右边却空出一大截，观感很不协调。
+        // 现在统一按 NavGap 等距排布，并让整组在面板内水平居中。
+        const float NavGap = 28f;
+        const float PrevW = 180f;
+        const float NextW = 210f;
+        const float SkipW = 320f;
+        float groupW = PrevW + NextW + SkipW + NavGap * 2f;
+        float cursor = -groupW * 0.5f;                       // 整组左边界（相对面板中心）
+
         prevBtn = CreateButton(panelRt, "PrevBtn", "‹ 上一页",
-            new Vector2(0.5f, 0f), new Vector2(-330f, 40f), new Vector2(180f, 62f));
+            new Vector2(0.5f, 0f), new Vector2(cursor + PrevW * 0.5f, 40f), new Vector2(PrevW, 62f));
         prevBtn.onClick.AddListener(PrevPage);
         prevLabel = prevBtn.GetComponentInChildren<Text>();
+        cursor += PrevW + NavGap;
 
         nextBtn = CreateButton(panelRt, "NextBtn", "下一页 ›",
-            new Vector2(0.5f, 0f), new Vector2(-120f, 40f), new Vector2(210f, 62f));
+            new Vector2(0.5f, 0f), new Vector2(cursor + NextW * 0.5f, 40f), new Vector2(NextW, 62f));
         nextBtn.onClick.AddListener(NextPage);
         nextLabel = nextBtn.GetComponentInChildren<Text>();
+        cursor += NextW + NavGap;
 
-        Button skipBtn = CreateButton(panelRt, "SkipBtn", "跳过序章",
-            new Vector2(0.5f, 0f), new Vector2(120f, 40f), new Vector2(170f, 62f));
+        // 横宽按中英文两套文案的最长者给足：「Skip prologue (S)」比「跳过序章 (S)」宽得多，
+        // 原来的窄按钮会让英文顶出右边界，这里直接加宽到 320；
+        // 同时给标签开自动缩字兜底（Wrap + Best Fit），再长的文案也只缩字、不越界。
+        Button skipBtn = CreateButton(panelRt, "SkipBtn", "跳过序章 (S)",
+            new Vector2(0.5f, 0f), new Vector2(cursor + SkipW * 0.5f, 40f), new Vector2(SkipW, 62f));
         skipBtn.onClick.AddListener(GoGrammarCourse);
         skipLabel = skipBtn.GetComponentInChildren<Text>();
+        if (skipLabel != null)
+        {
+            // Unity 的 Best Fit 需要横向换行模式才会真正生效：文字先尝试换行，仍放不下再按 min→max 缩字号
+            skipLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+            skipLabel.verticalOverflow = VerticalWrapMode.Truncate;
+            skipLabel.resizeTextForBestFit = true;
+            skipLabel.resizeTextMinSize = 12;
+            skipLabel.resizeTextMaxSize = 22;
+        }
 
         root.SetActive(false);
     }

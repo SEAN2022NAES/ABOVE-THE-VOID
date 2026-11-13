@@ -33,13 +33,30 @@ public class BlockIntroController : MonoBehaviour
     private const float RefWidth = 1920f;
     private const float RefHeight = 1080f;
     private const float PanelWidth = 1680f;
-    private const float PanelHeight = 900f;
+    private const float PanelHeight = 940f;   // 1080 参考高度下上下各留 70，正文区多让出两行空间
     private const float ViewSize = 600f;      // 左侧 3D 视图边长
+
+    // ---- 右侧文字栏：区域常量 + 字号自适应（文案不动，字号跟着每页内容走，任何语言都不压到图例 / 页脚）----
+    private const float ColumnLeftInset = 676f;   // 文字栏距面板左边 = 56 + 视图 600 + 20 间距
+    private const float ColumnRightInset = 52f;
+    private const float ColumnBottomInset = 150f; // 文字栏底部让位给按钮组 / 页脚
+    private const float ColumnTopInset = 132f;    // 文字栏顶部让位给页码 / 标题
+    private const float BodyTopInset = 156f;      // 正文顶部让位给「正对你的面 / 值 / 说明」
+    private const float BodyBottomInset = 16f;
+    private const float FaceDescHeight = 74f;
+    private const int BodyFontMax = 22;
+    private const int BodyFontMin = 15;
+    private const int DescFontMax = 20;
+    private const int DescFontMin = 15;
+
+    private static float BodyBoxWidth { get { return PanelWidth - ColumnLeftInset - ColumnRightInset; } }
+    private static float BodyBoxHeight { get { return PanelHeight - ColumnTopInset - ColumnBottomInset - BodyTopInset - BodyBottomInset; } }
     private const float FaceOffset = 0.5f;    // 立方体半边长（单位立方体）
     private const int TextureSize = 768;      // RenderTexture 边长
 
     private const float FadeOutSeconds = 0.35f;
     private const float FadeInSeconds = 0.5f;
+    private const KeyCode SkipKey = KeyCode.S;   // 跳过整段图鉴（与「跳过图鉴 (S)」按钮同一条链路）
 
     // ================== 面板 UI ==================
     private GameObject root;
@@ -47,6 +64,7 @@ public class BlockIntroController : MonoBehaviour
     private Text pageTagText;
     private Text titleText;
     private Text bodyText;
+    private int lastBodyFontSize = -1;   // 上一次自适应得到的正文字号（仅用于日志，页面切换时打印一次）
     private Text faceNameText;
     private Text faceValueText;
     private Text faceDescText;
@@ -59,14 +77,14 @@ public class BlockIntroController : MonoBehaviour
     private Text skipLabel;
     private readonly Image[] legendBgs = new Image[6];
     private readonly Text[] legendTexts = new Text[6];
+    private PlayerCameraController playerController; // 看页期间接管视角：释放鼠标、禁止鼠标转朝向
 
     // ================== 3D 视图 ==================
     private GameObject viewRoot;      // 独立 3D 舞台（放在远处，主相机看不到）
     private GameObject cubeRoot;      // 会旋转的立方体
     private Camera viewCamera;
     private RenderTexture viewTexture;
-    private readonly TextMesh[] faceLabels = new TextMesh[6];      // 朝 +Z 一侧的文字
-    private readonly TextMesh[] faceLabelsBack = new TextMesh[6];   // 朝 -Z 一侧的镜像文字（换语言时同步重写）
+    private readonly TextMesh[] faceLabels = new TextMesh[6];      // 每个面只有一张朝外的文字（内壁不再放镜像字）
     private readonly Transform[] faceTransforms = new Transform[6];
     private int frontFace = -1;       // 正对镜头的面（-1 = 还没算过）
 
@@ -323,6 +341,13 @@ public class BlockIntroController : MonoBehaviour
             return;
         }
 
+        // S 键：跳过整段图鉴，直接进入 Level 2 - Part 2 炮台 API 课
+        if (Input.GetKeyDown(SkipKey))
+        {
+            SkipAll();
+            return;
+        }
+
         SpinCube();
         UpdateFrontFace();
     }
@@ -350,6 +375,7 @@ public class BlockIntroController : MonoBehaviour
             inst.viewRoot.SetActive(true);
 
         inst.Refresh();
+        inst.EnterReadingMode(); // 看图鉴期间释放鼠标，鼠标移动不再转动背后场景的朝向
         Debug.Log("[BlockIntro] 方块图鉴开始：第 " + (inst.CurrentPage + 1) + "/" + PageCount + " 页。");
     }
 
@@ -359,6 +385,7 @@ public class BlockIntroController : MonoBehaviour
         if (Instance == null)
             return;
         Instance.Active = false;
+        Instance.ExitReadingMode(); // 交还鼠标、解除视角封锁
         if (Instance.root != null && Instance.root.activeSelf)
             Instance.root.SetActive(false);
         if (Instance.viewRoot != null && Instance.viewRoot.activeSelf)
@@ -371,6 +398,33 @@ public class BlockIntroController : MonoBehaviour
             return Instance;
         GameObject go = new GameObject("BlockIntro");
         return go.AddComponent<BlockIntroController>();
+    }
+
+    // ================== 阅读态：释放鼠标 + 冻结视角 ==================
+
+    /// <summary>
+    /// 进入阅读态：放出鼠标（可以点翻页 / 跳过按钮），并让 PlayerCameraController 进入「纯阅读」封锁，
+    /// 鼠标移动不再转动背后场景的朝向（ESC 暂停仍然可用）。
+    /// </summary>
+    private void EnterReadingMode()
+    {
+        if (playerController == null)
+            playerController = FindObjectOfType<PlayerCameraController>();
+        if (playerController != null)
+            playerController.SetViewBlocked(true);
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+    }
+
+    /// <summary>退出阅读态：解除视角封锁、把鼠标重新锁回（随后跳关 / 回主页的调用方会再锁一次，幂等）。</summary>
+    private void ExitReadingMode()
+    {
+        if (playerController == null)
+            playerController = FindObjectOfType<PlayerCameraController>();
+        if (playerController != null)
+            playerController.SetViewBlocked(false);
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = true;
     }
 
     // ================== 翻页 ==================
@@ -394,6 +448,33 @@ public class BlockIntroController : MonoBehaviour
         }
         CurrentPage++;
         Refresh();
+    }
+
+    /// <summary>
+    /// 跳过整段图鉴（S 键 / 跳过按钮）：把 5 页全部记成已读并同步存档，随后走与末页相同的黑幕过渡进入 API 课。
+    /// </summary>
+    private void SkipAll()
+    {
+        if (!Active || transitioning)
+            return;
+
+        if (pageDone != null)
+        {
+            bool changed = false;
+            for (int i = 0; i < pageDone.Length; i++)
+            {
+                if (!pageDone[i])
+                {
+                    pageDone[i] = true;
+                    changed = true;
+                }
+            }
+            if (changed)
+                GameProgress.SaveTaskDone(GameProgress.TaskDoneKeyBlockIntro, pageDone);
+        }
+
+        Debug.Log("[BlockIntro] 跳过图鉴 → 进入 Level 2 - Part 2 炮台 API 课。");
+        GoApiCourse();
     }
 
     /// <summary>
@@ -432,16 +513,30 @@ public class BlockIntroController : MonoBehaviour
 
         SetLabel(pageTagText, (zh ? "图鉴 " : "Guide ") + (page + 1) + "/" + PageCount);
         SetLabel(titleText, zh ? TitlesZh[page] : TitlesEn[page]);
-        SetLabel(bodyText, zh ? BodiesZh[page] : BodiesEn[page]);
+
+        // 正文：先按正文框实测挑字号，再写文本 / 载字体，保证每页都完整落在框内
+        string bodyContent = zh ? BodiesZh[page] : BodiesEn[page];
+        int bodySize = FitFontSize(bodyText, bodyContent, BodyFontMax, BodyFontMin, BodyBoxWidth, BodyBoxHeight);
+        if (bodyText != null)
+            bodyText.fontSize = bodySize;
+        SetLabel(bodyText, bodyContent);
+
+        if (bodySize != lastBodyFontSize)
+        {
+            lastBodyFontSize = bodySize;
+            Debug.Log("[BlockIntro] 第 " + (page + 1) + "/" + PageCount + " 页正文自适应字号："
+                + bodySize + "（正文框 " + (int)BodyBoxWidth + "×" + (int)BodyBoxHeight + "）");
+        }
+
         SetLabel(footerText, zh
-            ? "键盘 ← → 也能翻页　·　读完最后一页即可进入炮台 API 课"
-            : "Keyboard arrows also page through · finish the last page to start the API course");
+            ? "键盘 ← → 翻页　·　按 S 跳过图鉴　·　读完最后一页即可进入炮台 API 课"
+            : "Arrows page through · press S to skip the guide · finish the last page to start the API course");
 
         SetLabel(prevLabel, zh ? "‹ 上一页" : "‹ Back");
         SetLabel(nextLabel, page >= PageCount - 1
             ? (zh ? "开始 API 课 ›" : "Start the API course ›")
             : (zh ? "下一页 ›" : "Next ›"));
-        SetLabel(skipLabel, zh ? "跳过图鉴" : "Skip guide");
+        SetLabel(skipLabel, zh ? "跳过图鉴 (S)" : "Skip guide (S)");
 
         if (prevBtn != null)
             prevBtn.interactable = page > 0;
@@ -456,7 +551,6 @@ public class BlockIntroController : MonoBehaviour
 
             string faceLabelText = faceName + "\n" + f.value;
             SetFaceLabelText(faceLabels[i], faceLabelText);
-            SetFaceLabelText(faceLabelsBack[i], faceLabelText);
 
             if (legendTexts[i] != null)
                 SetLabel(legendTexts[i], faceName + "　" + f.value);
@@ -493,11 +587,29 @@ public class BlockIntroController : MonoBehaviour
             return;
         frontFace = best;
 
+        // 字必须贴在方块「外面」：TextMesh 用的是字体材质（GUI/Text Shader，ZTest Always + Cull Off），
+        // 它不受深度遮挡、双面都画——六个面的字全开着时，背面 / 侧面的字会穿过前面的色块，
+        // 看起来就像写在方块里面。这里只保留正对镜头的那一张，其余全部关掉，任何时刻只有一面有字。
+        for (int i = 0; i < faceLabels.Length; i++)
+        {
+            if (faceLabels[i] == null)
+                continue;
+            Renderer labelRenderer = faceLabels[i].GetComponent<Renderer>();
+            if (labelRenderer != null)
+                labelRenderer.enabled = i == frontFace;
+        }
+
         bool zh = Localization.IsChinese;
         FaceDef f = Faces[frontFace];
         SetLabel(faceNameText, (zh ? "正对你的面：" : "Facing you: ") + (zh ? f.nameZh : f.nameEn));
         SetLabel(faceValueText, f.value);
-        SetLabel(faceDescText, zh ? f.descZh : f.descEn);
+
+        // 面的说明长短不一（英文普遍更长），同样按框实测挑字号，避免压到下方正文
+        string desc = zh ? f.descZh : f.descEn;
+        int descSize = FitFontSize(faceDescText, desc, DescFontMax, DescFontMin, BodyBoxWidth, FaceDescHeight);
+        if (faceDescText != null)
+            faceDescText.fontSize = descSize;
+        SetLabel(faceDescText, desc);
 
         for (int i = 0; i < legendBgs.Length; i++)
         {
@@ -582,10 +694,9 @@ public class BlockIntroController : MonoBehaviour
         CreateQuad(faceNode.transform, "Color" + index + "A", 0f, f.faceColor);
         CreateQuad(faceNode.transform, "Color" + index + "B", 180f, f.faceColor);
 
-        // 面上文字：同理做成一对镜像标签（一张朝 +Z、一张朝 -Z），外面看到的一定是正读那一张，
-        // 另一张被前后两张不透明色块挡在立方体另一侧，看不见；这样不依赖 TextMesh 的默认朝向约定。
-        faceLabels[index] = CreateFaceLabel(faceNode.transform, index, "A", 180f, f, 0.014f);
-        faceLabelsBack[index] = CreateFaceLabel(faceNode.transform, index, "B", 0f, f, -0.014f);
+        // 面上文字：只放一张，朝向 = 面挂点的 +Z（即外法线方向），贴在色块外侧一点，
+        // 从立方体外看是正读的；内壁不再放镜像字，避免转过来时看到双重 / 背面反字。
+        faceLabels[index] = CreateFaceLabel(faceNode.transform, index, f);
 
         faceTransforms[index] = faceNode.transform;
     }
@@ -622,13 +733,17 @@ public class BlockIntroController : MonoBehaviour
         }
     }
 
-    /// <summary>面上的文字标签（面名 + 取值）。</summary>
-    private TextMesh CreateFaceLabel(Transform parent, int index, string tag, float yRotation, FaceDef f, float zOffset)
+    /// <summary>
+    /// 面上的文字标签（面名 + 取值）：唯一一张，可读面朝立方体外侧。
+    /// 注意 Unity 的 TextMesh 与内置 Quad 一样，正面朝自身局部 -Z（不是 +Z）；面挂点的 +Z 是外法线，
+    /// 所以标签必须绕 Y 转 180° 才能把可读面翻到外面，否则从方块外看到的是背面反字 —— 看起来就像写在方块里面。
+    /// </summary>
+    private TextMesh CreateFaceLabel(Transform parent, int index, FaceDef f)
     {
-        GameObject labelGo = new GameObject("FaceLabel" + index + tag);
+        GameObject labelGo = new GameObject("FaceLabel" + index);
         labelGo.transform.SetParent(parent, false);
-        labelGo.transform.localRotation = Quaternion.Euler(0f, yRotation, 0f);
-        labelGo.transform.localPosition = new Vector3(0f, 0f, zOffset);
+        labelGo.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);     // TextMesh 正面 = 局部 -Z，转 180° 后朝外
+        labelGo.transform.localPosition = new Vector3(0f, 0f, 0.02f);          // 贴在色块外侧，避免与面片 Z 冲突
 
         TextMesh tm = labelGo.AddComponent<TextMesh>();
         tm.text = f.nameZh + "\n" + f.value;
@@ -796,50 +911,51 @@ public class BlockIntroController : MonoBehaviour
             new Vector2(1f, 1f), new Vector2(0.5f, 0.5f));
         colRt.anchorMin = new Vector2(0f, 0f);
         colRt.anchorMax = new Vector2(1f, 1f);
-        colRt.offsetMin = new Vector2(676f, 150f);
-        colRt.offsetMax = new Vector2(-52f, -132f);
+        colRt.offsetMin = new Vector2(ColumnLeftInset, ColumnBottomInset);
+        colRt.offsetMax = new Vector2(-ColumnRightInset, -ColumnTopInset);
 
         faceNameText = StackText(colRt, "FaceName", 26, UITheme.Accent, 0f, 38f);
         faceNameText.fontStyle = FontStyle.Bold;
         faceValueText = StackText(colRt, "FaceValue", 22, UITheme.Value, 42f, 28f);
-        faceDescText = StackText(colRt, "FaceDesc", 20, UITheme.TextSub, 74f, 74f);
+        faceDescText = StackText(colRt, "FaceDesc", DescFontMax, UITheme.TextSub, 74f, FaceDescHeight);
 
-        bodyText = CreateText("Body", colRt, "", 21, UITheme.TextBody, TextAnchor.UpperLeft);
+        // 正文：从「面的说明」下方一直排到文字栏底部（图例已移到左侧，底部不再和正文抢空间）
+        bodyText = CreateText("Body", colRt, "", BodyFontMax, UITheme.TextBody, TextAnchor.UpperLeft);
         RectTransform bodyRt = bodyText.rectTransform;
         bodyRt.anchorMin = new Vector2(0f, 0f);
         bodyRt.anchorMax = new Vector2(1f, 1f);
-        bodyRt.offsetMin = new Vector2(0f, 108f);
-        bodyRt.offsetMax = new Vector2(0f, -160f);
+        bodyRt.offsetMin = new Vector2(0f, BodyBottomInset);
+        bodyRt.offsetMax = new Vector2(0f, -BodyTopInset);
         bodyText.horizontalOverflow = HorizontalWrapMode.Wrap;
         bodyText.verticalOverflow = VerticalWrapMode.Overflow;
         bodyText.lineSpacing = 1.28f;
 
-        // 图例标题
-        Text legendTitle = StackText(colRt, "LegendTitle", 18, UITheme.TextMuted, 0f, 24f, TextAnchor.LowerLeft);
+        // 图例：2 列 × 3 行，挂在左侧 3D 视图下方（原先塞在右侧正文底部，长页正文会压到图例上）
+        Text legendTitle = CreateText("LegendTitle", panelRt, "", 18, UITheme.TextMuted, TextAnchor.MiddleLeft);
         RectTransform legendTitleRt = legendTitle.rectTransform;
-        legendTitleRt.anchorMin = new Vector2(0f, 0f);
-        legendTitleRt.anchorMax = new Vector2(1f, 0f);
-        legendTitleRt.pivot = new Vector2(0.5f, 0f);
-        legendTitleRt.anchoredPosition = new Vector2(0f, 80f);
-        legendTitleRt.sizeDelta = new Vector2(0f, 22f);
+        legendTitleRt.anchorMin = new Vector2(0f, 1f);
+        legendTitleRt.anchorMax = new Vector2(0f, 1f);
+        legendTitleRt.pivot = new Vector2(0f, 1f);
+        legendTitleRt.anchoredPosition = new Vector2(56f, -770f);
+        legendTitleRt.sizeDelta = new Vector2(ViewSize, 22f);
         legendTitle.text = Localization.IsChinese ? "六个面（转一圈就认全了）" : "Six faces (one turn and you know them all)";
         legendTitle.font = UIFontHelper.LoadForText(legendTitle.text, 18);
 
-        // 图例：2 列 × 3 行
-        float colW = 464f;
+        float colW = (ViewSize - 12f) * 0.5f;
         for (int i = 0; i < 6; i++)
         {
             int col = i % 2;
             int row = i / 2;
-            RectTransform rowRt = CreateRect("Legend" + i, colRt, new Vector2(0f, 0f),
-                new Vector2(col * (colW + 12f), 8f + (2 - row) * 26f), new Vector2(colW, 24f), new Vector2(0f, 0f));
+            RectTransform rowRt = CreateRect("Legend" + i, panelRt, new Vector2(0f, 1f),
+                new Vector2(56f + col * (colW + 12f), -(800f + row * 26f)),
+                new Vector2(colW, 24f), new Vector2(0f, 1f));
             Image bg = rowRt.gameObject.AddComponent<Image>();
             bg.sprite = WhiteSprite();
             bg.color = UITheme.WithAlpha(UITheme.PanelSunk, 0.55f);
             bg.raycastTarget = false;
             legendBgs[i] = bg;
 
-            Text t = CreateText("Label", rowRt, "", 17, UITheme.TextMuted, TextAnchor.MiddleLeft);
+            Text t = CreateText("Label", rowRt, "", 16, UITheme.TextMuted, TextAnchor.MiddleLeft);
             Stretch(t.rectTransform);
             t.rectTransform.offsetMin = new Vector2(10f, 0f);
             t.rectTransform.offsetMax = new Vector2(-8f, 0f);
@@ -857,9 +973,9 @@ public class BlockIntroController : MonoBehaviour
         nextBtn.onClick.AddListener(NextPage);
         nextLabel = nextBtn.GetComponentInChildren<Text>();
 
-        Button skipBtn = CreateButton(panelRt, "SkipBtn", "跳过图鉴",
-            new Vector2(0.5f, 0f), new Vector2(120f, 40f), new Vector2(170f, 62f));
-        skipBtn.onClick.AddListener(GoApiCourse);
+        Button skipBtn = CreateButton(panelRt, "SkipBtn", "跳过图鉴 (S)",
+            new Vector2(0.5f, 0f), new Vector2(120f, 40f), new Vector2(200f, 62f));
+        skipBtn.onClick.AddListener(SkipAll);
         skipLabel = skipBtn.GetComponentInChildren<Text>();
 
         // 操作提示：放右下角，避开底部中间按钮组
@@ -910,6 +1026,34 @@ public class BlockIntroController : MonoBehaviour
         t.verticalOverflow = VerticalWrapMode.Overflow;
         t.lineSpacing = 1.2f;
         return t;
+    }
+
+    /// <summary>按框实测挑字号：从 max 逐级降到 min，返回第一个能让内容完整落在框内的字号。</summary>
+    private static int FitFontSize(Text t, string content, int max, int min, float boxWidth, float boxHeight)
+    {
+        if (t == null || string.IsNullOrEmpty(content))
+            return max;
+
+        for (int size = max; size > min; size--)
+        {
+            if (MeasureTextHeight(t, content, size, boxWidth) <= boxHeight)
+                return size;
+        }
+        return min;
+    }
+
+    /// <summary>用 Text 自己的 TextGenerator 量一段文字在给定宽度、字号下的排版高度（与渲染同一套设置）。</summary>
+    private static float MeasureTextHeight(Text t, string content, int size, float width)
+    {
+        TextGenerationSettings settings = t.GetGenerationSettings(new Vector2(Mathf.Max(32f, width), 0f));
+        settings.fontSize = size;
+        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        settings.generateOutOfBounds = true;
+
+        TextGenerator gen = t.cachedTextGeneratorForLayout;
+        gen.Populate(content, settings);
+        return gen.GetPreferredHeight(content, settings) / t.pixelsPerUnit;
     }
 
     private static void SetLabel(Text t, string content)

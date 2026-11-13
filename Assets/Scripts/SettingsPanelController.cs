@@ -119,6 +119,9 @@ public class SettingsPanelController : MonoBehaviour
         // Canvas（Screen Space Overlay）
         canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        // 暂停界面必须压在教学面板（TutorialController = 60）与任务卡(210) 之上，否则引导关按 ESC 时暂停面板会被教学面板挡住；
+        // 仍低于指令框(320) 与淡入淡出(900)。
+        canvas.sortingOrder = 260;
 
         CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
