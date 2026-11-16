@@ -413,6 +413,7 @@ public class CommandConsoleController : MonoBehaviour
     ///   ③ 设置：视场角 atv.settings.fov / 灵敏度 atv.settings.sensitivity / 帧率 atv.settings.fps
     ///      三个存档键全部删除，滑块恢复出厂值（90° / 1.75 / 60）并立即应用到相机与 Application.targetFrameRate；
     ///   ④ 编辑器代码：CodeEditorController.ResetCodeToDefault()（回到初始示例模板）；
+    ///      编辑器字号存档：ResetFontSettingsToDefault()（atv.codeEditor.fontSize / errorFontSize 删除，字号回默认 24 / 18）；
     ///   ⑤ 主页按钮：RefreshLevelLocks() 立即刷新为「只有关卡 1 可玩」（最高分行同时消失）；
     ///   ⑥ 若当前在关卡内：关闭指令框并把玩家送回主页，避免关卡状态与清零后的存档不一致。
     /// 输出走指令框自身的输出通道，与 /unlock 完全一致（中文全中文、英文全英文）。
@@ -463,11 +464,17 @@ public class CommandConsoleController : MonoBehaviour
             SettingsPanelController.ClearSavedSettings(); // 设置面板未构建时至少清掉全部存档键
 
         // ④ 编辑器代码清回初始模板（inputField.text = DEFAULT_CODE，并同步 lastCommittedText / defaultCodeFilled）
+        //    编辑器字号存档（atv.codeEditor.fontSize / errorFontSize）一并清掉、字号回默认（代码 24 / 报错 18）
         CodeEditorController editor = FindObjectOfType<CodeEditorController>();
         if (editor != null)
+        {
             editor.ResetCodeToDefault();
+            editor.ResetFontSettingsToDefault();
+        }
+        else
+            CodeEditorController.ClearSavedFontSettings(); // 编辑器尚未构建：至少把存档键清掉
 
-        Debug.Log("[CommandConsole] /lock 回厂重置：关卡进度、游玩进度与最高分、设置、编辑器代码已清空。");
+        Debug.Log("[CommandConsole] /lock 回厂重置：关卡进度、游玩进度与最高分、设置、编辑器代码与编辑器字号已清空。");
 
         // ⑤ / ⑥ 刷新主页锁定状态；若当前在关卡内，先写入提示再关指令框并把玩家送回主页
         MainMenuController menu = FindObjectOfType<MainMenuController>();

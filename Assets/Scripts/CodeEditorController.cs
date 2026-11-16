@@ -30,9 +30,9 @@ public class CodeEditorController : MonoBehaviour
     [Tooltip("标题字号")]
     public int titleFontSize = 20;
     [Tooltip("代码区字号")]
-    public int codeFontSize = 20;
+    public int codeFontSize = DefaultCodeFontSize;
     [Tooltip("错误列表字号")]
-    public int errorFontSize = 15;
+    public int errorFontSize = DefaultErrorFontSize;
     [Tooltip("状态栏字号")]
     public int statusFontSize = 14;
     [Tooltip("全屏背景色（#1E1E1E alpha 0.97）")]
@@ -74,18 +74,53 @@ public class CodeEditorController : MonoBehaviour
     private Text inputText;              // 输入层文字（透明）
     private RectTransform lineViewportRt; // 行号列视口（RectMask2D 裁剪 + 背景）
     private RectTransform codeViewportRt; // 代码区视口（RectMask2D 裁剪 + 背景）
+    // ---- 底部错误区（高度自适应 + 自身可滚动：报错内容永远整段留在屏幕内，不会被挤出画面下沿） ----
+    private RectTransform errorZoneRt;    // 底部错误 / 状态区底板（高度随报错行数增长）
+    private RectTransform errorMaskRt;    // 错误文字可视区（RectMask2D 裁剪，滚轮在此翻页）
+    private float errorContentHeight;     // 错误文字实测内容高度（排版后写入，供滚动范围使用）
+    private float errorScrollY;           // 错误文字上移量（0 = 顶部对齐；内容高于可视区时才有值）
+    private const float ErrorZoneMinHeight = 160f;   // 空错误 / 单行错误时的默认高度（与旧版一致）
+    private const float ErrorSplitBarHeight = 3f;    // 错误区上缘分界条「视觉」粗细（只画 3px，拖拽命中区另有一层更高的透明层）
+    private const float ErrorSplitHitHeight = 9f;    // 分界条拖拽命中区高度 = 3px 细条 + 6px 呼吸位（不遮挡下方错误文字）
+    // 红色细条「上方」再叠一条提示条：下缘贴住 3px 细条，细条负责画分界，这条负责一眼可见 + 好按住（整条都能上下拖）。
+    // 粗细由 10px 收细到 6px（原先与底部横条同粗细、显得太厚），命中区高度不受影响，照样好抓。
+    private const float ErrorSplitGripHeight = 6f;
+    private const float ErrorTopInset = ErrorSplitGripHeight + ErrorSplitBarHeight + 6f; // 错误视口顶部内缩 = 提示条 + 分界条 + 6px 呼吸位
+    private const float SeamMergeThreshold = 16f;    // 任一侧被压到这么矮，就把该侧的分界条收掉（两条合成一条）
+    private const int ErrorFontMax = 18;             // 报错字号自动适配的起点上限（默认字号，已整体上调；玩家可调区间仍是 ErrorFontMin ~ ErrorFontZoomMax）
+    private const int ErrorFontMin = 11;             // 报错字号下限：缩到这么小还放不下就交给滚轮
+    private const int ErrorFontZoomMax = 34;         // Ctrl+滚轮手动放大上限（手动缩放后不再自动缩字号）
     private RectTransform lineRt;         // 行号内容（高度随行数增长，滚动偏移同步）
     private RectTransform codeRt;         // 代码内容（高度随行数增长，滚动偏移 y ≤ 0）
     private RectTransform vScrollTrackRt;  // 右侧竖滚动条轨道
     private RectTransform vScrollHandleRt; // 右侧竖滚动条滑块
     private RectTransform hScrollTrackRt;  // 底部横滚动条轨道
     private RectTransform hScrollHandleRt; // 底部横滚动条滑块
+    private RectTransform errorScrollTrackRt;  // 错误区（红）竖滚动条轨道
+    private RectTransform errorScrollHandleRt; // 错误区（红）竖滚动条滑块
+    private RectTransform errorSplitBarRt;     // 错误区上缘红色分隔条（3px 视觉细条，不参与点击）
+    private RectTransform errorSplitGripRt;    // 分隔条上方的红色提示条（6px，整条可拖，下缘贴住 3px 细条）
+    private RectTransform errorSplitHitRt;     // 分隔条透明拖拽命中区（9px 高，真正承接上下拖动）
+    private bool errorFontScaled;              // 玩家用 Ctrl+滚轮手动调过报错字号（true 时不再自动缩字号适配）
+    private float errorZoneManualHeight;       // 用户拖红条设定的错误区高度（0 = 未手动调过，跟随内容自适应）
+    private float errorSplitStartMouseY;       // 分隔条拖动起点（屏幕像素）
+    private float errorSplitStartHeight;       // 分隔条拖动起始错误区高度（UI 单位）
+    private bool errorZoneCollapsed;           // 错误区被压到底、与底部横条合并后收起；有新报错才自动弹回
     private readonly List<string> undoList = new List<string>();  // 撤销栈（自实现，兜底原生）
     private readonly List<string> redoList = new List<string>();  // 重做栈
     private string lastCommittedText = "";
     private const int MaxUndoSteps = 100;
     private const int CodeFontSizeMin = 12;   // Ctrl+滚轮缩放的字体下限
     private const int CodeFontSizeMax = 40;   // Ctrl+滚轮缩放的字体上限
+
+    // ---- 字号默认值与存档键 ----
+    // 默认字号整体上调（代码 20 → 24、报错 15 → 18），玩家可调区间刻意保持原样不动：
+    //   代码 12 ~ 40、报错 11 ~ 34（ErrorFontMin / ErrorFontMax / ErrorFontZoomMax / CodeFontSizeMin / CodeFontSizeMax 全部沿用旧值）。
+    // 玩家用 Ctrl+滚轮调过的字号会写进 PlayerPrefs，重启游戏 / 重开编辑器后原样恢复。
+    private const int DefaultCodeFontSize = 24;
+    private const int DefaultErrorFontSize = 18;
+    private const string CodeFontSizePrefKey = "atv.codeEditor.fontSize";
+    private const string ErrorFontSizePrefKey = "atv.codeEditor.errorFontSize";
     private float codeContentHeight;          // 代码区内容高度缓存（滚动范围计算不依赖 rect 滞后值）
     private float codeContentWidth;           // 代码区内容宽度缓存（横向滚动范围，长行不换行时大于视口宽）
     private Vector2 lastViewportSize;         // 上次代码视口尺寸（窗口 / 编辑器尺寸变化时重算内容尺寸与滚动范围）
@@ -212,7 +247,7 @@ public class CodeEditorController : MonoBehaviour
             return;
         }
 
-        SetFullCode(DEFAULT_CODE, 0);
+        SetFullCode(DefaultCode, 0);
         defaultCodeFilled = true;              // 内容已等于默认模板，Open() 不再重复覆盖
         lastCommittedText = GetFullCode();      // 同步已提交文本，避免撤销 / 高亮错位
         undoList.Clear();
@@ -313,19 +348,125 @@ public class CodeEditorController : MonoBehaviour
         "        i, objects[i].Index, objects[i].Type, objects[i].HP,\n" +
         "        objects[i].Position, objects[i].Velocity, objects[i].Params);\n";
 
+    /// <summary>
+    /// 默认示例代码（英文版）：与 DEFAULT_CODE 逐行一一对应，只有「注释 + 屏幕说明文字」换成英文，
+    /// 代码本体完全一致 —— 英文界面下打开 Level 3 - Part 1 的代码演示，注释不该还是中文。
+    /// </summary>
+    private const string DEFAULT_CODE_EN =
+        "// Tower API demo: GetAllObjects / FireAtPlane / GetFireCooldown (minimal, no auto loop)\n" +
+        "// Output goes to the print screen (in front on +X), not Debug.Log; print supports printf-style {0} {1}\n" +
+        "// The engine calls Run(tower) every frame; write your own while / if when you need looping or rate limits\n" +
+        "// Note: the plane Ax+By+Cz=0 of FireAtPlane(A,B,C) always passes the origin, so only the normal (A,B,C) is needed\n" +
+        "tower.ClearPrint();\n" +
+        "tower.PrintLine(\"== Tower API demo ==\");\n" +
+        "float cd = tower.GetFireCooldown();\n" +
+        "tower.PrintLine(\"GetFireCooldown={0:F3}\", cd);\n" +
+        "bool fired1 = tower.FireAtPlane(0f, 1f, 0f);   // normal (0,1,0): plane through origin, fires along +Y\n" +
+        "tower.PrintLine(\"FireAtPlane fired={0}\", fired1);\n" +
+        "var objects = tower.GetAllObjects();\n" +
+        "tower.PrintLine(\"GetAllObjects count={0}\", objects.Count);\n" +
+        "for (int i = 0; i < objects.Count && i < 5; i++)\n" +
+        "    tower.PrintLine(\"obj[{0}] = #{1} {2} HP={3} pos={4} vel={5} [{6}]\",\n" +
+        "        i, objects[i].Index, objects[i].Type, objects[i].HP,\n" +
+        "        objects[i].Position, objects[i].Velocity, objects[i].Params);\n";
+
+    /// <summary>当前语言下的默认示例代码（中文界面 → 中文注释，英文界面 → 英文注释），打开编辑器 / 回厂重置都用它。</summary>
+    private static string DefaultCode
+    {
+        get { return Localization.IsChinese ? DEFAULT_CODE : DEFAULT_CODE_EN; }
+    }
+
     private void Awake()
     {
         EnsureEventSystem();
+        LoadFontSettings();   // 先读回玩家上次调好的字号，BuildUI 建字时直接用对（否则会先按默认字号建一遍再改）
         BuildUI();
         editorRoot.SetActive(false);
         // 主页切语言时编辑器早已构建完，标题栏 / 按钮文案不会自己变，必须订阅后重排一次
-        Localization.OnLanguageChanged -= RefreshTitleBarChrome;
-        Localization.OnLanguageChanged += RefreshTitleBarChrome;
+        Localization.OnLanguageChanged -= HandleLanguageChanged;
+        Localization.OnLanguageChanged += HandleLanguageChanged;
     }
 
     private void OnDestroy()
     {
-        Localization.OnLanguageChanged -= RefreshTitleBarChrome;
+        Localization.OnLanguageChanged -= HandleLanguageChanged;
+    }
+
+    // ================== 字号存档（PlayerPrefs） ==================
+
+    /// <summary>
+    /// 读回玩家上次用 Ctrl+滚轮调好的字号（代码区 + 报错区）。
+    ///   · 没有存档（第一次玩 / 回厂重置后）一律用默认字号：代码 24、报错 18；
+    ///   · 存档值一律夹回合法区间（代码 12~40、报错 11~34），脏数据不会把界面撑坏；
+    ///   · 报错字号存在存档里 = 玩家手动调过，同时把 errorFontScaled 置位，
+    ///     这样 RefreshErrorLayout 重启后也尊重玩家设定，不会自动缩回默认上限。
+    /// 必须在 BuildUI() 之前调用：文本组件创建时就按最终字号建，省掉一次「建完再改」的重排。
+    /// </summary>
+    private void LoadFontSettings()
+    {
+        codeFontSize = Mathf.Clamp(PlayerPrefs.GetInt(CodeFontSizePrefKey, DefaultCodeFontSize),
+            CodeFontSizeMin, CodeFontSizeMax);
+
+        bool hasErrorSaved = PlayerPrefs.HasKey(ErrorFontSizePrefKey);
+        errorFontSize = Mathf.Clamp(PlayerPrefs.GetInt(ErrorFontSizePrefKey, DefaultErrorFontSize),
+            ErrorFontMin, ErrorFontZoomMax);
+        errorFontScaled = hasErrorSaved;
+    }
+
+    /// <summary>把当前代码字号 / 报错字号写进存档并立即落盘（Ctrl+滚轮每调一次就存一次，崩溃也不丢）。</summary>
+    private void SaveFontSettings()
+    {
+        PlayerPrefs.SetInt(CodeFontSizePrefKey, Mathf.Clamp(codeFontSize, CodeFontSizeMin, CodeFontSizeMax));
+        PlayerPrefs.SetInt(ErrorFontSizePrefKey, Mathf.Clamp(errorFontSize, ErrorFontMin, ErrorFontZoomMax));
+        PlayerPrefs.Save();
+    }
+
+    /// <summary>只删字号存档键（编辑器实例还没建 / 不需要立刻重排时用），下次构建 UI 即回到默认字号。</summary>
+    public static void ClearSavedFontSettings()
+    {
+        PlayerPrefs.DeleteKey(CodeFontSizePrefKey);
+        PlayerPrefs.DeleteKey(ErrorFontSizePrefKey);
+        PlayerPrefs.Save();
+    }
+
+    /// <summary>
+    /// /lock 回厂重置：删掉字号存档，编辑器字号回到默认（代码 24 / 报错 18）。
+    /// 指令框在关卡内调起时编辑器可能正开着，所以顺带把已构建好的文本组件按新字号重排一次。
+    /// </summary>
+    public void ResetFontSettingsToDefault()
+    {
+        ClearSavedFontSettings();
+
+        codeFontSize = DefaultCodeFontSize;
+        errorFontSize = DefaultErrorFontSize;
+        errorFontScaled = false;
+        errorZoneManualHeight = 0f;
+
+        if (inputField == null)
+            return; // UI 还没建：下次 Awake / Open 时直接按默认字号建
+
+        ApplyFontSizeToAllSegments();
+        RefreshCodeView();
+        RefreshErrorLayout(errorListText != null ? errorListText.text : string.Empty);
+    }
+
+    /// <summary>
+    /// 语言切换：除了重排标题栏文案，还要把「仍是默认示例模板」的编辑器内容换成对应语言的版本 ——
+    /// 玩家自己改过的代码一个字都不动，只有内容恰好等于中文 / 英文默认模板时才整体替换（注释语言随界面走）。
+    /// </summary>
+    private void HandleLanguageChanged()
+    {
+        RefreshTitleBarChrome();
+        if (inputField == null)
+            return; // UI 未构建：下次 Open() 直接按新语言填默认模板
+        string current = GetFullCode();
+        if (current == DEFAULT_CODE || current == DEFAULT_CODE_EN)
+        {
+            SetFullCode(DefaultCode, 0);
+            lastCommittedText = GetFullCode();
+            undoList.Clear();
+            redoList.Clear();
+        }
     }
 
     private void Start()
@@ -448,6 +589,13 @@ public class CodeEditorController : MonoBehaviour
                 OpenCodeSavePicker();
                 return;
             }
+            // F10：展开 / 收起「报错界面」（与标题栏 Error Panel 按钮同逻辑）。
+            // 打开编辑器时默认不显示报错区，只有编译报错才自动弹出；想随时回看上次报错就按 F10。
+            if (Input.GetKeyDown(KeyCode.F10))
+            {
+                ToggleErrorPanel();
+                return;
+            }
         }
 
         // 编辑器打开时：光标位置变化 → 刷新状态栏并自动滚动跟随；滚轮在代码视口内翻页
@@ -515,7 +663,11 @@ public class CodeEditorController : MonoBehaviour
             HandleArrowHorizontalScroll(prevCaretBlock); // → / ← 逐字符横向浏览超出视口右侧的代码（按块内下标判断行首行尾）
             bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             if (ctrlHeld)
-                HandleFontZoom();  // Ctrl+滚轮：缩放代码字号（放大 / 缩小）
+            {
+                // Ctrl+滚轮：指针在报错区就缩放报错文字，在代码区就缩放代码字号（同一套「以鼠标所在行为锚」的算法）
+                if (!HandleErrorFontZoom())
+                    HandleFontZoom();  // Ctrl+滚轮：缩放代码字号（放大 / 缩小）
+            }
             else
                 HandleWheelScroll(); // 滚轮翻页（自实现，不依赖 ScrollRect）
             // Ctrl+C/V/X 粘贴保障：输入框未聚焦时原生快捷键不生效，检测到 Ctrl 组合先自动聚焦
@@ -537,7 +689,7 @@ public class CodeEditorController : MonoBehaviour
             // Ctrl+Z / Ctrl+Y（撤销 / 重做）：自实现栈兜底，失焦屏蔽原生撤销防止双触发
             HandleUndoRedoShortcuts();
 
-            UpdateScrollBars(); // 滑块常驻隐藏（防御性兜底：任何代码路径都不会让它重新显示）
+            UpdateScrollBars(); // 每帧兜底：内容溢出即显示滚动块，放得下即隐藏
         }
 
         // 用户代码每帧驱动炮台（编辑器关闭且游戏未暂停时）
@@ -665,7 +817,19 @@ public class CodeEditorController : MonoBehaviour
         if (consoleBg != null)
             consoleBg.color = bottomReservedHeight > 0f ? consoleBgSplitColor : consoleBgFullColor;
 
+        // 编辑器变矮后错误区可能高过了可用上限：按新高度重新夹一次，保证代码区不被挤没
+        ApplyErrorZoneHeight(errorZoneHeightCurrent());
+
         UpdateScrollBars(); // 视口高度变化后重算竖向滚动条的滑块长度与位置
+    }
+
+    /// <summary>当前错误区高度（无错误区时返回最小值）。</summary>
+    private float errorZoneHeightCurrent()
+    {
+        if (errorZoneRt == null)
+            return ErrorZoneMinHeight;
+        float h = errorZoneRt.sizeDelta.y;
+        return h > 0f ? h : ErrorZoneMinHeight;
     }
 
     /// <summary>
@@ -709,7 +873,11 @@ public class CodeEditorController : MonoBehaviour
         float r = rightReservedWidth;
         codeViewportRt.offsetMax = new Vector2(-r, codeViewportRt.offsetMax.y);
         if (vScrollTrackRt != null)
+        {
+            // 竖条左边也要跟着左移：只改右边界会把 10px 宽的轨道拉成一大片（滑块被推到区域正中）
+            vScrollTrackRt.offsetMin = new Vector2(-(r + 16f), vScrollTrackRt.offsetMin.y);
             vScrollTrackRt.offsetMax = new Vector2(-(r + 6f), vScrollTrackRt.offsetMax.y);
+        }
         if (hScrollTrackRt != null)
             hScrollTrackRt.offsetMax = new Vector2(-(r + 16f), hScrollTrackRt.offsetMax.y);
 
@@ -757,7 +925,7 @@ public class CodeEditorController : MonoBehaviour
             enterPromptRt.gameObject.SetActive(false); // 进场提示在打开编辑器后消失
         if (!defaultCodeFilled)
         {
-            SetFullCode(DEFAULT_CODE, 0); // 首次打开填入示例代码（内部分段判定）
+            SetFullCode(DefaultCode, 0); // 首次打开填入示例代码（内部分段判定；注释语言跟随当前语言）
             defaultCodeFilled = true;
         }
         lastCommittedText = GetFullCode();
@@ -789,10 +957,12 @@ public class CodeEditorController : MonoBehaviour
 
         Time.timeScale = 0f;
         SetCursorLocked(false);
-        AppendError("");
+        // 打开编辑器时「只显示代码编辑状态」：报错区默认收起（红条 / 粗提示条 / 报错文字一概不显示），
+        // 上一次的报错文本仍留在内存里 —— 编译报错会自动弹出，玩家也可以按 F10 / 点 Error Panel 随时调出。
+        CollapseErrorZone();
         SetStatus(Localization.Pick(
-            "编辑器已打开（Esc / ✕ 关闭）｜F6 编译运行 · F7 停止 · F8 载入 · F9 导出",
-            "Editor opened (Esc or ✕ to close) | F6 compile & run · F7 stop · F8 load · F9 export"), false);
+            "编辑器已打开（Esc / ✕ 关闭）｜F6 编译运行 · F7 停止 · F8 载入 · F9 导出 · F10 报错界面",
+            "Editor opened (Esc or ✕ to close) | F6 compile & run · F7 stop · F8 load · F9 export · F10 error panel"), false);
         Debug.Log("[CodeEditor] 编辑器打开");
     }
 
@@ -2649,18 +2819,65 @@ public class CodeEditorController : MonoBehaviour
     }
 
     /// <summary>
-    /// 滚动滑块常驻隐藏：竖向 / 横向滑块在任何窗口尺寸、任何内容长度下都不显示（需求：永不出现滚动滑块）。
-    /// 滑块是叠加在视口上的绝对定位节点（无 LayoutGroup），隐藏后不占布局、不挤压视口宽度，也不留空白占位。
-    /// 滚动能力本身保留：滚轮翻页 HandleWheelScroll、Shift+滚轮横向、方向键横向浏览、透明轨道点击跳转，
-    /// 依靠 RectMask2D 裁剪的视口 + 内容偏移实现，不依赖滑块存在。
-    /// 用 activeSelf 判断后再 SetActive，避免每帧重复触发 Canvas 重建。
+    /// 刷新代码区滚动块（竖向 + 横向）：内容真的超出视口时才显示对应方向的滑块，
+    /// 长度按「视口 : 内容」比例换算、位置按滚动进度换算；放得下就整块隐藏，不留深色条块占视线。
+    /// 轨道本身透明且常驻（click 跳转仍可用），所以滑块出现 / 消失不会挤压代码视口宽度。
     /// </summary>
     private void UpdateScrollBars()
     {
-        if (vScrollHandleRt != null && vScrollHandleRt.gameObject.activeSelf)
-            vScrollHandleRt.gameObject.SetActive(false);
-        if (hScrollHandleRt != null && hScrollHandleRt.gameObject.activeSelf)
-            hScrollHandleRt.gameObject.SetActive(false);
+        if (codeViewportRt == null)
+            return;
+
+        float viewH = codeViewportRt.rect.height;
+        float viewW = codeViewportRt.rect.width;
+
+        // ---------- 竖向滚动块 ----------
+        if (vScrollHandleRt != null)
+        {
+            float maxY = GetScrollMaxY();
+            if (maxY > 0.5f && viewH > 1f && codeContentHeight > 1f)
+            {
+                if (!vScrollHandleRt.gameObject.activeSelf)
+                    vScrollHandleRt.gameObject.SetActive(true);
+                float trackH = vScrollTrackRt != null ? vScrollTrackRt.rect.height : 0f;
+                if (trackH <= 1f)
+                    trackH = Mathf.Max(24f, viewH); // 首帧布局未完成时兜底
+                float ratio = Mathf.Clamp01(viewH / Mathf.Max(1f, codeContentHeight));
+                float handleH = Mathf.Clamp(trackH * ratio, 28f, trackH);
+                vScrollHandleRt.sizeDelta = new Vector2(vScrollHandleRt.sizeDelta.x, handleH);
+                float y = codeRt != null ? codeRt.anchoredPosition.y : 0f;
+                float t = Mathf.Clamp01(y / maxY);
+                vScrollHandleRt.anchoredPosition = new Vector2(0f, -t * Mathf.Max(0f, trackH - handleH));
+            }
+            else if (vScrollHandleRt.gameObject.activeSelf)
+            {
+                vScrollHandleRt.gameObject.SetActive(false);
+            }
+        }
+
+        // ---------- 横向滚动块 ----------
+        if (hScrollHandleRt != null)
+        {
+            float maxX = GetScrollMaxX();
+            if (maxX > 0.5f && viewW > 1f && codeContentWidth > 1f)
+            {
+                if (!hScrollHandleRt.gameObject.activeSelf)
+                    hScrollHandleRt.gameObject.SetActive(true);
+                float trackW = hScrollTrackRt != null ? hScrollTrackRt.rect.width : 0f;
+                if (trackW <= 1f)
+                    trackW = Mathf.Max(40f, viewW); // 同上兜底
+                float ratio = Mathf.Clamp01(viewW / Mathf.Max(1f, codeContentWidth));
+                float handleW = Mathf.Clamp(trackW * ratio, 40f, trackW);
+                hScrollHandleRt.sizeDelta = new Vector2(handleW, hScrollHandleRt.sizeDelta.y);
+                float sx = codeRt != null ? Mathf.Clamp(-codeRt.anchoredPosition.x, 0f, maxX) : 0f;
+                float t = Mathf.Clamp01(sx / maxX);
+                hScrollHandleRt.anchoredPosition = new Vector2(t * Mathf.Max(0f, trackW - handleW), 0f);
+            }
+            else if (hScrollHandleRt.gameObject.activeSelf)
+            {
+                hScrollHandleRt.gameObject.SetActive(false);
+            }
+        }
     }
 
     /// <summary>滚动条拖动 / 轨道点击回调：axis 0=竖 1=横；t 为归一化 0~1 滚动进度。</summary>
@@ -2779,6 +2996,9 @@ public class CodeEditorController : MonoBehaviour
         float wheel = Input.mouseScrollDelta.y;
         if (Mathf.Abs(wheel) < 0.01f || codeViewportRt == null || codeRt == null)
             return;
+        // 指针落在底部错误区：滚轮改翻报错文字（报错多到一屏放不下时），不再翻代码
+        if (HandleErrorWheelScroll(wheel))
+            return;
         if (!RectTransformUtility.RectangleContainsScreenPoint(codeViewportRt, Input.mousePosition, null))
             return;
         SyncContentHeight(); // 滚动前强制同步内容高度，避免 contentH 未更新导致滚动范围恒为 0（内容翻不下去）
@@ -2885,6 +3105,7 @@ public class CodeEditorController : MonoBehaviour
         float frac = rowF - row;            // 0~1：鼠标落在该行内的纵向比例
 
         codeFontSize = newSize;
+        SaveFontSettings();           // 字号存进存档：重启游戏 / 重开编辑器后照旧
         ApplyFontSizeToAllSegments(); // 所有分块的输入层 / 高亮层 / 行号层统一字号
         RefreshCodeView(); // 重算高亮 / 行号 / 内容高度与滚动范围（末尾的光标跟随会改写滚动偏移，下面统一覆盖）
 
@@ -3508,6 +3729,7 @@ public class CodeEditorController : MonoBehaviour
     private Button titleBtnCompile;                          // 编译运行 (F6)
     private Button titleBtnExport;                           // 导出 (F9)
     private Button titleBtnOpen;                             // 打开代码文件 (F8)
+    private Button titleBtnErrors;                           // 报错界面 (F10)：展开 / 收起底部报错区（与 Open Code File 并列）
     private const float TitleBarRightPadding = 14f;          // 最右边 ✕ 距窗口右缘
     private const float TitleBarCloseWidth = 56f;            // ✕ 按钮固定宽
     private const float TitleBarGap = 12f;                   // 按钮之间的横向间隔
@@ -4176,13 +4398,29 @@ public class CodeEditorController : MonoBehaviour
         ApplyChromeButton(titleBtnOpen, zh ? "打开代码文件 (F8)" : "Open Code File (F8)",
             zh ? "Tips：按 F8 或点此按钮打开文件面板，可逐级浏览磁盘目录，选中 .cs 或 .txt 文件即载入编辑器；载入前的内容仍留在撤销栈里（Ctrl+Z 可回退）。"
                : "Tips: press F8 (or this button) to open the file panel and browse your disk; picking a .cs or .txt file loads it into the editor, while the previous content stays in the undo stack (Ctrl+Z).");
+        // 「报错界面」按钮：与 Open Code File 并列，负责展开 / 收起底部报错区（打开编辑器时默认收起）
+        ApplyChromeButton(titleBtnErrors, zh ? "报错界面 (F10)" : "Error Panel (F10)",
+            zh ? "Tips：按 F10 或点此按钮展开 / 收起底部报错界面；打开编辑器时默认不显示报错，编译失败会自动弹出。"
+               : "Tips: press F10 (or this button) to expand/collapse the error panel; it stays hidden when the editor opens and pops up automatically on compile errors.");
+        // 报错区当前是否可展开：收起态时按钮文案前加「▸」，展开态加「▾」，一眼看出下一次点击是开还是关
+        if (titleBtnErrors != null)
+        {
+            Text errLabel = titleBtnErrors.GetComponentInChildren<Text>();
+            if (errLabel != null)
+            {
+                string baseLabel = errLabel.text.Replace("▸ ", string.Empty).Replace("▾ ", string.Empty);
+                errLabel.text = (errorZoneCollapsed ? "▸ " : "▾ ") + baseLabel;
+                errLabel.font = UIFontHelper.LoadForText(errLabel.text, errLabel.fontSize);
+            }
+        }
 
-        // 从右往左：✕ 按钮中点固定在 -TitleBarRightPadding，其后 4 个按钮按各自文案宽度 + 12px 间隔依次右对齐
+        // 从右往左：✕ 按钮中点固定在 -TitleBarRightPadding，其后 5 个按钮按各自文案宽度 + 12px 间隔依次右对齐
         float cursor = -(TitleBarRightPadding + TitleBarCloseWidth * 0.5f) - TitleBarGap;
         cursor = LayoutChromeButton(titleBtnStop, cursor);
         cursor = LayoutChromeButton(titleBtnCompile, cursor);
         cursor = LayoutChromeButton(titleBtnExport, cursor);
         cursor = LayoutChromeButton(titleBtnOpen, cursor);
+        cursor = LayoutChromeButton(titleBtnErrors, cursor);
 
         // 标题只允许占到最左按钮左侧 20px，避免长文案顶到按钮
         RectTransform titleRt = titleBarTitleText.rectTransform;
@@ -4266,9 +4504,375 @@ public class CodeEditorController : MonoBehaviour
         if (errorListText == null)
             return;
         errorListText.text = text;
-        errorListText.font = UIFontHelper.LoadForText(text, errorListText.fontSize);
+        RefreshErrorLayout(text);
         if (!string.IsNullOrEmpty(text))
-            SetStatus(Localization.Pick("编译失败 / 运行错误", "Compile / runtime error"), true);
+        {
+            // 多行报错在状态栏报个数：玩家一眼知道下面还有几条（配合错误区滚轮）
+            int count = CountLines(text);
+            string label = Localization.Pick("编译失败 / 运行错误", "Compile / runtime error");
+            if (count > 1)
+                label += Localization.Pick(" · " + count + " 条（滚轮可翻）", " · " + count + " issues (wheel to scroll)");
+            SetStatus(label, true);
+        }
+    }
+
+    /// <summary>错误区可用高度上限：给代码区至少留 240px，同时不超过整个编辑器高度的 45%。</summary>
+    private float GetErrorZoneMaxHeight()
+    {
+        float rootH = editorRootRt != null ? editorRootRt.rect.height : 1080f;
+        if (rootH <= 1f || float.IsNaN(rootH))
+            rootH = 1080f;
+        float rootCap = rootH - 240f;              // 代码区最少 240px
+        float screenCap = rootH * 0.45f;
+        return Mathf.Max(ErrorZoneMinHeight, Mathf.Min(rootCap, screenCap));
+    }
+
+    /// <summary>按字号与可用宽度实测错误文字高度（不依赖等一帧布局，TextGenerator 直接算）。</summary>
+    private float MeasureErrorHeight(string text, int size, float width)
+    {
+        if (string.IsNullOrEmpty(text) || errorListText == null)
+            return 0f;
+        TextGenerationSettings settings = errorListText.GetGenerationSettings(new Vector2(Mathf.Max(1f, width), 0f));
+        settings.font = UIFontHelper.LoadForText(text, size);
+        settings.fontSize = size;
+        settings.fontStyle = FontStyle.Normal;
+        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        settings.richText = false;
+        settings.scaleFactor = 1f;
+        TextGenerator gen = new TextGenerator();
+        float h = gen.GetPreferredHeight(text, settings);
+        if (float.IsNaN(h) || float.IsInfinity(h) || h < 0f)
+            h = 0f;
+        return h;
+    }
+
+    /// <summary>
+    /// 按报错文案重排错误区：先试最大字号，放不下就让错误区长高（上限见 GetErrorZoneMaxHeight），
+    /// 长到上限仍放不下才缩字号（15 → 11），最后仍超出时交给滚轮 —— 任何情况下内容都留在屏幕内。
+    /// </summary>
+    private void RefreshErrorLayout(string text)
+    {
+        if (errorListText == null)
+            return;
+
+        errorScrollY = 0f; // 新报错一律从第一条看起
+
+        // 没有任何报错文字（编译成功 / 刚打开编辑器）：错误区不占画面，只留底部状态栏，
+        // 屏幕上就是纯代码编辑状态；红条 / 粗提示条 / 报错视口一并收起。
+        if (string.IsNullOrEmpty(text))
+        {
+            errorListText.text = string.Empty;
+            errorListText.fontSize = Mathf.Clamp(errorFontSize, ErrorFontMin, ErrorFontZoomMax);
+            errorListText.font = UIFontHelper.LoadForText(string.Empty, errorListText.fontSize);
+            errorContentHeight = 0f;
+            errorListText.rectTransform.sizeDelta = new Vector2(0f, 0f);
+            errorZoneCollapsed = true;
+            ApplyErrorZoneHeight(30f); // 状态栏高度
+            return;
+        }
+
+        // 可视宽度：错误区宽度 - 左右各 12px 内边距；尚未完成首次布局时按编辑器宽度兜底
+        float viewW = errorMaskRt != null ? errorMaskRt.rect.width : 0f;
+        if (viewW <= 1f)
+            viewW = Mathf.Max(320f, (editorRootRt != null ? editorRootRt.rect.width : 1920f) - 24f);
+
+        float maxZone = GetErrorZoneMaxHeight();
+        float chrome = 36f + ErrorTopInset;   // 视口上下内缩：底部 36（状态栏 30 + 6）+ 顶部 ErrorTopInset（红色提示条 + 分界条 + 6px 呼吸位）
+        // 玩家拖过红条时，以手动设定的高度为排版上限；没拖过（或被压到底收起）就按最大可用高度排
+        float fitCap = (errorZoneManualHeight > 0f && !errorZoneCollapsed) ? Mathf.Min(errorZoneManualHeight, maxZone) : maxZone;
+        int maxSize = errorFontScaled
+            ? Mathf.Clamp(errorFontSize, ErrorFontMin, ErrorFontZoomMax)
+            : Mathf.Clamp(errorFontSize, ErrorFontMin, ErrorFontMax);
+        float contentH = MeasureErrorHeight(text, maxSize, viewW);
+        int size = maxSize;
+        // 手动缩放过的字号直接尊重玩家设定，不再自动缩回去（否则刚放大就被缩回原样，滚轮等于白转）；
+        // 放不下的部分交给「错误区长高 + 滚轮翻页」消化。
+        if (!errorFontScaled && contentH + chrome > fitCap)
+        {
+            for (size = maxSize - 1; size >= ErrorFontMin; size--)
+            {
+                contentH = MeasureErrorHeight(text, size, viewW);
+                if (contentH + chrome <= fitCap || size == ErrorFontMin)
+                    break;
+            }
+        }
+
+        errorListText.fontSize = size;
+        errorListText.font = UIFontHelper.LoadForText(text, size);
+        errorContentHeight = contentH;
+        errorListText.rectTransform.sizeDelta = new Vector2(0f, contentH);
+
+        float desired;
+        if (errorZoneCollapsed)
+        {
+            // 收起态（红条与蓝条已合并消失）来了新报错：自动弹回来，别让玩家以为没报错
+            errorZoneCollapsed = false;
+            errorZoneManualHeight = 0f;
+            desired = Mathf.Clamp(contentH + chrome, ErrorZoneMinHeight, maxZone);
+        }
+        else if (errorZoneManualHeight > 0f)
+            desired = Mathf.Clamp(errorZoneManualHeight, ErrorZoneMinHeight, maxZone);   // 拖过红条：尊重玩家设定的高度
+        else
+            desired = Mathf.Clamp(contentH + chrome, ErrorZoneMinHeight, maxZone);        // 没拖过：跟着内容自适应
+        ApplyErrorZoneHeight(desired);
+    }
+
+    /// <summary>
+    /// 应用错误区高度：代码 / 行号视口与横向滚动条一律跟着错误区上缘走，中间不留缝。
+    /// 高度允许一路压到 0 —— 压到 SeamMergeThreshold 以下时红色分界条与错误视口一起收掉，
+    /// 视觉上只剩底部那条横滚动条（两条合并成一条）；把横条往上拖又能把错误区整块拉回来。
+    /// </summary>
+    private void ApplyErrorZoneHeight(float height)
+    {
+        height = Mathf.Clamp(height, 0f, GetErrorZoneMaxHeight());
+        // 两条已经重合，不再各占一道，只留横条；errorZoneCollapsed 为「收起报错界面」态：
+        // 打开编辑器 / 按 F10 收起时高度只留状态栏（30px），红条与粗提示条同样不显示，只有代码区 + 状态栏。
+        bool merged = height < SeamMergeThreshold || errorZoneCollapsed;
+        if (errorZoneRt != null)
+            errorZoneRt.sizeDelta = new Vector2(0f, height);
+
+        float top = height + 10f;   // 横向滚动条占 160→170 那 10px 的旧位置，这里同样留 10px
+        if (lineViewportRt != null)
+            lineViewportRt.offsetMin = new Vector2(0f, top);
+        if (codeViewportRt != null)
+            codeViewportRt.offsetMin = new Vector2(70f, top);
+        if (vScrollTrackRt != null)
+            vScrollTrackRt.offsetMin = new Vector2(-(rightReservedWidth + 16f), top); // 左边界随右侧预留宽度一起左移，保持 10px 宽
+        if (hScrollTrackRt != null)
+        {
+            hScrollTrackRt.offsetMin = new Vector2(70f, height);
+            hScrollTrackRt.offsetMax = new Vector2(-(rightReservedWidth + 16f), top);
+        }
+
+        // 合并态：红条（视觉细条 + 透明命中区）/ 上方粗提示条 / 错误文字视口 / 错误竖滚动条全部收掉，屏幕上只剩底部那条横滚动条
+        SetActiveIfChanged(errorSplitBarRt, !merged);
+        SetActiveIfChanged(errorSplitGripRt, !merged);
+        SetActiveIfChanged(errorSplitHitRt, !merged);
+        SetActiveIfChanged(errorMaskRt, !merged);
+        SetActiveIfChanged(errorScrollTrackRt, !merged);
+
+        ApplyErrorScroll();
+
+        // 代码区可视高度变了：把已有滚动偏移夹回新范围，避免视口变高后露出底部空白（或变矮后滚过头）
+        if (codeRt != null)
+        {
+            float maxY = GetScrollMaxY();
+            float y = codeRt.anchoredPosition.y;
+            if (y > maxY || y < 0f)
+                codeRt.anchoredPosition = new Vector2(codeRt.anchoredPosition.x, Mathf.Clamp(y, 0f, maxY));
+        }
+
+        UpdateScrollBars();
+    }
+
+    /// <summary>切换显隐，但不产生多余的 SetActive 调用（避免每帧布局刷新时的无谓开销 / 重排）。</summary>
+    private static void SetActiveIfChanged(RectTransform rt, bool active)
+    {
+        if (rt == null)
+            return;
+        if (rt.gameObject.activeSelf != active)
+            rt.gameObject.SetActive(active);
+    }
+
+    /// <summary>收起报错界面：错误区只留状态栏高度（红条 / 粗提示条 / 报错文字 / 滚动条全部隐藏），代码区独占画面。</summary>
+    private void CollapseErrorZone()
+    {
+        errorZoneCollapsed = true;
+        errorZoneManualHeight = 0f;
+        errorScrollY = 0f;
+        // 这里绝不能走 RefreshErrorLayout：它见到 errorZoneCollapsed 会自动弹回（那是「来了新报错」的语义）。
+        // 收起态只是把高度压到状态栏那一格，错误文本原样留在内存里，等 F10 或下次编译报错再显示。
+        ApplyErrorZoneHeight(30f);  // 状态栏自身高度：收起后状态栏仍可见，代码区一直用到蓝条
+    }
+
+    /// <summary>展开报错界面：按内容排版一次错误区（没有报错文本就显示一句占位说明），并把滚动复位到顶部。</summary>
+    private void ExpandErrorPanel()
+    {
+        errorZoneCollapsed = false;
+        errorScrollY = 0f;
+        string text = errorListText != null ? errorListText.text : string.Empty;
+        if (string.IsNullOrEmpty(text))
+        {
+            // 展开时手上没有任何报错：给一句占位提示，免得弹出一块纯空白让人以为界面坏了（下次编译结果会直接覆盖）
+            text = Localization.Pick("暂无报错。编译失败时会在这里逐条列出错误行（Ctrl+滚轮可缩放字号）。",
+                                     "No errors yet. Compile failures are listed here line by line (Ctrl+wheel to zoom).");
+        }
+        RefreshErrorLayout(text);
+        ApplyErrorZoneHeight(errorZoneHeightCurrent());
+    }
+
+    /// <summary>F10 / 标题栏 Error Panel 按钮：展开时收起，收起时展开。</summary>
+    private void ToggleErrorPanel()
+    {
+        if (!IsOpen)
+            return;
+        if (errorZoneCollapsed)
+            ExpandErrorPanel();
+        else
+            CollapseErrorZone();
+        SetStatus(Localization.Pick(
+            errorZoneCollapsed ? "报错界面已收起（按 F10 展开）" : "报错界面已展开（按 F10 收起）",
+            errorZoneCollapsed ? "Error panel collapsed (F10 to expand)" : "Error panel expanded (F10 to collapse)"), false);
+        RefreshTitleBarChrome(); // 同步按钮前导箭头（▸ 收起 / ▾ 展开）与宽度
+    }
+
+    /// <summary>按下红色分隔条：记下起点（屏幕像素）与当时的错误区高度。</summary>
+    private void BeginErrorSplitDrag(PointerEventData ev)
+    {
+        errorSplitStartMouseY = ev.position.y;
+        errorSplitStartHeight = errorZoneHeightCurrent();
+        if (errorZoneManualHeight <= 0f)
+            errorZoneManualHeight = errorSplitStartHeight;
+    }
+
+    /// <summary>
+    /// 拖动中：往上拖错误区变高（代码区变矮），往下拖反之；下限放到 0 —— 一路压到底时
+    /// 红条会与底部横滚动条重合、收掉，只剩一条；蓝条同样可作为把手把错误区重新拉出来。
+    /// </summary>
+    private void DragErrorSplit(PointerEventData ev)
+    {
+        Canvas canvas = GetComponentInParent<Canvas>();
+        float scale = (canvas != null && canvas.scaleFactor > 0f) ? canvas.scaleFactor : 1f;
+        float dy = (ev.position.y - errorSplitStartMouseY) / scale;
+        float target = Mathf.Clamp(errorSplitStartHeight + dy, 0f, GetErrorZoneMaxHeight());
+        errorZoneManualHeight = target;              // 记住手动设定值，后续报错自适应不再覆盖它
+        // 压到合并阈值以下就算「收起」：红条与蓝条已经并成一条，再来报错时才自动弹回，避免卡在半收不放的怪状态
+        errorZoneCollapsed = target < SeamMergeThreshold;
+        ApplyErrorZoneHeight(target);
+        UpdateErrorScrollBar();
+    }
+
+    /// <summary>同步错误文字滚动偏移（仅当内容高于可视区时有值，范围 [0, 内容高 - 可视高]）。</summary>
+    private void ApplyErrorScroll()
+    {
+        if (errorListText == null || errorMaskRt == null)
+            return;
+        float viewH = ErrorViewportHeight();
+        float maxScroll = Mathf.Max(0f, errorContentHeight - viewH);
+        errorScrollY = Mathf.Clamp(errorScrollY, 0f, maxScroll);
+        errorListText.rectTransform.anchoredPosition = new Vector2(0f, errorScrollY);
+        UpdateErrorScrollBar();
+    }
+
+    /// <summary>错误视口可视高度：优先取实际 rect，首帧布局未完成时按错误区高度减去上下内缩（36 / 6）兜底。</summary>
+    private float ErrorViewportHeight()
+    {
+        float h = errorMaskRt != null ? errorMaskRt.rect.height : 0f;
+        if (h <= 1f || float.IsNaN(h))
+            h = Mathf.Max(24f, errorZoneHeightCurrent() - (36f + ErrorTopInset));
+        return h;
+    }
+
+    /// <summary>
+    /// 刷新错误区红色滚动块：平时整条不可见（错误区右侧不出现任何红条），
+    /// 只有报错内容真的超出可视高度时才冒出一小截滑块；长度按「可视高 : 内容高」换算，位置按滚动进度换算。
+    /// </summary>
+    private void UpdateErrorScrollBar()
+    {
+        if (errorScrollHandleRt == null)
+            return;
+
+        float viewH = ErrorViewportHeight();
+        float maxScroll = Mathf.Max(0f, errorContentHeight - viewH);
+        if (maxScroll <= 0.5f)
+        {
+            // 放得下：不显示任何滚动块
+            if (errorScrollHandleRt.gameObject.activeSelf)
+                errorScrollHandleRt.gameObject.SetActive(false);
+            return;
+        }
+
+        if (!errorScrollHandleRt.gameObject.activeSelf)
+            errorScrollHandleRt.gameObject.SetActive(true);
+
+        float trackH = errorScrollTrackRt != null ? errorScrollTrackRt.rect.height : 0f;
+        if (trackH <= 1f)
+            trackH = Mathf.Max(24f, viewH); // 首帧布局未完成时按可视高兜底
+        float ratio = errorContentHeight > 1f ? viewH / errorContentHeight : 1f;
+        float handleH = Mathf.Clamp(trackH * Mathf.Clamp01(ratio), 24f, trackH);
+        errorScrollHandleRt.sizeDelta = new Vector2(errorScrollHandleRt.sizeDelta.x, handleH);
+        float t = Mathf.Clamp01(errorScrollY / Mathf.Max(0.001f, maxScroll));
+        errorScrollHandleRt.anchoredPosition = new Vector2(0f, -t * Mathf.Max(0f, trackH - handleH));
+    }
+
+    /// <summary>错误区红色滑块拖动 / 轨道点击回调：t 为归一化 0~1 进度（0 = 第一条，1 = 最后一条）。</summary>
+    private void SetErrorScrollFromBar(float t)
+    {
+        if (errorListText == null || errorMaskRt == null)
+            return;
+        float maxScroll = Mathf.Max(0f, errorContentHeight - ErrorViewportHeight());
+        errorScrollY = Mathf.Clamp01(t) * maxScroll;
+        ApplyErrorScroll();
+    }
+
+    /// <summary>滚轮翻错误区：指针落在错误区且内容超出可视区时才生效，返回 true 表示这次滚轮已被吃掉。</summary>
+    private bool HandleErrorWheelScroll(float wheel)
+    {
+        if (errorMaskRt == null || errorListText == null || Mathf.Abs(wheel) < 0.01f)
+            return false;
+        if (errorContentHeight <= ErrorViewportHeight() + 0.5f)
+            return false;
+        // 指针落在错误文字区或其右侧红色滚动条上都算：滚轮与拖条两条入口行为一致
+        bool overText = RectTransformUtility.RectangleContainsScreenPoint(errorMaskRt, Input.mousePosition, null);
+        bool overBar = errorScrollTrackRt != null && errorScrollTrackRt.gameObject.activeSelf &&
+                       RectTransformUtility.RectangleContainsScreenPoint(errorScrollTrackRt, Input.mousePosition, null);
+        if (!overText && !overBar)
+            return false;
+        float lineH = Mathf.Max(12f, errorListText.fontSize * 1.45f);
+        errorScrollY -= wheel * lineH * 2f;
+        ApplyErrorScroll();
+        return true;
+    }
+
+    /// <summary>
+    /// Ctrl+滚轮：报错文字字号缩放（放大 / 缩小），鼠标需落在报错区（文字视口或右侧红滚动条）内。
+    /// 缩放算法与代码区 HandleFontZoom 完全一致：以「鼠标所指的那一行」为锚点，该行缩放前后贴在同一屏幕位置。
+    /// 手动缩放过字号后（errorFontScaled=true）RefreshErrorLayout 不再自动缩字号，放不下的部分交给长高 + 滚轮翻页。
+    /// </summary>
+    private bool HandleErrorFontZoom()
+    {
+        float wheel = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(wheel) < 0.01f || errorMaskRt == null || errorListText == null)
+            return false;
+        bool overText = errorMaskRt.gameObject.activeSelf &&
+                        RectTransformUtility.RectangleContainsScreenPoint(errorMaskRt, Input.mousePosition, null);
+        bool overBar = errorScrollTrackRt != null && errorScrollTrackRt.gameObject.activeSelf &&
+                       RectTransformUtility.RectangleContainsScreenPoint(errorScrollTrackRt, Input.mousePosition, null);
+        if (!overText && !overBar)
+            return false;
+        int newSize = Mathf.Clamp(errorFontSize + (wheel > 0f ? 2 : -2), ErrorFontMin, ErrorFontZoomMax);
+        if (newSize == errorFontSize)
+            return true;
+
+        // 缩放前：记录当前滚动偏移与旧行高，并把鼠标屏幕点换算到内容层局部坐标
+        // （errorListText pivot=(0.5,1)、锚点左上，局部 y 向下为负；内容层已带滚动偏移，换算结果天然是「行」位置）。
+        float scrollY0 = errorScrollY;
+        float lineHeight0 = Mathf.Max(12f, errorListText.fontSize * 1.45f);
+        Vector2 localPt;
+        bool hasPointer = RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            errorListText.rectTransform, Input.mousePosition, null, out localPt);
+        float rowF = hasPointer ? (-localPt.y) / lineHeight0 : 0f;
+        if (rowF < 0f)
+            rowF = 0f;                      // 鼠标落在内容上方留白 / 坐标换算失败：按第一行锚定
+        int row = Mathf.FloorToInt(rowF);
+        float frac = rowF - row;            // 0~1：鼠标落在该行内的纵向比例
+
+        errorFontSize = newSize;
+        errorFontScaled = true;             // 之后 RefreshErrorLayout 尊重该字号，不再自动缩回
+        SaveFontSettings();                 // 报错字号同样存档：重启后按玩家调好的大小显示
+        RefreshErrorLayout(errorListText.text); // 重算行高 / 内容高度 / 错误区高度（内部会把滚动清零，下面统一覆盖）
+
+        // 锚定鼠标行：行高由 lineHeight0 变为 lineHeight1 后，第 row 行行顶下移 row×Δ，
+        // 行内的 frac 部分再下移 frac×Δ；滚动偏移同量增加即可让该行仍贴在原屏幕位置。
+        float lineHeight1 = Mathf.Max(12f, errorListText.fontSize * 1.45f);
+        float scrollY = scrollY0 + (row + frac) * (lineHeight1 - lineHeight0);
+        scrollY = Mathf.Clamp(scrollY, 0f, Mathf.Max(0f, errorContentHeight - ErrorViewportHeight()));
+        errorScrollY = scrollY;
+        ApplyErrorScroll();
+
+        SetStatus(Localization.Pick("报错字号已调整：" + errorFontSize, "Error font size: " + errorFontSize), false);
+        return true;
     }
 
     private bool IsInputFocused()
@@ -4390,6 +4994,17 @@ public class CodeEditorController : MonoBehaviour
         AttachHoverTip(btnOpenSaved != null ? btnOpenSaved.gameObject : null,
             Localization.Pick("Tips：按 F8 或点此按钮打开文件面板，可逐级浏览磁盘目录，选中 .cs 或 .txt 文件即载入编辑器；载入前的内容仍留在撤销栈里（Ctrl+Z 可回退）。", "Tips: press F8 (or this button) to open the file panel and browse your disk; picking a .cs or .txt file loads it into the editor, while the previous content stays in the undo stack (Ctrl+Z)."));
 
+        // 「报错界面 (F10)」：与 Open Code File 并列（同在标题栏右侧一排），展开 / 收起底部报错区。
+        // 打开编辑器时默认收起，只显示代码编辑状态；编译失败会自动弹出，也可以用这个按钮随时调回来回看。
+        Button btnErrors = CreateButton("BtnErrors", titleBarRt,
+            Localization.Pick("报错界面 (F10)", "Error Panel (F10)"),
+            ToggleErrorPanel,
+            new Vector2(148f, 34f), new Vector2(-728f, 0f), new Vector2(1f, 0.5f),
+            UITheme.WithAlpha(UITheme.TextMuted, 0.24f));
+        titleBtnErrors = btnErrors;
+        AttachHoverTip(btnErrors != null ? btnErrors.gameObject : null,
+            Localization.Pick("Tips：按 F10 或点此按钮展开 / 收起底部报错界面；打开编辑器时默认不显示报错，编译失败会自动弹出。", "Tips: press F10 (or this button) to expand/collapse the error panel; it stays hidden when the editor opens and pops up automatically on compile errors."));
+
         // 构建完立刻按当前语言排一次：文案、字体、按钮宽度与间隔都由它统一算
         RefreshTitleBarChrome();
 
@@ -4501,6 +5116,7 @@ public class CodeEditorController : MonoBehaviour
         vTrackImg.raycastTarget = true;
         vScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>().Setup(vScrollTrackRt, true, t => SetScrollFromBar(0, t));
 
+        // 右侧竖滑块：青蓝色（与底部横滑块同色，UITheme.CodeScrollbar）、宽 10（与轨道同宽，比原来 6 更粗更好抓）
         vScrollHandleRt = CreateRect("VScrollHandle", vScrollTrackRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(10f, 60f), new Vector2(0.5f, 1f));
         vScrollHandleRt.anchorMin = new Vector2(0.5f, 1f);
         vScrollHandleRt.anchorMax = new Vector2(0.5f, 1f);
@@ -4508,9 +5124,9 @@ public class CodeEditorController : MonoBehaviour
         vScrollHandleRt.anchoredPosition = Vector2.zero;
         vScrollHandleRt.sizeDelta = new Vector2(10f, 60f);
         Image vHandleImg = vScrollHandleRt.gameObject.AddComponent<Image>();
-        vHandleImg.color = UITheme.CodeScrollbar;
+        vHandleImg.color = UITheme.CodeScrollbar;   // 与底部横滑块同一个颜色（青蓝 #57D2EF / 50%）：横竖两根拉动条视觉统一
         vScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>().Setup(vScrollTrackRt, true, t => SetScrollFromBar(0, t));
-        // 滑块自建即隐藏（需求：任何窗口尺寸下都不显示滑块）；轨道本身透明且保留点击跳转能力
+        // 滑块自建即隐藏：内容超出视口时由 UpdateScrollBars 唤起
         vScrollHandleRt.gameObject.SetActive(false);
 
         // 横条：贴底部错误区上缘（高 10，左 70 对齐代码视口左缘、右 16 留出竖条空间），轨道底色同样透明
@@ -4524,6 +5140,7 @@ public class CodeEditorController : MonoBehaviour
         hTrackImg.color = UITheme.WithAlpha(UITheme.CodeBg, 0f); // 透明轨道：仅保留可点击跳转的命中区域
         hTrackImg.raycastTarget = true;
         hScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>().Setup(hScrollTrackRt, false, t => SetScrollFromBar(1, t));
+        hScrollTrackRt.gameObject.AddComponent<SeamDragHandle>().Setup(this); // 蓝条同理：按住它上下拖也能拉出/收起错误区（拖到底与红条合并）
 
         hScrollHandleRt = CreateRect("HScrollHandle", hScrollTrackRt, new Vector2(0f, 1f), Vector2.zero, new Vector2(120f, 10f), new Vector2(0f, 1f));
         hScrollHandleRt.anchorMin = new Vector2(0f, 1f);
@@ -4534,29 +5151,105 @@ public class CodeEditorController : MonoBehaviour
         Image hHandleImg = hScrollHandleRt.gameObject.AddComponent<Image>();
         hHandleImg.color = UITheme.CodeScrollbar;
         hScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>().Setup(hScrollTrackRt, false, t => SetScrollFromBar(1, t));
-        hScrollHandleRt.gameObject.SetActive(false); // 同上：横向滑块常驻隐藏
+        hScrollHandleRt.gameObject.SetActive(false); // 横向滑块自建即隐藏：内容超宽时由 UpdateScrollBars 唤起
 
-        // ---- 底部错误 / 状态区（高 160px） ----
-        RectTransform bottomRt = CreateRect("ErrorZone", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 160f), new Vector2(0.5f, 0f));
+        // ---- 底部错误 / 状态区（默认高 160px，报错多时自动长高，最高不超过编辑器可用高度的 45%） ----
+        RectTransform bottomRt = CreateRect("ErrorZone", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, ErrorZoneMinHeight), new Vector2(0.5f, 0f));
         bottomRt.anchorMin = Vector2.zero;
         bottomRt.anchorMax = new Vector2(1f, 0f);
         bottomRt.pivot = new Vector2(0.5f, 0f);
         bottomRt.anchoredPosition = Vector2.zero;
-        bottomRt.sizeDelta = new Vector2(0f, 160f);
+        bottomRt.sizeDelta = new Vector2(0f, ErrorZoneMinHeight);
         Image bottomBg = bottomRt.gameObject.AddComponent<Image>();
         bottomBg.color = consoleBgFullColor;
         consoleBg = bottomBg;
+        errorZoneRt = bottomRt;
 
-        errorListText = CreateText("ErrorList", bottomRt, "", errorFontSize, errorColor, TextAnchor.UpperLeft);
+        // 错误文字可视区：RectMask2D 裁剪。文字内容按实测高度向下生长，超出部分靠滚轮翻页查看，
+        // 绝不使用 verticalOverflow = Overflow —— 那样多行报错会直接溢出面板、掉到屏幕下沿之外，玩家根本看不到。
+        RectTransform errMaskRt = CreateRect("ErrorViewport", bottomRt, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
+        errMaskRt.anchorMin = Vector2.zero;
+        errMaskRt.anchorMax = Vector2.one;
+        errMaskRt.offsetMin = new Vector2(12f, 36f);    // 底部让开状态栏（30）与 6px 间隙
+        errMaskRt.offsetMax = new Vector2(-16f, -(ErrorSplitBarHeight + ErrorSplitGripHeight + 6f));  // 顶部让开粗提示条 + 细分界条 + 6px 呼吸位；右侧让开滚动块
+        errMaskRt.gameObject.AddComponent<RectMask2D>();
+        errorMaskRt = errMaskRt;
+
+        int errorStartFont = Mathf.Clamp(errorFontSize, ErrorFontMin, ErrorFontMax); // 沿用 Inspector 里的上报字号（夹在 11~15）
+        errorListText = CreateText("ErrorList", errMaskRt, "", errorStartFont, errorColor, TextAnchor.UpperLeft);
         RectTransform errRt = errorListText.rectTransform;
         errRt.anchorMin = new Vector2(0f, 1f);
         errRt.anchorMax = new Vector2(1f, 1f);
         errRt.pivot = new Vector2(0.5f, 1f);
-        errRt.anchoredPosition = new Vector2(0f, -6f);
-        errRt.sizeDelta = new Vector2(-24f, -56f);
+        errRt.anchoredPosition = Vector2.zero;
+        errRt.sizeDelta = new Vector2(0f, 0f);      // 高度由 RefreshErrorLayout 按实测文字高度写入
         errorListText.supportRichText = false;
         errorListText.horizontalOverflow = HorizontalWrapMode.Wrap;
         errorListText.verticalOverflow = VerticalWrapMode.Overflow;
+
+        // ---- 错误区（红）竖向滚动块：平时完全不可见（右侧不出现任何红条），
+        //      只有报错真的超出可视高度时才冒出一小截红色滑块；轨道留作透明命中区，点一下可跳转 ----
+        errorScrollTrackRt = CreateRect("ErrorScrollTrack", bottomRt, new Vector2(1f, 0f), Vector2.zero, new Vector2(6f, 0f), new Vector2(1f, 0.5f));
+        errorScrollTrackRt.anchorMin = new Vector2(1f, 0f);
+        errorScrollTrackRt.anchorMax = new Vector2(1f, 1f);
+        errorScrollTrackRt.pivot = new Vector2(1f, 0.5f);
+        errorScrollTrackRt.offsetMin = new Vector2(-18f, 36f);
+        errorScrollTrackRt.offsetMax = new Vector2(-12f, -(ErrorSplitBarHeight + ErrorSplitGripHeight + 6f));
+        Image errTrackImg = errorScrollTrackRt.gameObject.AddComponent<Image>();
+        errTrackImg.color = UITheme.WithAlpha(errorColor, 0f); // 透明：不画轨道，只当点击跳转的命中区
+        errTrackImg.raycastTarget = true;
+        errorScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>().Setup(errorScrollTrackRt, true, t => SetErrorScrollFromBar(t));
+
+        errorScrollHandleRt = CreateRect("ErrorScrollHandle", errorScrollTrackRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(6f, 40f), new Vector2(0.5f, 1f));
+        errorScrollHandleRt.anchorMin = new Vector2(0.5f, 1f);
+        errorScrollHandleRt.anchorMax = new Vector2(0.5f, 1f);
+        errorScrollHandleRt.pivot = new Vector2(0.5f, 1f);
+        errorScrollHandleRt.anchoredPosition = Vector2.zero;
+        errorScrollHandleRt.sizeDelta = new Vector2(6f, 40f);
+        Image errHandleImg = errorScrollHandleRt.gameObject.AddComponent<Image>();
+        errHandleImg.color = UITheme.WithAlpha(errorColor, 0.6f); // 红色滚动块，可上下拖动
+        errHandleImg.raycastTarget = true;
+        errorScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>().Setup(errorScrollTrackRt, true, t => SetErrorScrollFromBar(t));
+        errorScrollHandleRt.gameObject.SetActive(false); // 报错放得下时完全不出现，溢出才显示
+
+        // ---- 错误区上缘红色分隔条：和教程卡片那条可拖蓝条同样的玩法 —— 按住它上下拖，
+        //      「错误区（红）/ 代码区」的高度比例实时互换；拖动结果会被记住，之后不再被内容自适应冲掉 ----
+        errorSplitBarRt = CreateRect("ErrorSplitBar", bottomRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, ErrorSplitBarHeight), new Vector2(0.5f, 1f));
+        errorSplitBarRt.anchorMin = new Vector2(0f, 1f);
+        errorSplitBarRt.anchorMax = new Vector2(1f, 1f);
+        errorSplitBarRt.pivot = new Vector2(0.5f, 1f);
+        errorSplitBarRt.anchoredPosition = new Vector2(0f, -ErrorSplitGripHeight); // 让位给上方粗提示条：细条紧贴粗条下缘
+        errorSplitBarRt.sizeDelta = new Vector2(0f, ErrorSplitBarHeight);
+        Image errSplitImg = errorSplitBarRt.gameObject.AddComponent<Image>();
+        errSplitImg.color = UITheme.WithAlpha(errorColor, 0.95f); // 鲜红旗标：一眼看出这里能上下拖
+        errSplitImg.raycastTarget = false; // 3px 细条只负责「显示」，点击/拖动全部交给下面那层更高的透明命中区
+
+        // 红色细条「正上方」的提示条：厚度收到 6px（比底部横向蓝条的 10px 更细），下缘贴住 3px 细条（向下对齐），
+        // 整条都能按住上下拖，交互与蓝条完全相同 —— 细条继续画分界，这条负责看得见、抓得住。
+        errorSplitGripRt = CreateRect("ErrorSplitGrip", bottomRt, new Vector2(0.5f, 1f), Vector2.zero,
+            new Vector2(0f, ErrorSplitGripHeight), new Vector2(0.5f, 1f));
+        errorSplitGripRt.anchorMin = new Vector2(0f, 1f);
+        errorSplitGripRt.anchorMax = new Vector2(1f, 1f);
+        errorSplitGripRt.pivot = new Vector2(0.5f, 1f);
+        errorSplitGripRt.anchoredPosition = Vector2.zero; // 顶格：粗提示条上缘贴住错误区顶边，细条被压在它下面
+        errorSplitGripRt.sizeDelta = new Vector2(0f, ErrorSplitGripHeight);
+        Image errGripImg = errorSplitGripRt.gameObject.AddComponent<Image>();
+        errGripImg.color = UITheme.WithAlpha(errorColor, 0.85f); // 与细条同色系，但整条更粗、更像把手
+        errGripImg.raycastTarget = true;
+        errorSplitGripRt.gameObject.AddComponent<ErrorSplitBarDrag>().Setup(this);
+
+        // 命中区比红条更高（9px），细条看着细、但依旧好按住 —— 细归细，手感不能丢
+        errorSplitHitRt = CreateRect("ErrorSplitHit", bottomRt, new Vector2(0.5f, 1f), Vector2.zero,
+            new Vector2(0f, ErrorSplitHitHeight), new Vector2(0.5f, 1f));
+        errorSplitHitRt.anchorMin = new Vector2(0f, 1f);
+        errorSplitHitRt.anchorMax = new Vector2(1f, 1f);
+        errorSplitHitRt.pivot = new Vector2(0.5f, 1f);
+        errorSplitHitRt.anchoredPosition = Vector2.zero;
+        errorSplitHitRt.sizeDelta = new Vector2(0f, ErrorSplitGripHeight + ErrorSplitBarHeight); // 整块（粗条 + 细条）都能拖
+        Image errSplitHitImg = errorSplitHitRt.gameObject.AddComponent<Image>();
+        errSplitHitImg.color = UITheme.WithAlpha(errorColor, 0f);
+        errSplitHitImg.raycastTarget = true;
+        errorSplitHitRt.gameObject.AddComponent<ErrorSplitBarDrag>().Setup(this);
 
         RectTransform statusRt = CreateRect("StatusBar", bottomRt.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 30f), new Vector2(0.5f, 0f));
         statusRt.anchorMin = new Vector2(0f, 0f);
@@ -4670,6 +5363,10 @@ public class CodeEditorController : MonoBehaviour
         private RectTransform trackRt;
         private bool vertical;
         private System.Action<float> onSet;
+        private bool dragging;
+        private float startT;          // 按下瞬间滑块代表的滚动进度
+        private float usable = 1f;     // 滑块中心可移动距离（轨道长 - 滑块长）
+        private Vector2 startPointer;  // 按下瞬间的屏幕坐标
 
         public void Setup(RectTransform track, bool isVertical, System.Action<float> callback)
         {
@@ -4678,33 +5375,52 @@ public class CodeEditorController : MonoBehaviour
             onSet = callback;
         }
 
-        public void OnBeginDrag(PointerEventData e) { Apply(e); }
-        public void OnDrag(PointerEventData e) { Apply(e); }
-
-        private void Apply(PointerEventData e)
+        public void OnBeginDrag(PointerEventData e)
         {
-            Vector2 lp;
-            if (trackRt == null || onSet == null ||
-                !RectTransformUtility.ScreenPointToLocalPointInRectangle(trackRt, e.position, null, out lp))
+            dragging = false;
+            if (trackRt == null)
                 return;
             RectTransform self = transform as RectTransform;
+            if (self == null)
+                return;
             float trackSize = vertical ? trackRt.rect.height : trackRt.rect.width;
             float handleSize = vertical ? self.rect.height : self.rect.width;
-            float usable = Mathf.Max(1f, trackSize - handleSize);
-            float v = vertical ? lp.y : lp.x;
-            // 竖轨道 pivot.y=0.5：局部 y 以中心为原点，滑块中心可行域 [-usable/2, usable/2]
-            // 横轨道 pivot.x=0：局部 x 以左缘为原点，滑块中心可行域 [handle/2, track-handle/2]
-            float centerMin = vertical ? -usable * 0.5f : handleSize * 0.5f;
-            onSet(Mathf.Clamp01((v - centerMin) / usable));
+            usable = Mathf.Max(1f, trackSize - handleSize);
+            // 用滑块当下的 anchoredPosition 反算进度：竖向 t=0 在轨道最上，t=1 在最下
+            startT = vertical
+                ? Mathf.Clamp01(-self.anchoredPosition.y / usable)
+                : Mathf.Clamp01(self.anchoredPosition.x / usable);
+            startPointer = e.position;
+            dragging = true;
+        }
+
+        /// <summary>
+        /// 按「相对按下点的位移」改进度，而不是把滑块中心对齐到指针：
+        /// 抓在滑块哪个位置就一直在那个位置，滑块不会每次都被拽到指针正中。
+        /// </summary>
+        public void OnDrag(PointerEventData e)
+        {
+            if (!dragging || onSet == null || trackRt == null)
+                return;
+            Vector2 lpNow, lpStart;
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(trackRt, e.position, null, out lpNow) ||
+                !RectTransformUtility.ScreenPointToLocalPointInRectangle(trackRt, startPointer, null, out lpStart))
+                return;
+            float delta = vertical ? (lpNow.y - lpStart.y) : (lpNow.x - lpStart.x);
+            // 竖向：往上拖（delta>0）进度变小；横向：往右拖进度变大。
+            float t = vertical ? (startT - delta / usable) : (startT + delta / usable);
+            onSet(Mathf.Clamp01(t));
         }
     }
 
     /// <summary>滚动条轨道点击跳转：点击轨道任意位置即把滑块中心移到该处（拖动滑块时事件冒泡到轨道，位置与当前滑块一致，无跳变）。</summary>
-    private sealed class ScrollBarTrackJump : MonoBehaviour, IPointerDownHandler
+    private sealed class ScrollBarTrackJump : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
     {
         private RectTransform trackRt;
         private bool vertical;
         private System.Action<float> onSet;
+        private bool pressed;
+        private Vector2 downPointer;
 
         public void Setup(RectTransform track, bool isVertical, System.Action<float> callback)
         {
@@ -4713,16 +5429,74 @@ public class CodeEditorController : MonoBehaviour
             onSet = callback;
         }
 
+        /// <summary>按下只记坐标：抬手时才判断「是点击还是拖动」，让轨道同时能被用作分界拖拽不误跳。</summary>
         public void OnPointerDown(PointerEventData e)
         {
+            pressed = true;
+            downPointer = e.position;
+        }
+
+        public void OnPointerUp(PointerEventData e)
+        {
+            if (!pressed)
+                return;
+            pressed = false;
+            if ((e.position - downPointer).sqrMagnitude > 36f) // 移动超过 6px 视为拖动，不跳转
+                return;
+            // 按在滑块上（指针拖拽目标是滑块本身）不算点轨道：滑块只按位移走，中心绝不跳到指针处
+            if (e.pointerDrag != null && e.pointerDrag != gameObject)
+                return;
             Vector2 lp;
             if (trackRt == null || onSet == null ||
                 !RectTransformUtility.ScreenPointToLocalPointInRectangle(trackRt, e.position, null, out lp))
                 return;
             float trackSize = vertical ? trackRt.rect.height : trackRt.rect.width;
             float v = vertical ? lp.y : lp.x;
-            float t = vertical ? (v / Mathf.Max(1f, trackSize) + 0.5f) : (v / Mathf.Max(1f, trackSize));
+            // 竖轨道 pivot.y=0.5：局部 y 向上为正，点上方应是「内容往回翻到顶部」= 进度 0，所以要取反（0.5 - v/h）。
+            // 横轨道 pivot.x=0：局部 x 向右为正，点右边 = 进度 1，方向本就是对的。
+            float t = vertical ? (0.5f - v / Mathf.Max(1f, trackSize)) : (v / Mathf.Max(1f, trackSize));
             onSet(Mathf.Clamp01(t));
+        }
+    }
+
+    /// <summary>错误区上缘红色分隔条的拖动手柄：按住上下拖，实时改变「错误区（红）/ 代码区」的高度比例。</summary>
+    private sealed class ErrorSplitBarDrag : MonoBehaviour, IBeginDragHandler, IDragHandler
+    {
+        private CodeEditorController host;
+
+        public void Setup(CodeEditorController owner) { host = owner; }
+
+        public void OnBeginDrag(PointerEventData e) { if (host != null) host.BeginErrorSplitDrag(e); }
+        public void OnDrag(PointerEventData e) { if (host != null) host.DragErrorSplit(e); }
+    }
+
+    /// <summary>
+    /// 底部横滚动条（蓝条）兼作分界把手：红条被压到底与它合并、消失之后，它就是唯一的抓手，
+    /// 按住往上拖即可把错误区重新拉出来。按在滑块上时不接管（那是滚动，不是拉分界）。
+    /// </summary>
+    private sealed class SeamDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
+    {
+        private CodeEditorController host;
+        private bool active;
+
+        public void Setup(CodeEditorController owner) { host = owner; }
+
+        public void OnBeginDrag(PointerEventData e)
+        {
+            active = false;
+            if (host == null)
+                return;
+            // 指针拖的是滑块本体（滚动）时不管，只接管「按住轨道拖动」
+            if (e.pointerDrag != null && e.pointerDrag != gameObject)
+                return;
+            host.BeginErrorSplitDrag(e);
+            active = true;
+        }
+
+        public void OnDrag(PointerEventData e)
+        {
+            if (active && host != null)
+                host.DragErrorSplit(e);
         }
     }
 }

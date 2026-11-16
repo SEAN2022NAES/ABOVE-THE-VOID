@@ -11,12 +11,45 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.4**
+Current version: **v0.2.5**
 
 > **Licence / 许可**：Non-commercial use (study, teaching, research, non-profit open source) is free with
 > attribution and no monetisation of any kind; **commercial use requires a prior written licence**.
 > See [LICENSE](LICENSE) and [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). © 2026 Ma Yixiao (Sean Ma). All rights reserved.
 > **非商业用途免费（须署名、禁任何盈利场景），商业用途必须事先取得书面授权。** 详见下方「12. License / 许可」。
+
+### v0.2.5
+
+**Code editor - error panel**
+
+- The compile-error band is now a real pane with its own grip: dragging the bar above it sets `errorZoneManualHeight`, clamped between `ErrorZoneMinHeight` and `GetErrorZoneMaxHeight()` so the pane can neither disappear nor eat the code area, and `ErrorSplitGripHeight` gives the grip enough hit area to grab.
+- It stays collapsed while the editor opens and pops up automatically only when a compile actually fails; F10 or the title-bar `Error Panel (F10)` button calls `ToggleErrorPanel` to bring the last diagnostics back, and the text is kept in memory while collapsed.
+- Long diagnostics scroll on their own: `MeasureErrorHeight` measures the real content height, while `ApplyErrorScroll` / `UpdateErrorScrollBar` / `SetErrorScrollFromBar` / `HandleErrorWheelScroll` drive a vertical scrollbar and the wheel without touching the code caret.
+- `Ctrl` + wheel zooms the error font (`HandleErrorFontZoom`, from `ErrorFontMin` up to `ErrorFontZoomMax`), so a wall of compiler text can be shrunk to fit.
+
+**Code editor - font settings**
+
+- Code and error font sizes are persisted under `atv.codeEditor.fontSize` / `atv.codeEditor.errorFontSize` (`LoadFontSettings` / `SaveFontSettings`) and restored the next time the editor opens, so the size chosen in one session survives a restart.
+
+**Code editor - language and templates**
+
+- `DEFAULT_CODE_EN` gives the starter template an English twin, and `HandleLanguageChanged` swaps the template, the title-bar chrome (F6 / F7 / F8 / F9 / F10), the hover tips and the error hints when the language is switched, so an English session no longer opens with Chinese sample code.
+
+**Scrolling**
+
+- The vertical scrollbar of the code area moved to its own colour (`UITheme.CodeScrollbarLight`, a light grey block) instead of reusing the thin cyan `CodeScrollbar` of the horizontal bar, so the two are told apart at a glance.
+
+**Reset**
+
+- `/lock` now also drops the saved font sizes (`ResetFontSettingsToDefault`, or `ClearSavedFontSettings` when the editor has not been built yet), so a factory reset really restores the default 24 / 18 instead of keeping the last hand-picked sizes.
+
+**Block guide (Level 2 - Part 1)**
+
+- The three footer buttons were re-spaced and the middle one widened to 300 px, so the longest English label (`Start the API course >`) no longer wraps inside its frame or collides with its neighbours.
+
+**Grammar course - memory stage**
+
+- The "how to read this stage" header (one box = one byte, little-endian) is now pinned to Task 2 - variables and types - through `MemHeaderTaskIndex`, instead of appearing on whichever task the player happens to be on when the memory page is first opened; every other task reclaims that height for the byte rows.
 
 ### v0.2.4
 

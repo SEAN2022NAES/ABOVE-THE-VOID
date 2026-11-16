@@ -87,8 +87,10 @@ public static class UITheme
     public static readonly Color CodeStatusBg = Hex(0x061421, 1f);
     /// <summary>选中区域（冷青半透明）</summary>
     public static readonly Color CodeSelection = Hex(0x2E7EA0, 0.28f);
-    /// <summary>滚动条滑块（冷青细条）</summary>
+    /// <summary>滚动条滑块（冷青细条，横向滚动条 / 兼容旧引用）</summary>
     public static readonly Color CodeScrollbar = Hex(0x57D2EF, 0.50f);
+    /// <summary>右侧竖向滚动块（浅灰，比横向滚动条更粗更显眼）</summary>
+    public static readonly Color CodeScrollbarLight = Hex(0xC3CFDA, 0.78f);
     /// <summary>语法高亮：关键字</summary>
     public static readonly Color SyntaxKeyword = Hex(0x5CD8F2, 1f);
     /// <summary>语法高亮：字符串</summary>

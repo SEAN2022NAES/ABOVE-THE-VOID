@@ -195,7 +195,9 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private const float MemStageTopInset = 108f;      // 舞台顶边内缩：让开任务名那一行
     private const float MemStageBottomInset = 26f;    // 舞台底边内缩：一条呼吸位
     private const float MemStageSideInset = 26f;      // 舞台左右内缩
-    private const float MemHeaderH = 40f;             // 顶部说明条高度（留两行：小端那句要写清楚，一行放不下）
+    private const float MemHeaderOnceH = 64f;         // 「怎么读这张图」只在一个任务里展示：高度给足两行，行与行不再压叠
+    private const int MemHeaderTaskIndex = 1;         // 说明条挂在哪个任务（0 基）：1 = Task 2「变量与类型」——第一次真正出现 int/char/bool/float 的地方
+    private const float MemFootH = 34f;               // 说明条收起后，右上角步数行保留的高度（行区不会顶到它）
     private const float MemExprH = 34f;               // 执行台（当前代码行）高度
     private const float MemNoteH = 56f;               // 底部旁白高度
     private const float MemNoteGapY = 6f;             // 旁白与执行台之间的间距
@@ -226,7 +228,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
 
     // ---- 第 3 页：内存可视化舞台（整块正文区改成图形演示，manim 风格） ----
     private RectTransform memRoot;      // 舞台根节点（覆盖整个正文区）
-    private Text memHeaderText;         // 顶部说明：一格 = 1 字节 / 右高左低（小端）
+    private Text memHeaderText;         // 顶部说明：一格 = 1 字节 / 右高左低（小端），只在 Task 2 出现
     private Text memExprText;           // 执行台：当前这一行代码
     private Text memNoteText;           // 旁白：这一步在干什么
     private Text memFootText;           // 顶部右侧：第几步 / 循环提示
@@ -507,6 +509,28 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         //   · 没有记录（第一次进入 / 清档后 / 老版本存档）时是一张全 false 的表，等价于「什么都没做过」。
         int start = Mathf.Clamp(startIndex, 0, Mathf.Max(0, tasks.Length - 1));
         done = GameProgress.LoadTaskDone(DoneKeyOf(course), tasks.Length);
+
+        // 「从关卡起点进入」（startIndex ≤ 0：选关卡片、主页继续按到该关开头、直接进某个 Part 都是这种）
+        // 时不再从第 1 个任务重新讲起，而是直接停在最近一个没做完的任务上：
+        //   · 完成表里第一个 false 就是玩家接下来该做的那一项（中间被跳过的空洞也顺手补上，不会越做越散）；
+        //   · 玩家 / 开发者显式指定章节（/level 2 2 7 的第三个参数 → startIndex > 0）时一律不动，
+        //     保留精确跳转能力，方便回看早先的任务；
+        //   · 整门课全部做完（找不到 false）时仍从第 1 个任务进，方便整关从头重玩。
+        if (start <= 0)
+        {
+            int firstUndone = -1;
+            for (int i = 0; i < done.Length; i++)
+            {
+                if (!done[i])
+                {
+                    firstUndone = i;
+                    break;
+                }
+            }
+            if (firstUndone > 0)
+                start = firstUndone;
+        }
+
         CurrentIndex = start;
         guidePage = 0; // 进入教学总是从每个任务的第 1 页（写法 / 示例）开始看
 
@@ -981,18 +1005,19 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         memRoot = root;
 
         // ---- 顶部：左边一句「怎么读这张图」，右边步数 ----
-        memHeaderText = CreateText("MemHeader", root, "", 17, UITheme.TextMuted, TextAnchor.MiddleLeft);
+        memHeaderText = CreateText("MemHeader", root, "", 15, UITheme.TextMuted, TextAnchor.MiddleLeft);
         RectTransform hdr = memHeaderText.rectTransform;
         hdr.anchorMin = new Vector2(0f, 1f);
         hdr.anchorMax = new Vector2(1f, 1f);
         hdr.pivot = new Vector2(0f, 1f);
         hdr.anchoredPosition = Vector2.zero;
-        hdr.sizeDelta = new Vector2(-190f, MemHeaderH);
+        hdr.sizeDelta = new Vector2(-190f, MemHeaderOnceH);
         memHeaderText.horizontalOverflow = HorizontalWrapMode.Wrap;
         memHeaderText.verticalOverflow = VerticalWrapMode.Truncate;
-        memHeaderText.resizeTextForBestFit = true;
-        memHeaderText.resizeTextMinSize = 12;
-        memHeaderText.resizeTextMaxSize = 17;
+        // 不再开 bestFit：原来 40px 里硬塞两行会被自动缩到 12 号、行与行压在一起（看着就是「重合」）。
+        // 现在只在首次出现时展开到 MemHeaderOnceH，用固定的 15 号两行稳稳坐下。
+        memHeaderText.resizeTextForBestFit = false;
+        memHeaderText.lineSpacing = 1.12f;
 
         memFootText = CreateText("MemFoot", root, "", 16, UITheme.TextDim, TextAnchor.MiddleRight);
         RectTransform ftr = memFootText.rectTransform;
@@ -1000,7 +1025,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         ftr.anchorMax = new Vector2(1f, 1f);
         ftr.pivot = new Vector2(1f, 1f);
         ftr.anchoredPosition = Vector2.zero;
-        ftr.sizeDelta = new Vector2(180f, MemHeaderH);
+        ftr.sizeDelta = new Vector2(180f, MemFootH);
         memFootText.horizontalOverflow = HorizontalWrapMode.Wrap;
 
         // ---- 中间：行池 ----
@@ -1214,9 +1239,16 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         float flowH = Mathf.Max(availH, MemStageBaselineHeight());
         PlaceMemBottom(flowH);
 
+        // 顶部说明条只挂在 MemHeaderTaskIndex 那一个任务（Task 2「变量与类型」）上：
+        // 那是第一次真正出现 int / char / bool / float 的地方，讲「一格 = 1 字节、小端怎么读」正对得上；
+        // 别的任务（含 Task 1 注释、Task 4 算术）一律不出现，只留右上角步数那一行的高度，
+        // 空出来的几十像素全还给字节行。
+        bool showMemHeader = index == MemHeaderTaskIndex;
+        float headerH = showMemHeader ? MemHeaderOnceH : MemFootH;
+
         // 底部固定占位：旁白 + 执行台；其余高度留给行区
         float bottomH = MemNoteH + MemNoteGapY + MemExprH + 12f;
-        float rowsArea = Mathf.Max(90f, flowH - MemHeaderH - 10f - bottomH);
+        float rowsArea = Mathf.Max(90f, flowH - headerH - 10f - bottomH);
         float gap = MemRowGapY;
         // 均分 + 先收行间距、再收行高：任何情况下 totalH 都不会超过 rowsArea，
         // 于是行永远不会压到底部的执行台 / 旁白上（旧写法把 blockH 抬到 56 又保底 gap，反而整体溢出）。
@@ -1227,7 +1259,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             blockH = Mathf.Max(34f, (rowsArea - gap * (rows - 1)) / rows);
         }
         float totalH = rows * blockH + gap * (rows - 1);
-        float firstTop = -MemHeaderH - 10f - Mathf.Max(0f, (rowsArea - totalH) * 0.5f);
+        float firstTop = -headerH - 10f - Mathf.Max(0f, (rowsArea - totalH) * 0.5f);
 
         // 左侧标签列：徽章 / 类型名牌 / 变量名，窗口窄时按比例收
         float leftW = Mathf.Min(330f, Mathf.Max(210f, availW * 0.44f));
@@ -1435,10 +1467,20 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         }
 
         // 顶部说明与步数
+        // 「一格 = 1 字节 / 小端」这张「怎么读这张图」的说明只挂在 Task 2（变量与类型）：
+        // 那一步第一次把 int / char / bool / float 摆上台，说明条正好对上眼前的格子；
+        // 其余任务收起，读法已经记住了，再挂一遍只是白占一行高度、把字节行挤窄。
         if (memHeaderText != null)
-            SetLabel(memHeaderText, zh
-                ? "一格 = 1 字节；int 占 4 格、char 占 1 格，地址从 0x100 起递增。\n3 写成 0x00000003，小端存放 = 低字节在低地址，所以从 0x100 往高读是 03 00 00 00"
-                : "1 box = 1 byte. int = 4 boxes, char = 1, addresses grow from 0x100.\n3 is 0x00000003; little-endian keeps the low byte at the low address, so reading up from 0x100 gives 03 00 00 00.");
+        {
+            if (memHeaderText.gameObject.activeSelf != showMemHeader)
+                memHeaderText.gameObject.SetActive(showMemHeader);
+            if (showMemHeader)
+            {
+                SetLabel(memHeaderText, zh
+                    ? "一格 = 1 字节；int 占 4 格、char 占 1 格，地址从 0x100 起递增。\n3 写成 0x00000003，小端存放 = 低字节在低地址，所以从 0x100 往高读是 03 00 00 00"
+                    : "1 box = 1 byte. int = 4 boxes, char = 1, addresses grow from 0x100.\n3 is 0x00000003; little-endian keeps the low byte at the low address, so reading up from 0x100 gives 03 00 00 00.");
+            }
+        }
         if (memFootText != null)
             SetLabel(memFootText, (zh ? "第 " : "Step ") + (n + 1) + "/" + scene.Steps.Length + (zh ? " 步" : ""));
         if (memExprText != null)
@@ -2089,7 +2131,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             else
             {
                 headlineText.text = zh
-                    ? "关卡 1 · 第 3 部分 · C# 基础语法教学（零基础手把手）"
+                    ? "关卡 1 · 第 3 部分 · C# 基础语法教学"
                     : "Level 1 · Part 3 · C# Syntax Tutorial";
             }
         }

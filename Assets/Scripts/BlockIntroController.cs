@@ -963,18 +963,20 @@ public class BlockIntroController : MonoBehaviour
         }
 
         // 右下按钮组
+        // 末页按钮的文案在英文下最长（"Start the API course ›"），旧宽度 210 会被挤到换行 / 出框，
+        // 因此把这个按钮本身加宽到 300，左右两个按钮同步外移，三颗按钮保持等距不重叠。
         prevBtn = CreateButton(panelRt, "PrevBtn", "‹ 上一页",
-            new Vector2(0.5f, 0f), new Vector2(-330f, 40f), new Vector2(180f, 62f));
+            new Vector2(0.5f, 0f), new Vector2(-355f, 40f), new Vector2(180f, 62f));
         prevBtn.onClick.AddListener(PrevPage);
         prevLabel = prevBtn.GetComponentInChildren<Text>();
 
         nextBtn = CreateButton(panelRt, "NextBtn", "下一页 ›",
-            new Vector2(0.5f, 0f), new Vector2(-120f, 40f), new Vector2(210f, 62f));
+            new Vector2(0.5f, 0f), new Vector2(-95f, 40f), new Vector2(300f, 62f));
         nextBtn.onClick.AddListener(NextPage);
         nextLabel = nextBtn.GetComponentInChildren<Text>();
 
         Button skipBtn = CreateButton(panelRt, "SkipBtn", "跳过图鉴 (S)",
-            new Vector2(0.5f, 0f), new Vector2(120f, 40f), new Vector2(200f, 62f));
+            new Vector2(0.5f, 0f), new Vector2(165f, 40f), new Vector2(200f, 62f));
         skipBtn.onClick.AddListener(SkipAll);
         skipLabel = skipBtn.GetComponentInChildren<Text>();
 
