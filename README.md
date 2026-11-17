@@ -11,12 +11,47 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.5**
+Current version: **v0.2.6**
 
 > **Licence / 许可**：Non-commercial use (study, teaching, research, non-profit open source) is free with
 > attribution and no monetisation of any kind; **commercial use requires a prior written licence**.
 > See [LICENSE](LICENSE) and [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). © 2026 Ma Yixiao (Sean Ma). All rights reserved.
 > **非商业用途免费（须署名、禁任何盈利场景），商业用途必须事先取得书面授权。** 详见下方「12. License / 许可」。
+
+### v0.2.6
+
+**Code editor - runtime error pane (RE)**
+
+- The purple RE pane no longer keeps a fixed height and no longer has a drag grip: `GetReZoneAutoHeight()` now returns `reContentHeight + ReZoneChromeHeight` clamped between `ReZoneMinHeight` (64) and `GetReZoneMaxHeight()`, so the pane grows with the font and shrinks back with it; `BeginReSplitDrag`, `DragReSplit` and `reZoneManualHeight` were removed together with the grip.
+- Top and bottom insets are symmetric around the split line (`ReTopInset` / `ReBottomInset`, the lower one counting only half the line weight), so the first and the last text lines keep the same breathing room.
+- The pane background starts *below* the split line (`RuntimeErrorBg`, `offsetMax.y = -(ReSplitTopGap + ReSplitLineHeight)`) and is pushed to the first sibling, which removes the purple sliver that used to leak above the line.
+- The 6 px strip above the line is now part of the split band (`RuntimeErrorSplitTopPad`): it fades in dim purple on hover (`ReSplitTopPadAlpha` 0.10 -> `ReSplitTopPadHoverAlpha` 0.30), counts as the band for hit-testing and never turns solid, so the line above keeps its weight.
+- Clicking any part of the band (pad, 2 px bar or grip) collapses the pane through `ReSplitClickClose`, exactly like one `F10` press; the transparent hit area stays non-raycast so the band is not widened.
+- `F11` toggles the RE pane on its own; while it is open `F10` closes it first and only moves on to the CE pane on the next press.
+
+**Code editor - compile error pane (CE)**
+
+- The red CE pane got the same treatment: a 6 px `ErrorSplitTopPad` above its bar fades in dim red on hover (`ErrorSplitTopPadAlpha` / `ErrorSplitTopPadHoverAlpha`), and `ErrorZoneBg` starts below the pad, so no colour leaks above the line.
+
+**Code editor - font size**
+
+- Minimum font sizes were raised to 14 (`ReFontSizeMin`, `ErrorFontMin`) to match the `Lang C#` label of the status bar, so a zoomed-out pane never becomes unreadable; `DefaultReFontSize` is 15.
+
+**Tutorials - sample code**
+
+- Every task card now labels its example block: `写法:` / `Syntax:` is followed by `示例代码:` / `Example Code:` before the code lines, 62 spots in total (18 grammar and 13 API tasks, both languages). The 4-space indent of the code lines is untouched, so the page-3 animation still locates its lines by indentation.
+
+**Tutorials - navigation buttons**
+
+- The footer buttons of the programming prologue (`BlockIntroController`) and of the course-intro panel (`CodeIntroTutorialController`) are laid out by `LayoutNavButtons()`: fixed 28 px gaps, the "next" width measured from the current label (`MeasureNavLabelWidth`) and clamped per panel, the whole group centred, and best-fit shrinking as a last resort, so the longest English labels no longer wrap or push out of the frame.
+
+**Origin hint**
+
+- Added `OriginHintController`: when the view is back at the origin and no panel is on screen, a `开始语法课 / Start the course` bar fades in at the bottom of the screen; it hides itself while soul-cam (Q) is on, while paused, or while a prologue / course / editor panel occupies the screen, and fades back in on return.
+
+**Tuning**
+
+- `CoordinateAxesDrawer.axisWidth` and `TutorialController.completionHoldSeconds` are serialized so both can be tweaked per scene.
 
 ### v0.2.5
 
@@ -402,6 +437,8 @@ The core experience includes a 3D coordinate system, an origin camera, mouse loo
 | Save data | Resume checkpoint, per-level high scores, sensitivity, field of view, and frame rate cap persist across launches. |
 | Developer console | Inspect state and navigate to supported level parts. |
 | Code editor | Press Enter to edit tower code with syntax highlighting, diagnostics, undo/redo, and runtime execution. |
+| Runtime error pane | Runtime (RE) and compile (CE) errors are shown in their own panes, each with an adaptive height, a hover-lit split band, and its own scrollbar. |
+| Origin hint | A `Start the course` bar fades in at the bottom whenever the view is back at the origin and no panel is on screen. |
 | Pause | Press ESC in any gameplay mode to pause and resume. |
 | Q / F1 modes | Strict axis movement or camera-relative free flight. |
 
@@ -438,6 +475,7 @@ ABOVE THE VOID/
 │       ├── CodeSyntaxTutorialController.cs  # Level 1 grammar and Level 2 API course panel
 │       ├── CodeIntroTutorialController.cs   # Level 1 Part 2 programming prologue
 │       ├── BlockIntroController.cs          # Level 2 Part 1 block guide (cube faces)
+│       ├── OriginHintController.cs          # "At origin" hint bar that opens the course
 │       ├── CodeTower.cs                   # Code-controlled tower interface
 │       ├── UIFitScreen.cs                 # Screen-fitting UI helper
 │       ├── UITheme.cs                     # Single colour source for the whole UI
@@ -518,7 +556,7 @@ An orbit camera can be added later with `yaw` and `pitch`: `pos = origin + Quate
 
 Use the Inspector to adjust:
 
-- `CoordinateAxesDrawer`: axis length, tick spacing, line width, arrow size, and axis colors.
+- `CoordinateAxesDrawer`: axis length, tick spacing, line width (`axisWidth`), arrow size, and axis colors.
 - Coordinate convention: X is right, Y is left, and Z is vertical. The first unit tick uses the matching axis color.
 - Spirit movement is limited to X/Y/Z in [-20, 20].
 - Axis labels use generated colored TextMesh objects and compensate for camera distance.
@@ -527,7 +565,8 @@ Use the Inspector to adjust:
 - `FlyingBlockSpawner`: spawn interval, block size limits, speed, spawn distance, and block type probabilities.
 - `FlyingBlock`: size, speed, overlap margin, and externally controlled destruction.
 - `UITheme`: the whole UI palette (void background, accent, on-accent text, dimmed text, editor surfaces, syntax colours).
-- `CodeEditorController`: editor font sizes, line height, caret blink rate, the Enter / `Alt+O` / `Ctrl+Shift+O` bindings, and the segment thresholds (`segEnableThreshold`, `segCharBudget`).
+- `CodeEditorController`: editor font sizes (RE clamped to `ReFontSizeMin` 14 / `ReFontSizeMax` 32, default 15), line height, caret blink rate, the Enter / `Alt+O` / `Ctrl+Shift+O` / `F10` / `F11` bindings, and the segment thresholds (`segEnableThreshold`, `segCharBudget`).
+- `TutorialController`: `completionHoldSeconds`, how long the Level 1 completion banner stays before moving on.
 
 ## 10. Future Extensions
 

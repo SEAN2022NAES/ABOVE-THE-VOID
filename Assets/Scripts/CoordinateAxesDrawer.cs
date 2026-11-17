@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 在原点绘制 3D 直角坐标系可视化：
@@ -19,7 +19,7 @@ public class CoordinateAxesDrawer : MonoBehaviour
 
     [Header("线条外观")]
     [Tooltip("主轴宽度")]
-    public float axisWidth = 0.06f;
+    public float axisWidth = 0.03f;
 
     [Tooltip("刻度线宽度")]
     public float tickWidth = 0.04f;

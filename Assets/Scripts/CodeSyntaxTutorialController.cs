@@ -2512,6 +2512,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 1：注释",
             "Task 1: Comments",
             "写法：// 单行注释      /* 多行注释 */\n"
+            + "示例代码：\n"
             + "    // 计算剩余血量\n"
             + "    int remainHp = 3;\n"
             + "    /* 下面这行打印到荧幕\n"
@@ -2521,6 +2522,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：注释不参与运行；养成在关键逻辑上方写一行说明的习惯。\n"
             + "判定：代码里出现 // 或 /*（写在字符串里的不算）。",
             "Syntax: // single line      /* multi line */\n"
+            + "Example Code:\n"
             + "    // remaining hp\n"
             + "    int remainHp = 3;\n"
             + "    /* this prints to the screen\n"
@@ -2535,6 +2537,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 2：变量声明与类型",
             "Task 2: Variables & Types",
             "写法：类型 变量名 = 初始值;\n"
+            + "示例代码：\n"
             + "    int hp = 100;\n"
             + "    float speed = 1.5f;\n"
             + "    bool ready = true;\n"
@@ -2543,6 +2546,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：float 字面量要带 f。每个任务的示例都能直接粘贴进编辑器（变量名互不重复），粘完点编译即可。\n"
             + "判定：出现「类型 名字 = 值;」。",
             "Syntax: type name = value;\n"
+            + "Example Code:\n"
             + "    int hp = 100;\n"
             + "    float speed = 1.5f;\n"
             + "    bool ready = true;\n"
@@ -2556,12 +2560,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 3：常量 const",
             "Task 3: const Constants",
             "写法：const 类型 常量名 = 值;\n"
+            + "示例代码：\n"
             + "    const int MaxBlocks = 400;\n"
             + "    const float Pi = 3.14f;\n\n"
             + "目标：声明至少 1 个 const 常量。\n"
             + "提示：const 必须在声明时就赋值，之后不能再改。\n"
             + "判定：出现 const 声明。",
             "Syntax: const type NAME = value;\n"
+            + "Example Code:\n"
             + "    const int MaxBlocks = 400;\n"
             + "    const float Pi = 3.14f;\n\n"
             + "Goal: declare at least one const.\n"
@@ -2573,6 +2579,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 4：算术运算符与表达式",
             "Task 4: Arithmetic Operators",
             "写法：操作数 运算符 操作数，运算符可用 + - * / %\n"
+            + "示例代码：\n"
             + "    int total = 2 + 3 * 4;\n"
             + "    float halfTotal = total / 2f;\n"
             + "    int rest = total % 5;\n\n"
@@ -2580,6 +2587,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：* / % 优先级高于 + -，可用括号改变顺序；整数相除会丢掉小数。\n"
             + "判定：出现算术运算表达式。",
             "Syntax: operand op operand, ops: + - * / %\n"
+            + "Example Code:\n"
             + "    int total = 2 + 3 * 4;\n"
             + "    float halfTotal = total / 2f;\n"
             + "    int rest = total % 5;\n\n"
@@ -2592,6 +2600,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 5：关系运算符",
             "Task 5: Comparison Operators",
             "写法：操作数 关系运算符 操作数（可用运算符：==  !=  >  <  >=  <=）\n"
+            + "示例代码：\n"
             + "    int hpNow = 5;\n"
             + "    bool alive = hpNow > 0;\n"
             + "    bool empty = (hpNow == 0);\n\n"
@@ -2599,6 +2608,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：赋值用 =，判断相等要用 ==，别写反。\n"
             + "判定：出现 == != > < >= <= 之一。",
             "Syntax: operand op operand (operators: ==  !=  >  <  >=  <=)\n"
+            + "Example Code:\n"
             + "    int hpNow = 5;\n"
             + "    bool alive = hpNow > 0;\n"
             + "    bool empty = (hpNow == 0);\n\n"
@@ -2611,6 +2621,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 6：逻辑运算符",
             "Task 6: Logical Operators",
             "写法：条件 逻辑运算符 条件，运算符有 &&  ||  !\n"
+            + "示例代码：\n"
             + "    bool weaponReady = true;\n"
             + "    int hpLeft = 5;\n"
             + "    bool canFire = weaponReady && hpLeft > 0;\n"
@@ -2619,6 +2630,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：&& 两边都真才真，|| 一边真就真，! 取反。\n"
             + "判定：出现 && || ! 之一。",
             "Syntax: condition op condition, ops: &&  ||  !\n"
+            + "Example Code:\n"
             + "    bool weaponReady = true;\n"
             + "    int hpLeft = 5;\n"
             + "    bool canFire = weaponReady && hpLeft > 0;\n"
@@ -2632,6 +2644,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 7：if 条件判断",
             "Task 7: if Statements",
             "写法：if (条件) { 条件成立时执行的语句 }\n"
+            + "示例代码：\n"
             + "    int blockCount = tower.GetAllObjects().Count;\n"
             + "    if (blockCount > 0)\n"
             + "    {\n"
@@ -2641,6 +2654,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：括号里的条件必须求值为 bool；多条语句用 { } 包起来。\n"
             + "判定：出现 if ( …条件… ) 结构。",
             "Syntax: if (condition) { statements }\n"
+            + "Example Code:\n"
             + "    int blockCount = tower.GetAllObjects().Count;\n"
             + "    if (blockCount > 0)\n"
             + "    {\n"
@@ -2655,6 +2669,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 8：if … else …",
             "Task 8: if / else",
             "写法：if (条件) { … } else { … }\n"
+            + "示例代码：\n"
             + "    float cd = tower.GetFireCooldown();\n"
             + "    if (cd <= 0f)\n"
             + "    {\n"
@@ -2668,6 +2683,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：else 后面不写条件；多层判断用 else if (条件)。\n"
             + "判定：出现 if 且出现 else。",
             "Syntax: if (condition) { ... } else { ... }\n"
+            + "Example Code:\n"
             + "    float cd = tower.GetFireCooldown();\n"
             + "    if (cd <= 0f)\n"
             + "    {\n"
@@ -2686,6 +2702,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 9：switch 多分支",
             "Task 9: switch",
             "写法：switch (表达式) { case 值: … break; default: … break; }\n"
+            + "示例代码：\n"
             + "    int mode = 1;\n"
             + "    switch (mode)\n"
             + "    {\n"
@@ -2697,6 +2714,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：每个分支结尾要 break，否则会继续往下执行；default 处理其余情况。\n"
             + "判定：出现 switch ( … ) { case 结构。",
             "Syntax: switch (expr) { case v: ... break; default: ... break; }\n"
+            + "Example Code:\n"
             + "    int mode = 1;\n"
             + "    switch (mode)\n"
             + "    {\n"
@@ -2713,6 +2731,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 10：for 循环",
             "Task 10: for Loops",
             "写法：for (初始化; 条件; 迭代)\n"
+            + "示例代码：\n"
             + "    for (int i = 0; i < 3; i++)\n"
             + "    {\n"
             + "        tower.PrintLine(\"i={0}\", i);\n"
@@ -2721,6 +2740,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：三段分别用分号隔开：初始化; 终止条件; 每轮结束后的迭代。\n"
             + "判定：出现 for ( … ; … ; ) 结构。",
             "Syntax: for (init; condition; step)\n"
+            + "Example Code:\n"
             + "    for (int i = 0; i < 3; i++)\n"
             + "    {\n"
             + "        tower.PrintLine(\"i={0}\", i);\n"
@@ -2734,6 +2754,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 11：while 循环",
             "Task 11: while Loops",
             "写法：while (条件) { 循环体 }\n"
+            + "示例代码：\n"
             + "    int wi = 0;\n"
             + "    while (wi < 3)\n"
             + "    {\n"
@@ -2743,6 +2764,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：循环体里要改变条件变量，否则会死循环。\n"
             + "判定：出现 while ( … ) { 结构。",
             "Syntax: while (condition) { body }\n"
+            + "Example Code:\n"
             + "    int wi = 0;\n"
             + "    while (wi < 3)\n"
             + "    {\n"
@@ -2757,6 +2779,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 12：do … while 循环",
             "Task 12: do / while Loops",
             "写法：do { 循环体 } while (条件);\n"
+            + "示例代码：\n"
             + "    int di = 0;\n"
             + "    do\n"
             + "    {\n"
@@ -2766,6 +2789,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：do 的循环体至少执行 1 次，条件写在最后且末尾要加分号。\n"
             + "判定：出现 do { … } while ( … ); 结构。",
             "Syntax: do { body } while (condition);\n"
+            + "Example Code:\n"
             + "    int di = 0;\n"
             + "    do\n"
             + "    {\n"
@@ -2780,6 +2804,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 13：一维数组",
             "Task 13: Arrays",
             "写法：类型[] 名字 = new 类型[长度];\n"
+            + "示例代码：\n"
             + "    int[] hits = new int[3];\n"
             + "    hits[0] = 2;\n"
             + "    tower.PrintLine(\"hits[0]={0}\", hits[0]);\n\n"
@@ -2787,6 +2812,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：下标从 0 开始，长度 3 的合法下标是 0/1/2，越界会报错。\n"
             + "判定：出现 new 类型[长度] 或 名字[下标]。",
             "Syntax: type[] name = new type[length];\n"
+            + "Example Code:\n"
             + "    int[] hits = new int[3];\n"
             + "    hits[0] = 2;\n"
             + "    tower.PrintLine(\"hits[0]={0}\", hits[0]);\n\n"
@@ -2799,6 +2825,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 14：List 集合",
             "Task 14: List<T>",
             "写法：List<类型> 名字 = new List<类型>();\n"
+            + "示例代码：\n"
             + "    List<int> hpList = new List<int>();\n"
             + "    hpList.Add(3);\n"
             + "    tower.PrintLine(\"count={0}\", hpList.Count);\n\n"
@@ -2806,6 +2833,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：编辑器模板已带 using System.Collections.Generic;；用 Add 追加、Count 取数量。\n"
             + "判定：出现 new List<…> 且出现 .Add(。",
             "Syntax: List<T> name = new List<T>();\n"
+            + "Example Code:\n"
             + "    List<int> hpList = new List<int>();\n"
             + "    hpList.Add(3);\n"
             + "    tower.PrintLine(\"count={0}\", hpList.Count);\n\n"
@@ -2818,6 +2846,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 15：方法定义与参数",
             "Task 15: Methods & Parameters",
             "写法：返回类型 方法名(参数类型 参数名, …) { 方法体 }\n"
+            + "示例代码：\n"
             + "    void ShowHp(int hp)\n"
             + "    {\n"
             + "        tower.PrintLine(\"hp={0}\", hp);\n"
@@ -2827,6 +2856,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：方法写在 Run 里面（局部函数），先定义后调用。\n"
             + "判定：出现「类型 名字(参数…) {」。",
             "Syntax: returnType name(type arg, ...) { body }\n"
+            + "Example Code:\n"
             + "    void ShowHp(int hp)\n"
             + "    {\n"
             + "        tower.PrintLine(\"hp={0}\", hp);\n"
@@ -2841,6 +2871,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 16：方法返回值 return",
             "Task 16: Return Values",
             "写法：return 表达式; 并用变量接收调用结果\n"
+            + "示例代码：\n"
             + "    int Twice(int v)\n"
             + "    {\n"
             + "        return v * 2;\n"
@@ -2851,6 +2882,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：return 后面跟表达式；返回值类型要与方法声明一致。\n"
             + "判定：出现 return …; 且出现「变量 = 方法调用(」。",
             "Syntax: return expression; and receive it into a variable\n"
+            + "Example Code:\n"
             + "    int Twice(int v)\n"
             + "    {\n"
             + "        return v * 2;\n"
@@ -2866,6 +2898,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 17：字符串拼接",
             "Task 17: String Concatenation",
             "写法：用 + 拼接字符串与其他值\n"
+            + "示例代码：\n"
             + "    int curHp = 3;\n"
             + "    string msg = \"hp=\" + curHp;\n"
             + "    tower.PrintLine(msg + \" / done\");\n\n"
@@ -2873,6 +2906,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：数字会自动转成字符串，多个值用多个 + 连起来。\n"
             + "判定：出现「字符串 + 值」。",
             "Syntax: join strings and values with +\n"
+            + "Example Code:\n"
             + "    int curHp = 3;\n"
             + "    string msg = \"hp=\" + curHp;\n"
             + "    tower.PrintLine(msg + \" / done\");\n\n"
@@ -2885,6 +2919,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 18：string.Format 格式化",
             "Task 18: string.Format",
             "写法：string.Format(\"模板 {0} {1}\", 值1, 值2)\n"
+            + "示例代码：\n"
             + "    int baseHp = 3;\n"
             + "    string msgFmt = string.Format(\"hp={0}, half={1:F1}\", baseHp, baseHp / 2f);\n"
             + "    tower.PrintLine(msgFmt);\n\n"
@@ -2892,6 +2927,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：{0} {1} 是占位符，按顺序取后面的参数；{1:F1} 表示保留 1 位小数。\n"
             + "判定：出现 string.Format(。",
             "Syntax: string.Format(\"template {0} {1}\", v1, v2)\n"
+            + "Example Code:\n"
             + "    int baseHp = 3;\n"
             + "    string msgFmt = string.Format(\"hp={0}, half={1:F1}\", baseHp, baseHp / 2f);\n"
             + "    tower.PrintLine(msgFmt);\n\n"
@@ -4032,6 +4068,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "Task 1: Print",
             "签名：void Print(string format, params object[] args);\n"
             + "说明：输出到荧幕但不换行，适合在同一行拼多段内容。\n"
+            + "示例代码：\n"
             + "    tower.Print(\"hp={0} \", 7);\n"
             + "    tower.Print(\"count={0}\", 42);\n\n"
             + "目标：用 Print 输出一段不换行的文字（两句会拼在同一行）。\n"
@@ -4039,6 +4076,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "判定：出现「tower.Print(」（PrintLine 不算）。",
             "Signature: void Print(string format, params object[] args);\n"
             + "Note: prints without a trailing newline - handy for building one line piecewise.\n"
+            + "Example Code:\n"
             + "    tower.Print(\"hp={0} \", 7);\n"
             + "    tower.Print(\"count={0}\", 42);\n\n"
             + "Goal: use Print for a non-newline output (both calls land on the same line).\n"
@@ -4051,12 +4089,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "Task 2: PrintLine",
             "签名：void PrintLine(string format, params object[] args);\n"
             + "说明：输出到 +X 前方荧幕并换行，占位符同 string.Format。\n"
+            + "示例代码：\n"
             + "    tower.PrintLine(\"hp={0}\", 7);\n\n"
             + "目标：用 PrintLine 输出一行文字（每次调用自动换行）。\n"
             + "提示：荧幕最多保留 24 行，超出会自动丢弃最旧的；调试循环里别每帧狂打印。\n"
             + "判定：出现「tower.PrintLine(」。",
             "Signature: void PrintLine(string format, params object[] args);\n"
             + "Note: prints one line to the +X screen; same placeholders as string.Format.\n"
+            + "Example Code:\n"
             + "    tower.PrintLine(\"hp={0}\", 7);\n\n"
             + "Goal: print one line with PrintLine (each call ends the line).\n"
             + "Hint: the screen keeps 24 lines; avoid printing every frame in a loop.\n"
@@ -4067,12 +4107,14 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 3：ClearPrint 清空荧幕",
             "Task 3: ClearPrint",
             "签名：void ClearPrint();   // 清空荧幕全部内容\n"
+            + "示例代码：\n"
             + "    tower.ClearPrint();\n"
             + "    tower.PrintLine(\"screen cleared\");\n\n"
             + "目标：调用 ClearPrint 清空一次荧幕。\n"
             + "提示：Run 每帧都会执行，无条件 ClearPrint 会导致荧幕始终只有一行；配合计数条件使用。\n"
             + "判定：出现「tower.ClearPrint(」。",
             "Signature: void ClearPrint();   // clears the whole screen\n"
+            + "Example Code:\n"
             + "    tower.ClearPrint();\n"
             + "    tower.PrintLine(\"screen cleared\");\n\n"
             + "Goal: call ClearPrint once.\n"
@@ -4085,6 +4127,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "Task 4: GetAllObjects",
             "签名：List<TowerObjectInfo> GetAllObjects();\n"
             + "返回：场上所有飞行方块的列表（可能为空）。\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        tower.PrintLine(\"object {0}\", o.Index);\n"
@@ -4094,6 +4137,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "判定：代码里同时出现 foreach 与 tower.GetAllObjects(。",
             "Signature: List<TowerObjectInfo> GetAllObjects();\n"
             + "Returns: every flying block currently in the scene (may be empty).\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        tower.PrintLine(\"object {0}\", o.Index);\n"
@@ -4107,6 +4151,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 5：读取 Index 编号",
             "Task 5: Read Index",
             "字段：int Index;   // 方块生成编号（全局递增，非数组下标）\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        tower.PrintLine(\"#{0}\", o.Index);\n"
@@ -4115,6 +4160,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：Index 只用于标识身份，不表示位置或顺序。\n"
             + "判定：出现「.Index」。",
             "Field: int Index;   // spawn serial number (global counter, not an array index)\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        tower.PrintLine(\"#{0}\", o.Index);\n"
@@ -4128,6 +4174,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 6：读取 Type 类型",
             "Task 6: Read Type",
             "字段：string Type;   // \"ATTACK\" 红块 / \"BOMB\" 蓝块\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        if (o.Type == \"ATTACK\")\n"
@@ -4137,6 +4184,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：Type 是字符串，比较要用 == 且带引号；红块击毁加分，蓝块不加分。\n"
             + "判定：出现「.Type」。",
             "Field: string Type;   // \"ATTACK\" red / \"BOMB\" blue\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        if (o.Type == \"ATTACK\")\n"
@@ -4151,6 +4199,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 7：读取 HP 剩余血量",
             "Task 7: Read HP",
             "字段：int HP;   // 剩余受击层数（各块不同，最多 6 层；吃光即被击毁）\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        if (o.HP <= 1)\n"
@@ -4160,6 +4209,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：HP 越小越接近被击毁，可用来优先攻击残血目标。\n"
             + "判定：出现「.HP」。",
             "Field: int HP;   // remaining hit layers (varies per block, up to 7; destroyed at 0)\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        if (o.HP <= 1)\n"
@@ -4174,6 +4224,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 8：读取 Position 位置",
             "Task 8: Read Position",
             "字段：Vector3 Position;   // 几何中心的世界坐标\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        Vector3 p = o.Position;\n"
@@ -4183,6 +4234,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：Position 是 Vector3，用 .x .y .z 访问分量；炮台在原点朝 +X 发射。\n"
             + "判定：出现「.Position」。",
             "Field: Vector3 Position;   // world-space geometric center\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        Vector3 p = o.Position;\n"
@@ -4197,6 +4249,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 9：读取 Velocity 速度",
             "Task 9: Read Velocity",
             "字段：Vector3 Velocity;   // 速度向量（方向 × 速度，单位/秒）\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        Vector3 v = o.Velocity;\n"
@@ -4206,6 +4259,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：v.magnitude 是速度标量；v.normalized 是飞行方向。\n"
             + "判定：出现「.Velocity」。",
             "Field: Vector3 Velocity;   // velocity vector (direction x speed, units/sec)\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        Vector3 v = o.Velocity;\n"
@@ -4221,6 +4275,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "Task 10: Read Volume",
             "字段：float Volume;   // 当前剩余体积（越打越小）；float InitialVolume;   // 初始体积（切割后不变）\n"
             + "int MaxHits;   // 初始受击层数；Vector3 Size;   // 当前三边尺寸\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "        tower.PrintLine(\"#{0} vol={1:F2}/{2:F2}\", o.Index, o.Volume, o.InitialVolume);\n\n"
             + "目标：读取 Volume（可同时用 InitialVolume 算剩余比例）。\n"
@@ -4229,6 +4284,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "Fields: float Volume;   // current remaining volume (shrinks when hit)\n"
             + "float InitialVolume;   // initial volume (constant); int MaxHits;   // initial hit layers\n"
             + "Vector3 Size;   // current edge sizes\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "        tower.PrintLine(\"#{0} vol={1:F2}/{2:F2}\", o.Index, o.Volume, o.InitialVolume);\n\n"
             + "Goal: read Volume (optionally with InitialVolume for a ratio).\n"
@@ -4240,6 +4296,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 11：GetFireCooldown 冷却查询",
             "Task 11: GetFireCooldown",
             "签名：float GetFireCooldown();   // 距下一发可发射的剩余秒数，0 = 已就绪\n"
+            + "示例代码：\n"
             + "    float cd = tower.GetFireCooldown();\n"
             + "    if (cd <= 0f)\n"
             + "        tower.PrintLine(\"ready to fire\");\n\n"
@@ -4247,6 +4304,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：冷却未好时 FireAtPlane 会返回 false，先判断冷却能省掉无效调用。\n"
             + "判定：出现「tower.GetFireCooldown(」。",
             "Signature: float GetFireCooldown();   // seconds until next shot; 0 = ready\n"
+            + "Example Code:\n"
             + "    float cd = tower.GetFireCooldown();\n"
             + "    if (cd <= 0f)\n"
             + "        tower.PrintLine(\"ready to fire\");\n\n"
@@ -4261,6 +4319,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "签名：bool FireAtPlane(float A, float B, float C);\n"
             + "说明：沿过原点平面 A*x+B*y+C*z=0 的法线方向 (A,B,C) 发射；冷却中返回 false。\n"
             + "约束：平面必过原点（炮台就在原点），所以只需 A、B、C 三个参数，没有 D。\n"
+            + "示例代码：\n"
             + "    bool fired = tower.FireAtPlane(1f, 0f, 0f);   // 法线 (1,0,0)，沿 +X 发射\n"
             + "    tower.PrintLine(\"fired={0}\", fired);\n\n"
             + "目标：调用一次 FireAtPlane 发射。\n"
@@ -4269,6 +4328,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "Signature: bool FireAtPlane(float A, float B, float C);\n"
             + "Note: fires along the normal (A,B,C) of the origin-passing plane A*x+B*y+C*z=0; false while cooling down.\n"
             + "Constraint: the plane always passes through the origin (the tower is at the origin), so only A, B, C are needed - there is no D.\n"
+            + "Example Code:\n"
             + "    bool fired = tower.FireAtPlane(1f, 0f, 0f);   // normal (1,0,0): fires along +X\n"
             + "    tower.PrintLine(\"fired={0}\", fired);\n\n"
             + "Goal: call FireAtPlane once.\n"
@@ -4280,6 +4340,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             "任务 13：实战组合（遍历 + 判断 + 发射）",
             "Task 13: Combine (loop + if + fire)",
             "把三个 API 串起来：遍历对象 → 判断类型 → 打最靠前的一个\n"
+            + "示例代码：\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        if (o.Type == \"ATTACK\" && o.Position.x > 0f)\n"
@@ -4293,6 +4354,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             + "提示：命中一个就 break，避免一帧内重复调用浪费冷却；把目标的坐标当法向量传给 A B C 即可瞄准它。\n"
             + "判定：同时出现 foreach、if 与 tower.FireAtPlane(。",
             "Chain three APIs: iterate → filter by type → shoot one target\n"
+            + "Example Code:\n"
             + "    foreach (var o in tower.GetAllObjects())\n"
             + "    {\n"
             + "        if (o.Type == \"ATTACK\" && o.Position.x > 0f)\n"

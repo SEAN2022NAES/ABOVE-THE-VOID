@@ -33,7 +33,7 @@ public class TutorialController : MonoBehaviour
     [Tooltip("欢迎页停留秒数（真实时间）")]
     public float welcomeHoldSeconds = 2.8f;
     [Tooltip("引导教学完成后，自动顺接进入 Level 1 - Part 2 前在结语页停留的秒数（真实时间，可调）")]
-    public float completionHoldSeconds = 2.2f;
+    public float completionHoldSeconds = 4.5f;
     [Tooltip("进入 Level 1 - Part 2 前的淡出到全黑时长（秒，真实时间，可调；0 = 无淡出）")]
     public float transitionFadeOutSeconds = 0.35f;
     [Tooltip("进入 Level 1 - Part 2 后的淡入时长（秒，真实时间，可调；0 = 无淡入）")]

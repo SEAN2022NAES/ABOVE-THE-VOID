@@ -47,11 +47,27 @@ public class CodeIntroTutorialController : MonoBehaviour
     private const float FadeInSeconds = 0.5f;
     private Button prevBtn;
     private Button nextBtn;
+    private RectTransform prevRt;   // 底部按钮组的三个矩形：宽度按文案动态重排（见 LayoutNavButtons）
+    private RectTransform nextRt;
+    private RectTransform skipRt;
     private Text prevLabel;
     private Text nextLabel;
     private Text skipLabel;
     private PlayerCameraController playerController; // 读字期间接管视角：释放鼠标、禁止鼠标转朝向
     private const KeyCode SkipKey = KeyCode.S;       // 跳过序章的快捷键（与按钮同效）
+
+    // ---- 底部按钮组布局 ----
+    // 三个按钮等距排布、整组在面板内水平居中。
+    // 「下一页」在末页会变成「开始语法课 › / Start the course ›」，比「下一页 › / Next ›」宽一大截：
+    // 固定 210 宽会把文字顶出按钮边框（英文尤其明显），所以宽度改由 LayoutNavButtons() 按当前文案实测后动态给。
+    private const float NavGap = 28f;
+    private const float PrevW = 180f;
+    private const float NextWMin = 210f;
+    private const float NextWMax = 380f;
+    private const float SkipW = 320f;
+    private const float NavBtnH = 62f;
+    private const float NavBtnY = 40f;
+    private const float NavLabelPadding = 48f; // 按钮文字左右各留的内边距，避免量出来的宽度贴边
 
     // ---- 正文字号自适应（修复换字体后的文字溢出）----
     // 正文框是「固定高度 + verticalOverflow = Overflow」，字号原先写死 26。
@@ -388,6 +404,10 @@ public class CodeIntroTutorialController : MonoBehaviour
 
         if (prevBtn != null)
             prevBtn.interactable = page > 0;
+
+        // 文案换了（「下一页 ›」↔「开始语法课 ›」）就按新文案重新定宽并整组居中，
+        // 否则末页英文「Start the course ›」会被原来 210 宽顶出按钮边框。
+        LayoutNavButtons();
     }
 
     // ================== UI 构建 ==================
@@ -491,31 +511,36 @@ public class CodeIntroTutorialController : MonoBehaviour
         // 三个按钮的间距必须一致：之前是各自写死 x 坐标（-330 / -120 / 150），
         // 结果 上一页↔下一页只隔 15px、下一页↔跳过序章只隔 5px，三个挤成一坨，右边却空出一大截，观感很不协调。
         // 现在统一按 NavGap 等距排布，并让整组在面板内水平居中。
-        const float NavGap = 28f;
-        const float PrevW = 180f;
-        const float NextW = 210f;
-        const float SkipW = 320f;
-        float groupW = PrevW + NextW + SkipW + NavGap * 2f;
-        float cursor = -groupW * 0.5f;                       // 整组左边界（相对面板中心）
-
+        // 具体横向位置与宽度交给 LayoutNavButtons() 统一算：先建出来，位置随后置。
         prevBtn = CreateButton(panelRt, "PrevBtn", "‹ 上一页",
-            new Vector2(0.5f, 0f), new Vector2(cursor + PrevW * 0.5f, 40f), new Vector2(PrevW, 62f));
+            new Vector2(0.5f, 0f), new Vector2(0f, NavBtnY), new Vector2(PrevW, NavBtnH));
         prevBtn.onClick.AddListener(PrevPage);
         prevLabel = prevBtn.GetComponentInChildren<Text>();
-        cursor += PrevW + NavGap;
+        prevRt = prevBtn.GetComponent<RectTransform>();
 
         nextBtn = CreateButton(panelRt, "NextBtn", "下一页 ›",
-            new Vector2(0.5f, 0f), new Vector2(cursor + NextW * 0.5f, 40f), new Vector2(NextW, 62f));
+            new Vector2(0.5f, 0f), new Vector2(0f, NavBtnY), new Vector2(NextWMin, NavBtnH));
         nextBtn.onClick.AddListener(NextPage);
         nextLabel = nextBtn.GetComponentInChildren<Text>();
-        cursor += NextW + NavGap;
+        nextRt = nextBtn.GetComponent<RectTransform>();
+        if (nextLabel != null)
+        {
+            // 兜底：万一极端分辨率 / 字体回退后动态宽度仍不够，先换行再缩字，绝不顶出边框
+            nextLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+            nextLabel.verticalOverflow = VerticalWrapMode.Truncate;
+            nextLabel.resizeTextForBestFit = true;
+            nextLabel.resizeTextMinSize = 12;
+            nextLabel.resizeTextMaxSize = 22;
+            nextLabel.resizeTextMaxSize = 22;
+        }
 
         // 横宽按中英文两套文案的最长者给足：「Skip prologue (S)」比「跳过序章 (S)」宽得多，
         // 原来的窄按钮会让英文顶出右边界，这里直接加宽到 320；
         // 同时给标签开自动缩字兜底（Wrap + Best Fit），再长的文案也只缩字、不越界。
         Button skipBtn = CreateButton(panelRt, "SkipBtn", "跳过序章 (S)",
-            new Vector2(0.5f, 0f), new Vector2(cursor + SkipW * 0.5f, 40f), new Vector2(SkipW, 62f));
+            new Vector2(0.5f, 0f), new Vector2(0f, NavBtnY), new Vector2(SkipW, NavBtnH));
         skipBtn.onClick.AddListener(GoGrammarCourse);
+        skipRt = skipBtn.GetComponent<RectTransform>();
         skipLabel = skipBtn.GetComponentInChildren<Text>();
         if (skipLabel != null)
         {
@@ -525,8 +550,10 @@ public class CodeIntroTutorialController : MonoBehaviour
             skipLabel.resizeTextForBestFit = true;
             skipLabel.resizeTextMinSize = 12;
             skipLabel.resizeTextMaxSize = 22;
+            skipLabel.resizeTextMaxSize = 22;
         }
 
+        LayoutNavButtons(); // 先按「下一页 ›」把三颗按钮排好，避免显示瞬间挤在面板中线上
         root.SetActive(false);
     }
 
@@ -545,6 +572,59 @@ public class CodeIntroTutorialController : MonoBehaviour
         Text t = CreateText("Label", rt, label, 22, UITheme.TextPrimary, TextAnchor.MiddleCenter);
         Stretch(t.rectTransform);
         return btn;
+    }
+
+    /// <summary>
+    /// 底部按钮组重排：三个按钮间距统一（NavGap），整组在面板内水平居中。
+    /// 「下一页」的宽度按当前文案的实测自然宽度给，并夹在 [NextWMin, NextWMax] 之间——
+    /// 末页文案「开始语法课 › / Start the course ›」比「下一页 › / Next ›」宽一大截，
+    /// 固定 210 宽会把文字顶出按钮边框（英文最明显）。
+    /// </summary>
+    private void LayoutNavButtons()
+    {
+        if (prevRt == null || nextRt == null || skipRt == null)
+            return;
+
+        float nextW = Mathf.Clamp(MeasureNavLabelWidth() + NavLabelPadding, NextWMin, NextWMax);
+
+        float groupW = PrevW + nextW + SkipW + NavGap * 2f;
+        float cursor = -groupW * 0.5f; // 整组左边界（相对面板中心）
+
+        PlaceNavButton(prevRt, cursor, PrevW);
+        cursor += PrevW + NavGap;
+        PlaceNavButton(nextRt, cursor, nextW);
+        cursor += nextW + NavGap;
+        PlaceNavButton(skipRt, cursor, SkipW);
+    }
+
+    private static void PlaceNavButton(RectTransform rt, float leftOffset, float width)
+    {
+        rt.sizeDelta = new Vector2(width, NavBtnH);
+        rt.anchoredPosition = new Vector2(leftOffset + width * 0.5f, NavBtnY);
+    }
+
+    /// <summary>
+    /// 量「下一页」标签当前文案的单行自然宽度（按标签自身字号 + 已加载字体）。
+    /// 刻意关掉 Best Fit 再量，避免「按钮太窄 → 自动缩字 → 量出来更窄」的死循环，量出来的永远是原字号宽度。
+    /// </summary>
+    private float MeasureNavLabelWidth()
+    {
+        if (nextLabel == null)
+            return 0f;
+
+        string content = nextLabel.text;
+        if (string.IsNullOrEmpty(content))
+            return 0f;
+
+        TextGenerationSettings settings = nextLabel.GetGenerationSettings(new Vector2(NextWMax, 0f));
+        settings.horizontalOverflow = HorizontalWrapMode.Overflow;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        settings.resizeTextForBestFit = false;
+        settings.fontSize = nextLabel.fontSize;
+
+        TextGenerator generator = nextLabel.cachedTextGeneratorForLayout;
+        float scale = nextLabel.pixelsPerUnit > 0.01f ? nextLabel.pixelsPerUnit : 1f;
+        return generator.GetPreferredWidth(content, settings) / scale;
     }
 
     private static void SetLabel(Text t, string content)

@@ -80,15 +80,68 @@ public class CodeEditorController : MonoBehaviour
     private float errorContentHeight;     // 错误文字实测内容高度（排版后写入，供滚动范围使用）
     private float errorScrollY;           // 错误文字上移量（0 = 顶部对齐；内容高于可视区时才有值）
     private const float ErrorZoneMinHeight = 160f;   // 空错误 / 单行错误时的默认高度（与旧版一致）
-    private const float ErrorSplitBarHeight = 3f;    // 错误区上缘分界条「视觉」粗细（只画 3px，拖拽命中区另有一层更高的透明层）
+    private const float ErrorSplitBarHeight = 2f;    // 错误区上缘分界条「视觉」粗细（只画 3px，拖拽命中区另有一层更高的透明层）
     private const float ErrorSplitHitHeight = 9f;    // 分界条拖拽命中区高度 = 3px 细条 + 6px 呼吸位（不遮挡下方错误文字）
     // 红色细条「上方」再叠一条提示条：下缘贴住 3px 细条，细条负责画分界，这条负责一眼可见 + 好按住（整条都能上下拖）。
     // 粗细由 10px 收细到 6px（原先与底部横条同粗细、显得太厚），命中区高度不受影响，照样好抓。
-    private const float ErrorSplitGripHeight = 6f;
-    private const float ErrorTopInset = ErrorSplitGripHeight + ErrorSplitBarHeight + 6f; // 错误视口顶部内缩 = 提示条 + 分界条 + 6px 呼吸位
+    private const float ErrorSplitGripHeight = 2f;
+    // ---- 运行时错误（RE）独立窗口：紫色，与红色编译错误（CE）窗口并行存在、互不覆盖 ----
+    // 结构与红色窗口同构：顶部紫色分隔条（细条 + 提示条，仅作视觉分隔，不支持拖拽）+ 文字视口 + 右侧竖滚动条；
+    // 没有 RE 时整块收起（高度 0、全部隐藏），完全不占画面。
+    private const float ReZoneMinHeight = 64f;      // 自适应下限：至少放得下最低字号的一行 RE
+    // 紫窗高度自适应字号：窗口高度 = 上下留白（ReZoneChromeHeight）+ 内容实测高度，
+    // 字号调大窗就变高、调小窗就变矮；内容再多交给滚轮翻页，不再有固定高度、也不再支持拖拽改高度。
+    private const float ReSplitLineHeight = ReSplitGripHeight + ReSplitBarHeight; // 紫线本体总高（提示条 + 细条 = 4px）
+    private const float ReSplitBreath = 6f;         // 紫线下沿到文字的呼吸位（ReTopInset 里最后的 +6）
+    // 紫线上方那 6px（原本是给蓝条让缝的空白）也归紫线管辖：只做「悬停高亮 + 拉高判定」的归属区，
+    // 颜色始终是淡淡一层紫（0.10 → 高亮 0.30），绝不画成和紫线一样的实心色。
+    private const float ReSplitTopPadAlpha = 0.10f;
+    private const float ReSplitTopPadHoverAlpha = 0.30f;
+    private const float ErrorSplitTopPadAlpha = 0.10f;      // 红线上方归属区的常态淡红：只是薄薄一层，绝不当实线用
+    private const float ErrorSplitTopPadHoverAlpha = 0.30f;  // 鼠标压上去后的提亮上限：仍保持淡色，只比常态更明显一点
+    // 折中口径：紫线以上 6px 缝隙已改为透明（不算窗内留白），可见窗顶就是紫线下沿，
+    // 所以底部留白 = 呼吸位 6 + 紫线高度的一半 2 = 8，让文字在「线到底边」之间视觉居中。
+    private const float ReBottomInset = ReSplitBreath + ReSplitLineHeight * 0.5f;
+    private const float ReZoneChromeHeight = ReTopInset + ReBottomInset; // 窗口 rect 总 chrome（含顶部 6px 透明缝）
+    private const float ReSplitBarHeight = 2f;      // 紫色分界细条，与红色细条同粗
+    private const float ReSplitGripHeight = 2f;     // 紫色提示条，比底部蓝条更细，只作视觉分隔（不可拖）
+    private const float ReSplitHitHeight = 12f;     // 原拖拽命中区的尺寸（已停用 raycast，保留布局位避免位移）
+    private const float ReSplitTopGap = 6f;         // 紫条整体从窗口顶边下移 6px：与上方蓝色横向滚动条彻底分开，互不抢事件
+    private const float ReTopInset = ReSplitTopGap + ReSplitGripHeight + ReSplitBarHeight + ReSplitBreath; // 窗口顶边到文字 = 缝隙 + 紫线 + 呼吸位
+    private int reFontSize = 15;             // 紫窗字号（Ctrl+滚轮指向紫窗时可调）
+    private const int ReFontSizeMin = 14;    // 紫窗字号下限：与状态栏「Lang C#」提示同号（statusFontSize = 14），再小看不清
+    private const int ReFontSizeMax = 32;    // 紫窗字号上限
+    private const int DefaultReFontSize = 15;
+    private const string ReFontSizePrefKey = "atv.codeEditor.reFontSize";
+
+    // 分隔条悬停高亮：鼠标指到红条 / 紫条就把整条提亮，提示「这里能拖」
+    private Image errorSplitBarImg;          // 红条细条（3px）
+    private Image errorSplitGripImg;         // 红条粗提示条
+    private Image reSplitBarImg;             // 紫条细条
+    private Image reSplitGripImg;            // 紫条粗提示条
+    private RectTransform reSplitTopPadRt;   // 紫线上方的归属区（6px，只做高亮与拉高判定）
+    private Image reSplitTopPadImg;
+    private RectTransform errorSplitTopPadRt; // 红线上方的归属区（6px，只做高亮与拉高判定，与紫窗同一套玩法）
+    private Image errorSplitTopPadImg;
+    private readonly Vector3[] splitCorners = new Vector3[4]; // 分隔条悬停判定复用的角点缓存，避免每帧 GC
+    private float errorSplitHoverT;          // 红条提亮程度 0~1（平滑过渡）
+    private float reSplitHoverT;             // 紫条提亮程度 0~1（平滑过渡）
+    private RectTransform reZoneRt;
+    private RectTransform reMaskRt;
+    private Text reListText;
+    private RectTransform reScrollTrackRt;
+    private RectTransform reScrollHandleRt;
+    private RectTransform reSplitBarRt;
+    private RectTransform reSplitGripRt;
+    private RectTransform reSplitHitRt;
+    private float reContentHeight;
+    private float reScrollY;
+    private bool reZoneCollapsed = true;
+    private const float ErrorSplitTopGap = 6f; // 红条从窗口顶边下移 6px：与上方蓝色横向滚动条留缝，二者互不抢指针
+    private const float ErrorTopInset = ErrorSplitTopGap + ErrorSplitGripHeight + ErrorSplitBarHeight + 6f; // 错误视口顶部内缩 = 提示条 + 分界条 + 6px 呼吸位
     private const float SeamMergeThreshold = 16f;    // 任一侧被压到这么矮，就把该侧的分界条收掉（两条合成一条）
-    private const int ErrorFontMax = 18;             // 报错字号自动适配的起点上限（默认字号，已整体上调；玩家可调区间仍是 ErrorFontMin ~ ErrorFontZoomMax）
-    private const int ErrorFontMin = 11;             // 报错字号下限：缩到这么小还放不下就交给滚轮
+    private const int ErrorFontMax = 18;             // 报错字号自动适配的起点上限（默认字号，已整体上调；玩家可调区间仍是 ErrorFontMin(14) ~ ErrorFontZoomMax(34)）
+    private const int ErrorFontMin = 14;             // 报错字号下限：与状态栏「Lang C#」提示同号（statusFontSize = 14），缩到这么小还放不下就交给滚轮
     private const int ErrorFontZoomMax = 34;         // Ctrl+滚轮手动放大上限（手动缩放后不再自动缩字号）
     private RectTransform lineRt;         // 行号内容（高度随行数增长，滚动偏移同步）
     private RectTransform codeRt;         // 代码内容（高度随行数增长，滚动偏移 y ≤ 0）
@@ -299,6 +352,7 @@ public class CodeEditorController : MonoBehaviour
         {
             SetFullCode(string.Empty, 0);
             AppendError("");
+            ClearRuntimeErrorPanel();
             RefreshCodeView();
             if (codeRt != null)
             {
@@ -411,6 +465,9 @@ public class CodeEditorController : MonoBehaviour
         errorFontSize = Mathf.Clamp(PlayerPrefs.GetInt(ErrorFontSizePrefKey, DefaultErrorFontSize),
             ErrorFontMin, ErrorFontZoomMax);
         errorFontScaled = hasErrorSaved;
+
+        reFontSize = Mathf.Clamp(PlayerPrefs.GetInt(ReFontSizePrefKey, DefaultReFontSize),
+            ReFontSizeMin, ReFontSizeMax);
     }
 
     /// <summary>把当前代码字号 / 报错字号写进存档并立即落盘（Ctrl+滚轮每调一次就存一次，崩溃也不丢）。</summary>
@@ -418,6 +475,7 @@ public class CodeEditorController : MonoBehaviour
     {
         PlayerPrefs.SetInt(CodeFontSizePrefKey, Mathf.Clamp(codeFontSize, CodeFontSizeMin, CodeFontSizeMax));
         PlayerPrefs.SetInt(ErrorFontSizePrefKey, Mathf.Clamp(errorFontSize, ErrorFontMin, ErrorFontZoomMax));
+        PlayerPrefs.SetInt(ReFontSizePrefKey, Mathf.Clamp(reFontSize, ReFontSizeMin, ReFontSizeMax));
         PlayerPrefs.Save();
     }
 
@@ -426,6 +484,7 @@ public class CodeEditorController : MonoBehaviour
     {
         PlayerPrefs.DeleteKey(CodeFontSizePrefKey);
         PlayerPrefs.DeleteKey(ErrorFontSizePrefKey);
+        PlayerPrefs.DeleteKey(ReFontSizePrefKey);
         PlayerPrefs.Save();
     }
 
@@ -441,6 +500,7 @@ public class CodeEditorController : MonoBehaviour
         errorFontSize = DefaultErrorFontSize;
         errorFontScaled = false;
         errorZoneManualHeight = 0f;
+        reFontSize = DefaultReFontSize;
 
         if (inputField == null)
             return; // UI 还没建：下次 Awake / Open 时直接按默认字号建
@@ -448,6 +508,8 @@ public class CodeEditorController : MonoBehaviour
         ApplyFontSizeToAllSegments();
         RefreshCodeView();
         RefreshErrorLayout(errorListText != null ? errorListText.text : string.Empty);
+        if (reListText != null && !reZoneCollapsed)
+            RefreshReLayout(reListText.text); // 紫窗字号一并回默认
     }
 
     /// <summary>
@@ -591,9 +653,21 @@ public class CodeEditorController : MonoBehaviour
             }
             // F10：展开 / 收起「报错界面」（与标题栏 Error Panel 按钮同逻辑）。
             // 打开编辑器时默认不显示报错区，只有编译报错才自动弹出；想随时回看上次报错就按 F10。
+            // 紫色 RE 窗口正开着时，按 F10 只关紫窗；再按一次 F10 才去动红色报错框，避免一按 F10 又把紫色弹回来。
             if (Input.GetKeyDown(KeyCode.F10))
             {
+                if (IsReZoneVisible())
+                {
+                    CloseReZonePanel();
+                    return;
+                }
                 ToggleErrorPanel();
+                return;
+            }
+            // F11：紫色运行时错误（RE）窗口开 / 关，与 F10 的红窗互不干扰。
+            if (Input.GetKeyDown(KeyCode.F11))
+            {
+                ToggleReZonePanel();
                 return;
             }
         }
@@ -664,9 +738,8 @@ public class CodeEditorController : MonoBehaviour
             bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             if (ctrlHeld)
             {
-                // Ctrl+滚轮：指针在报错区就缩放报错文字，在代码区就缩放代码字号（同一套「以鼠标所在行为锚」的算法）
-                if (!HandleErrorFontZoom())
-                    HandleFontZoom();  // Ctrl+滚轮：缩放代码字号（放大 / 缩小）
+                // Ctrl+滚轮：按指针所在部位只缩放那一处字号 —— 紫窗 / 红窗 / 代码区，互不串台
+                HandlePointerWheelZoom();
             }
             else
                 HandleWheelScroll(); // 滚轮翻页（自实现，不依赖 ScrollRect）
@@ -690,6 +763,7 @@ public class CodeEditorController : MonoBehaviour
             HandleUndoRedoShortcuts();
 
             UpdateScrollBars(); // 每帧兜底：内容溢出即显示滚动块，放得下即隐藏
+            UpdateSplitHoverHighlights(); // 鼠标压到红色 / 紫色分隔条就提亮，提示这里能拖
         }
 
         // 用户代码每帧驱动炮台（编辑器关闭且游戏未暂停时）
@@ -708,7 +782,7 @@ public class CodeEditorController : MonoBehaviour
                     msg = Localization.Pick(
                         "用户程序集与当前脚本程序集不匹配（旧程序集残留或依赖缺失），已停止运行；请重新点击编译，或重启编辑器后重试。",
                         "User assembly mismatch with current scripts (stale assembly or missing dependency). Stopped; recompile or restart editor.");
-                AppendError(Localization.Pick("运行时错误：", "Runtime error: ") + msg);
+                AppendRuntimeError(msg);
                 Debug.LogError("[CodeEditor] 运行时错误：" + msg);
                 Debug.LogException(e);
             }
@@ -786,8 +860,8 @@ public class CodeEditorController : MonoBehaviour
 
     // 底部错误 / 状态区底板（全屏时为深色分隔带；上下分栏教学时与代码区同色，避免两块之间浮出黑色横带）
     private Image consoleBg;
-    private static readonly Color consoleBgFullColor = UITheme.CodeBg;
-    private static readonly Color consoleBgSplitColor = UITheme.CodeBg;
+    private static readonly Color consoleBgFullColor = new Color(0.165f, 0.086f, 0.102f, 1f); // 红灰：底部红窗底板与红色 CE 提示同调
+    private static readonly Color consoleBgSplitColor = new Color(0.165f, 0.086f, 0.102f, 1f); // 分栏时同样红灰，红区边界仍可辨
 
     // 强制关闭后忽略一次「Enter 打开」输入：避免跳关指令框里那一下 Enter 又在同帧 / 下一帧把编辑器打开
     private bool suppressOpenUntilRelease;
@@ -819,6 +893,8 @@ public class CodeEditorController : MonoBehaviour
 
         // 编辑器变矮后错误区可能高过了可用上限：按新高度重新夹一次，保证代码区不被挤没
         ApplyErrorZoneHeight(errorZoneHeightCurrent());
+        if (reZoneRt != null)
+            ApplyReZoneHeight(reZoneRt.sizeDelta.y); // 紫色 RE 窗口同样按新高度夹一次，避免挤出代码区
 
         UpdateScrollBars(); // 视口高度变化后重算竖向滚动条的滑块长度与位置
     }
@@ -961,8 +1037,8 @@ public class CodeEditorController : MonoBehaviour
         // 上一次的报错文本仍留在内存里 —— 编译报错会自动弹出，玩家也可以按 F10 / 点 Error Panel 随时调出。
         CollapseErrorZone();
         SetStatus(Localization.Pick(
-            "编辑器已打开（Esc / ✕ 关闭）｜F6 编译运行 · F7 停止 · F8 载入 · F9 导出 · F10 报错界面",
-            "Editor opened (Esc or ✕ to close) | F6 compile & run · F7 stop · F8 load · F9 export · F10 error panel"), false);
+            "编辑器已打开（Esc / ✕ 关闭）｜F6 编译运行 · F7 停止 · F8 载入 · F9 导出 · F10 报错界面 · F11 紫色 RE",
+            "Editor opened (Esc or ✕ to close) | F6 compile & run · F7 stop · F8 load · F9 export · F10 error panel · F11 runtime (RE)"), false);
         Debug.Log("[CodeEditor] 编辑器打开");
     }
 
@@ -1066,6 +1142,7 @@ public class CodeEditorController : MonoBehaviour
         string fullSource = WrapUserCode(userCode, out string className, out int userCodeStartLine);
 
         StopRunner(); // 编译前停掉旧 runner，避免重复运行
+        ClearRuntimeErrorPanel(); // 每次编译清空紫色 RE 窗口：CE（红）与 RE（紫）互不混淆
 
         try
         {
@@ -2999,6 +3076,8 @@ public class CodeEditorController : MonoBehaviour
         // 指针落在底部错误区：滚轮改翻报错文字（报错多到一屏放不下时），不再翻代码
         if (HandleErrorWheelScroll(wheel))
             return;
+        if (HandleReWheelScroll(wheel)) // 指针在紫色 RE 窗口上：滚轮只翻运行时报错，不带动代码
+            return;
         if (!RectTransformUtility.RectangleContainsScreenPoint(codeViewportRt, Input.mousePosition, null))
             return;
         SyncContentHeight(); // 滚动前强制同步内容高度，避免 contentH 未更新导致滚动范围恒为 0（内容翻不下去）
@@ -3072,6 +3151,132 @@ public class CodeEditorController : MonoBehaviour
     }
 
     /// <summary>
+    /// Ctrl+滚轮总入口：先看指针压在哪个区，只缩放那一个区的字号。
+    /// 判定顺序 = 叠放顺序：紫窗（浮在最上层）→ 红窗 → 代码区；
+    /// 三个区都没踩中就不缩放，避免「指针停在空白处滚一下，字号莫名全变」。
+    /// </summary>
+    private void HandlePointerWheelZoom()
+    {
+        if (Mathf.Abs(Input.mouseScrollDelta.y) < 0.01f)
+            return;
+        if (HandleReFontZoom())     // 紫色运行时报错窗
+            return;
+        if (HandleErrorFontZoom())  // 红色编译报错窗
+            return;
+        if (IsPointerOverCodeZone())
+            HandleFontZoom();       // 代码阅读区
+    }
+
+    /// <summary>指针是否落在代码阅读区（文字视口或右侧竖向滚动条）。</summary>
+    private bool IsPointerOverCodeZone()
+    {
+        if (codeViewportRt == null || !codeViewportRt.gameObject.activeInHierarchy)
+            return false;
+        if (RectTransformUtility.RectangleContainsScreenPoint(codeViewportRt, Input.mousePosition, null))
+            return true;
+        return vScrollTrackRt != null && vScrollTrackRt.gameObject.activeInHierarchy &&
+               RectTransformUtility.RectangleContainsScreenPoint(vScrollTrackRt, Input.mousePosition, null);
+    }
+
+    /// <summary>
+    /// Ctrl+滚轮：紫窗（RE）字号缩放，指针压在紫窗内（文字区 / 顶部紫条 / 右侧滚动条）才生效。
+    /// 算法与代码区、红区一致：以「鼠标所指的那一行」为锚点，缩放前后该行仍贴在同一屏幕位置。
+    /// </summary>
+    private bool HandleReFontZoom()
+    {
+        if (reZoneCollapsed || reZoneRt == null || reMaskRt == null || reListText == null)
+            return false;
+        float wheel = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(wheel) < 0.01f)
+            return false;
+        bool overZone = reZoneRt.gameObject.activeInHierarchy &&
+                        RectTransformUtility.RectangleContainsScreenPoint(reZoneRt, Input.mousePosition, null);
+        bool overBar = reScrollTrackRt != null && reScrollTrackRt.gameObject.activeInHierarchy &&
+                       RectTransformUtility.RectangleContainsScreenPoint(reScrollTrackRt, Input.mousePosition, null);
+        if (!overZone && !overBar)
+            return false;
+
+        int newSize = Mathf.Clamp(reFontSize + (wheel > 0f ? 2 : -2), ReFontSizeMin, ReFontSizeMax);
+        if (newSize == reFontSize)
+            return true;
+
+        // 缩放前：记录滚动偏移与旧行高，并把鼠标屏幕点换算到内容层局部坐标（取行号）
+        float scrollY0 = reScrollY;
+        float lineHeight0 = Mathf.Max(12f, reListText.fontSize * 1.45f);
+        Vector2 localPt;
+        bool hasPointer = RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            reListText.rectTransform, Input.mousePosition, null, out localPt);
+        float rowF = hasPointer ? (-localPt.y) / lineHeight0 : 0f;
+        if (rowF < 0f) rowF = 0f;   // 指针落在内容上方留白 / 换算失败：按第一行锚定
+
+        reFontSize = newSize;
+        string keep = reListText.text;
+        // 紫窗高度自适应字号：这里重排一次布局，窗口会按新字号重算高度
+        RefreshReLayout(keep);
+
+        // 缩放后：按新行高把锚定行放回同一屏幕位置，并夹在合法滚动范围内
+        float lineHeight1 = Mathf.Max(12f, reListText.fontSize * 1.45f);
+        float viewH = ReViewportHeight();
+        float maxScroll = Mathf.Max(0f, reContentHeight - viewH);
+        reScrollY = Mathf.Clamp(rowF * lineHeight1 - (rowF * lineHeight0 - scrollY0), 0f, maxScroll);
+        ApplyReScroll();
+        SaveFontSettings();
+        return true;
+    }
+
+    /// <summary>
+    /// 指针是否压在某条分隔条上：以「粗提示条的实际屏幕矩形」为基准，向上放宽 6px、向下放宽 padDown（盖住细条）。
+    /// 不看透明命中区，因为命中区尺寸/锚点是为拖拽手感调的，未必贴住可见条。
+    /// </summary>
+    private bool IsPointerOverSplitBand(RectTransform gripRt, float padDown)
+    {
+        if (gripRt == null || !gripRt.gameObject.activeInHierarchy)
+            return false;
+        gripRt.GetWorldCorners(splitCorners); // 0:左下 1:左上 2:右上 3:右下
+        Vector2 bl = RectTransformUtility.WorldToScreenPoint(null, splitCorners[0]);
+        Vector2 tr = RectTransformUtility.WorldToScreenPoint(null, splitCorners[2]);
+        Vector2 m = Input.mousePosition;
+        return m.x >= bl.x - 2f && m.x <= tr.x + 2f &&
+               m.y >= bl.y - padDown && m.y <= tr.y + 6f;
+    }
+
+    /// <summary>
+    /// 红色 / 紫色分隔条的悬停高亮：鼠标压上去时整条提亮（向白色靠、alpha 拉满），移开平滑恢复原色。
+    /// 只改 Image.color，不动 sizeDelta / 布局，因此不会干扰拖拽、折叠与合并判定。
+    /// </summary>
+    private void UpdateSplitHoverHighlights()
+    {
+        float step = Time.unscaledDeltaTime * 12f;
+        // 红线的命中范围同样以「上方归属区」为基准：归属区 6px + 线本体 4px + 呼吸位 6px 都算在红线里
+        bool overError = IsPointerOverSplitBand(errorSplitTopPadRt, ErrorSplitGripHeight + ErrorSplitBarHeight + 6f);
+        // 紫线的命中范围以「上方归属区」为基准：归属区 6px + 线本体 4px + 呼吸位 6px 都算在线里
+        bool overRe = IsPointerOverSplitBand(reSplitTopPadRt, ReSplitLineHeight + ReSplitBreath + 6f);
+        errorSplitHoverT = Mathf.MoveTowards(errorSplitHoverT, overError ? 1f : 0f, step);
+        reSplitHoverT = Mathf.MoveTowards(reSplitHoverT, overRe ? 1f : 0f, step);
+
+        if (errorSplitBarImg != null)
+            errorSplitBarImg.color = Color.Lerp(UITheme.WithAlpha(errorColor, 0.95f),
+                UITheme.WithAlpha(Color.Lerp(errorColor, Color.white, 0.55f), 1f), errorSplitHoverT);
+        if (errorSplitGripImg != null)
+            errorSplitGripImg.color = Color.Lerp(UITheme.WithAlpha(errorColor, 0.85f),
+                UITheme.WithAlpha(Color.Lerp(errorColor, Color.white, 0.45f), 1f), errorSplitHoverT);
+        // 红线上方那 6px 归属区跟着整条一起亮：只提透明度，颜色仍是淡红，不会变成实线
+        if (errorSplitTopPadImg != null)
+            errorSplitTopPadImg.color = Color.Lerp(UITheme.WithAlpha(errorColor, ErrorSplitTopPadAlpha),
+                UITheme.WithAlpha(Color.Lerp(errorColor, Color.white, 0.45f), ErrorSplitTopPadHoverAlpha), errorSplitHoverT);
+        if (reSplitBarImg != null)
+            reSplitBarImg.color = Color.Lerp(UITheme.WithAlpha(UITheme.Purple, 0.95f),
+                UITheme.WithAlpha(Color.Lerp(UITheme.Purple, Color.white, 0.55f), 1f), reSplitHoverT);
+        if (reSplitGripImg != null)
+            reSplitGripImg.color = Color.Lerp(UITheme.WithAlpha(UITheme.Purple, 0.85f),
+                UITheme.WithAlpha(Color.Lerp(UITheme.Purple, Color.white, 0.45f), 1f), reSplitHoverT);
+        // 线上方那 6px 归属区跟着整条一起亮：只有透明度的提亮，颜色仍是淡紫，不会变成实线
+        if (reSplitTopPadImg != null)
+            reSplitTopPadImg.color = Color.Lerp(UITheme.WithAlpha(UITheme.Purple, ReSplitTopPadAlpha),
+                UITheme.WithAlpha(Color.Lerp(UITheme.Purple, Color.white, 0.45f), ReSplitTopPadHoverAlpha), reSplitHoverT);
+    }
+
+    /// <summary>
     /// Ctrl+滚轮：代码字号缩放（放大 / 缩小），鼠标需在代码视口内。
     /// 缩放以「鼠标所指的那一行」为锚点：该行在缩放前后保持贴在同一屏幕位置，
     /// 因此连续放大 / 缩小都不会丢失当前阅读位置。
@@ -3082,7 +3287,7 @@ public class CodeEditorController : MonoBehaviour
         float wheel = Input.mouseScrollDelta.y;
         if (Mathf.Abs(wheel) < 0.01f || codeViewportRt == null || codeRt == null || ActiveField == null)
             return;
-        if (!RectTransformUtility.RectangleContainsScreenPoint(codeViewportRt, Input.mousePosition, null))
+        if (!IsPointerOverCodeZone())
             return;
         int newSize = Mathf.Clamp(codeFontSize + (wheel > 0f ? 2 : -2), CodeFontSizeMin, CodeFontSizeMax);
         if (newSize == codeFontSize)
@@ -4400,8 +4605,8 @@ public class CodeEditorController : MonoBehaviour
                : "Tips: press F8 (or this button) to open the file panel and browse your disk; picking a .cs or .txt file loads it into the editor, while the previous content stays in the undo stack (Ctrl+Z).");
         // 「报错界面」按钮：与 Open Code File 并列，负责展开 / 收起底部报错区（打开编辑器时默认收起）
         ApplyChromeButton(titleBtnErrors, zh ? "报错界面 (F10)" : "Error Panel (F10)",
-            zh ? "Tips：按 F10 或点此按钮展开 / 收起底部报错界面；打开编辑器时默认不显示报错，编译失败会自动弹出。"
-               : "Tips: press F10 (or this button) to expand/collapse the error panel; it stays hidden when the editor opens and pops up automatically on compile errors.");
+            zh ? "Tips：按 F10 或点此按钮展开 / 收起底部报错界面；打开编辑器时默认不显示报错，编译失败会自动弹出。紫色 RE 窗口按 F11 单独开关。"
+               : "Tips: press F10 (or this button) to expand/collapse the error panel; it stays hidden when the editor opens and pops up automatically on compile errors. The purple RE window toggles with F11.");
         // 报错区当前是否可展开：收起态时按钮文案前加「▸」，展开态加「▾」，一眼看出下一次点击是开还是关
         if (titleBtnErrors != null)
         {
@@ -4632,7 +4837,10 @@ public class CodeEditorController : MonoBehaviour
         if (errorZoneRt != null)
             errorZoneRt.sizeDelta = new Vector2(0f, height);
 
-        float top = height + 10f;   // 横向滚动条占 160→170 那 10px 的旧位置，这里同样留 10px
+        float reH = reZoneRt != null ? Mathf.Max(0f, reZoneRt.sizeDelta.y) : 0f;
+        if (reZoneRt != null)
+            reZoneRt.anchoredPosition = new Vector2(0f, height); // 紫窗始终叠在红窗上方
+        float top = height + reH + 10f;   // 横向滚动条占 160→170 那 10px 的旧位置，这里同样留 10px
         if (lineViewportRt != null)
             lineViewportRt.offsetMin = new Vector2(0f, top);
         if (codeViewportRt != null)
@@ -4641,11 +4849,12 @@ public class CodeEditorController : MonoBehaviour
             vScrollTrackRt.offsetMin = new Vector2(-(rightReservedWidth + 16f), top); // 左边界随右侧预留宽度一起左移，保持 10px 宽
         if (hScrollTrackRt != null)
         {
-            hScrollTrackRt.offsetMin = new Vector2(70f, height);
+            hScrollTrackRt.offsetMin = new Vector2(70f, height + reH);
             hScrollTrackRt.offsetMax = new Vector2(-(rightReservedWidth + 16f), top);
         }
 
         // 合并态：红条（视觉细条 + 透明命中区）/ 上方粗提示条 / 错误文字视口 / 错误竖滚动条全部收掉，屏幕上只剩底部那条横滚动条
+        SetActiveIfChanged(errorSplitTopPadRt, !merged);
         SetActiveIfChanged(errorSplitBarRt, !merged);
         SetActiveIfChanged(errorSplitGripRt, !merged);
         SetActiveIfChanged(errorSplitHitRt, !merged);
@@ -4700,6 +4909,226 @@ public class CodeEditorController : MonoBehaviour
         }
         RefreshErrorLayout(text);
         ApplyErrorZoneHeight(errorZoneHeightCurrent());
+    }
+
+    // ================= 运行时错误（RE）紫色窗口：与红色 CE 窗口同构、互不覆盖 =================
+
+    /// <summary>紫色窗口可用高度上限：代码区至少留 320px，同时不超过编辑器高度的 34%。</summary>
+    private float GetReZoneMaxHeight()
+    {
+        float rootH = editorRootRt != null ? editorRootRt.rect.height : 1080f;
+        if (rootH <= 1f || float.IsNaN(rootH)) rootH = 1080f;
+        float rootCap = rootH - 320f;
+        float ratioCap = rootH * 0.50f; // 上限放到半屏：此前 34% 常常一拖到顶就没反应，看着像「拖不动」
+        return Mathf.Max(ReZoneMinHeight, Mathf.Min(rootCap, ratioCap));
+    }
+
+    /// <summary>按字号与可用宽度实测 RE 文字高度（TextGenerator 直接算，不等布局帧）。</summary>
+    private float MeasureReHeight(string text, int size, float width)
+    {
+        if (string.IsNullOrEmpty(text) || reListText == null) return 0f;
+        TextGenerationSettings settings = reListText.GetGenerationSettings(new Vector2(Mathf.Max(1f, width), 0f));
+        settings.font = UIFontHelper.LoadForText(text, size);
+        settings.fontSize = size;
+        settings.fontStyle = FontStyle.Normal;
+        settings.horizontalOverflow = HorizontalWrapMode.Wrap;
+        settings.verticalOverflow = VerticalWrapMode.Overflow;
+        settings.richText = false;
+        settings.scaleFactor = 1f;
+        TextGenerator gen = new TextGenerator();
+        float h = gen.GetPreferredHeight(text, settings);
+        if (float.IsNaN(h) || float.IsInfinity(h) || h < 0f) h = 0f;
+        return h;
+    }
+
+    /// <summary>追加一条运行时错误（RE）：写进紫色窗口并自动展开，红色窗口只留编译错误（CE）。</summary>
+    public void AppendRuntimeError(string message)
+    {
+        if (reListText == null) return;
+        string line = Localization.Pick("RE：", "RE: ") + (message ?? string.Empty);
+        string text = string.IsNullOrEmpty(reListText.text) ? line : reListText.text + "\n" + line;
+        RefreshReLayout(text);
+        SetStatus(Localization.Pick("运行时错误（RE）已弹出紫色窗口", "Runtime error (RE) shown in purple panel"), false);
+        statusColor = UITheme.Purple; // RE 的状态文字也用紫色：红色只留给编译错误（CE）
+        if (IsOpen) RefreshCursorStatus();
+        RefreshTitleBarChrome();
+    }
+
+    /// <summary>清空紫色窗口（重新编译 / 关闭编辑器时调用）。</summary>
+    public void ClearRuntimeErrorPanel()
+    {
+        if (reListText == null) return;
+        reListText.text = string.Empty;
+        reContentHeight = 0f;
+        reScrollY = 0f;
+        RefreshReLayout(string.Empty);
+    }
+
+    /// <summary>紫色窗口此刻是否可见（有内容且没被收起）。F10 判断用它决定先关紫窗还是去动红窗。</summary>
+    public bool IsReZoneVisible()
+    {
+        return !reZoneCollapsed && reZoneRt != null && reZoneRt.sizeDelta.y > 1f;
+    }
+
+    /// <summary>关闭紫色 RE 窗口：只收高度、文字留在内存里，随时按 F11 再打开（不丢这次 RE）。</summary>
+    public void CloseReZonePanel()
+    {
+        if (reZoneRt == null) return;
+        reZoneCollapsed = true; // 关掉只是隐藏，再打开按字号重新自适应高度
+        ApplyReZoneHeight(0f);
+        UpdateReScrollBar();
+        RefreshTitleBarChrome();
+    }
+
+    /// <summary>打开紫色 RE 窗口：固定尺寸；当前没有 RE 内容时只落一条状态栏提示，不弹空窗。</summary>
+    public void OpenReZonePanel()
+    {
+        if (reZoneRt == null) return;
+        if (reListText == null || string.IsNullOrEmpty(reListText.text))
+        {
+            statusColor = UITheme.Purple;
+            if (IsOpen) RefreshCursorStatus();
+            return;
+        }
+        reZoneCollapsed = false;
+        ApplyReZoneHeight(GetReZoneAutoHeight());
+        UpdateReScrollBar();
+        RefreshTitleBarChrome();
+    }
+
+    /// <summary>F11：紫色 RE 窗口开 / 关（与 F10 的红色报错框互不干扰）。</summary>
+    public void ToggleReZonePanel()
+    {
+        if (IsReZoneVisible()) CloseReZonePanel();
+        else OpenReZonePanel();
+    }
+
+    /// <summary>紫窗自适应高度 = 内容实测高度 + 上下留白，夹在 [ReZoneMinHeight, 上限定值] 之间。</summary>
+    private float GetReZoneAutoHeight()
+    {
+        float desired = reContentHeight + ReZoneChromeHeight;
+        return Mathf.Clamp(desired, ReZoneMinHeight, GetReZoneMaxHeight());
+    }
+
+    /// <summary>按文案重排紫色窗口：窗口高度随字号自适应，内容多了交给滚轮翻页。</summary>
+    private void RefreshReLayout(string text)
+    {
+        if (reListText == null) return;
+        reScrollY = 0f;
+        if (string.IsNullOrEmpty(text))
+        {
+            reListText.text = string.Empty;
+            reListText.fontSize = reFontSize;
+            reListText.font = UIFontHelper.LoadForText(string.Empty, reFontSize);
+            reContentHeight = 0f;
+            reListText.rectTransform.sizeDelta = new Vector2(0f, 0f);
+            reZoneCollapsed = true;
+            ApplyReZoneHeight(0f);
+            return;
+        }
+        reListText.text = text;
+        reListText.fontSize = reFontSize;
+        reListText.font = UIFontHelper.LoadForText(text, reFontSize);
+        float width = reMaskRt != null ? reMaskRt.rect.width : 0f;
+        if (width <= 1f)
+        {
+            float rootW = editorRootRt != null ? editorRootRt.rect.width : 1600f;
+            width = Mathf.Max(240f, rootW - 48f);
+        }
+        reContentHeight = MeasureReHeight(text, reFontSize, width);
+        reListText.rectTransform.sizeDelta = new Vector2(0f, reContentHeight);
+        // 自适应尺寸：窗口高度跟着「内容实测高度 + 上下留白」走，字号变大窗就变高、变小窗就变矮。
+        float desired = GetReZoneAutoHeight();
+        reZoneCollapsed = false;
+        ApplyReZoneHeight(desired);
+        UpdateReScrollBar();
+    }
+
+    /// <summary>应用紫色窗口高度（0 = 整块收起），并让代码区顶部与横滚动条一起让开这块高度。</summary>
+    private void ApplyReZoneHeight(float height)
+    {
+        if (reZoneRt == null) return;
+        height = Mathf.Clamp(height, 0f, GetReZoneMaxHeight());
+        bool merged = height < 1f || reZoneCollapsed;
+        reZoneRt.sizeDelta = new Vector2(0f, merged ? 0f : height);
+        float ceH = errorZoneRt != null ? errorZoneRt.sizeDelta.y : 30f;
+        reZoneRt.anchoredPosition = new Vector2(0f, ceH);
+        SetActiveIfChanged(reSplitTopPadRt, !merged);
+        SetActiveIfChanged(reSplitBarRt, !merged);
+        SetActiveIfChanged(reSplitGripRt, !merged);
+        SetActiveIfChanged(reSplitHitRt, !merged);
+        SetActiveIfChanged(reMaskRt, !merged);
+        SetActiveIfChanged(reScrollTrackRt, !merged);
+        if (!merged) ApplyReScroll();
+        ApplyErrorZoneHeight(ceH); // 代码区 / 横滚动条按「红 + 紫」两层总高重新让位
+        UpdateScrollBars();
+    }
+
+    /// <summary>同步 RE 文字滚动偏移。</summary>
+    private void ApplyReScroll()
+    {
+        if (reListText == null || reMaskRt == null) return;
+        float viewH = ReViewportHeight();
+        float maxScroll = Mathf.Max(0f, reContentHeight - viewH);
+        // 内容没超出视口时不显示紫色滚动条，避免右侧常驻一条空轨道
+        SetActiveIfChanged(reScrollHandleRt, maxScroll > 0.5f);
+        if (maxScroll <= 0.5f) return;
+        reScrollY = Mathf.Clamp(reScrollY, 0f, maxScroll);
+        reListText.rectTransform.anchoredPosition = new Vector2(0f, reScrollY);
+        UpdateReScrollBar();
+    }
+
+    private float ReViewportHeight()
+    {
+        float viewH = reMaskRt != null ? reMaskRt.rect.height : 0f;
+        if (viewH <= 1f || float.IsNaN(viewH))
+            viewH = Mathf.Max(24f, (reZoneRt != null ? reZoneRt.sizeDelta.y : 0f) - ReZoneChromeHeight);
+        return viewH;
+    }
+
+    /// <summary>更新紫色窗口竖滚动条滑块长度与位置。</summary>
+    private void UpdateReScrollBar()
+    {
+        if (reScrollHandleRt == null) return;
+        float viewH = ReViewportHeight();
+        float trackH = reScrollTrackRt != null ? reScrollTrackRt.rect.height : 0f;
+        if (trackH <= 1f || float.IsNaN(trackH)) trackH = Mathf.Max(24f, viewH);
+        float ratio = reContentHeight > 1f ? viewH / reContentHeight : 1f;
+        float handleH = Mathf.Clamp(trackH * Mathf.Clamp01(ratio), 24f, trackH);
+        float maxScroll = Mathf.Max(0f, reContentHeight - viewH);
+        float t = maxScroll > 0.5f ? Mathf.Clamp01(reScrollY / maxScroll) : 0f;
+        reScrollHandleRt.sizeDelta = new Vector2(reScrollHandleRt.sizeDelta.x, handleH);
+        reScrollHandleRt.anchoredPosition = new Vector2(0f, -t * Mathf.Max(0f, trackH - handleH));
+    }
+
+    private void SetReScrollFromBar(float t)
+    {
+        float viewH = ReViewportHeight();
+        float maxScroll = Mathf.Max(0f, reContentHeight - viewH);
+        reScrollY = Mathf.Clamp01(t) * maxScroll;
+        ApplyReScroll();
+    }
+
+    private bool IsPointerOverReZone()
+    {
+        return reMaskRt != null && reMaskRt.gameObject.activeInHierarchy &&
+               RectTransformUtility.RectangleContainsScreenPoint(reMaskRt, Input.mousePosition, null);
+    }
+
+    /// <summary>滚轮翻 RE 窗口：指针在紫色文字区或它的滚动条上时接管滚轮。</summary>
+    private bool HandleReWheelScroll(float wheel)
+    {
+        if (reZoneCollapsed || reMaskRt == null || reListText == null || Mathf.Abs(wheel) < 0.01f) return false;
+        bool overText = IsPointerOverReZone();
+        bool overBar = reScrollTrackRt != null && reScrollTrackRt.gameObject.activeInHierarchy &&
+                       RectTransformUtility.RectangleContainsScreenPoint(reScrollTrackRt, Input.mousePosition, null);
+        if (!overText && !overBar) return false;
+        float viewH = ReViewportHeight();
+        if (reContentHeight <= viewH + 0.5f) return true; // 放得下也吃掉滚轮，避免把代码区一起滚走
+        float lineH = Mathf.Max(12f, reListText.fontSize * 1.45f);
+        reScrollY -= wheel * lineH * 2f;
+        ApplyReScroll();
+        return true;
     }
 
     /// <summary>F10 / 标题栏 Error Panel 按钮：展开时收起，收起时展开。</summary>
@@ -5003,7 +5432,7 @@ public class CodeEditorController : MonoBehaviour
             UITheme.WithAlpha(UITheme.TextMuted, 0.24f));
         titleBtnErrors = btnErrors;
         AttachHoverTip(btnErrors != null ? btnErrors.gameObject : null,
-            Localization.Pick("Tips：按 F10 或点此按钮展开 / 收起底部报错界面；打开编辑器时默认不显示报错，编译失败会自动弹出。", "Tips: press F10 (or this button) to expand/collapse the error panel; it stays hidden when the editor opens and pops up automatically on compile errors."));
+            Localization.Pick("Tips：按 F10 或点此按钮展开 / 收起底部报错界面；打开编辑器时默认不显示报错，编译失败会自动弹出。紫色 RE 窗口按 F11 单独开关。", "Tips: press F10 (or this button) to expand/collapse the error panel; it stays hidden when the editor opens and pops up automatically on compile errors. The purple RE window toggles with F11."));
 
         // 构建完立刻按当前语言排一次：文案、字体、按钮宽度与间隔都由它统一算
         RefreshTitleBarChrome();
@@ -5140,7 +5569,7 @@ public class CodeEditorController : MonoBehaviour
         hTrackImg.color = UITheme.WithAlpha(UITheme.CodeBg, 0f); // 透明轨道：仅保留可点击跳转的命中区域
         hTrackImg.raycastTarget = true;
         hScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>().Setup(hScrollTrackRt, false, t => SetScrollFromBar(1, t));
-        hScrollTrackRt.gameObject.AddComponent<SeamDragHandle>().Setup(this); // 蓝条同理：按住它上下拖也能拉出/收起错误区（拖到底与红条合并）
+        // 蓝条只做横向滚动：不再兼任「上下拖拽拉出错误区」的把手，否则按住蓝条上下拖会把底部红框一起拽出来
 
         hScrollHandleRt = CreateRect("HScrollHandle", hScrollTrackRt, new Vector2(0f, 1f), Vector2.zero, new Vector2(120f, 10f), new Vector2(0f, 1f));
         hScrollHandleRt.anchorMin = new Vector2(0f, 1f);
@@ -5161,9 +5590,20 @@ public class CodeEditorController : MonoBehaviour
         bottomRt.anchoredPosition = Vector2.zero;
         bottomRt.sizeDelta = new Vector2(0f, ErrorZoneMinHeight);
         Image bottomBg = bottomRt.gameObject.AddComponent<Image>();
-        bottomBg.color = consoleBgFullColor;
+        bottomBg.color = UITheme.WithAlpha(consoleBgFullColor, 0f); // 根层不画颜色，只留指针拦截；真正的底板交给下面那层
         consoleBg = bottomBg;
         errorZoneRt = bottomRt;
+
+        // 底板单独一层并让出顶部 6px：那条缝已归红线管辖，露出代码区底色后淡红才看得出是「红条上身」
+        RectTransform errorBgRt = CreateRect("ErrorZoneBg", bottomRt, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
+        errorBgRt.anchorMin = Vector2.zero;
+        errorBgRt.anchorMax = Vector2.one;
+        errorBgRt.offsetMin = Vector2.zero;
+        errorBgRt.offsetMax = new Vector2(0f, -ErrorSplitTopGap);
+        Image errorBg = errorBgRt.gameObject.AddComponent<Image>();
+        errorBg.color = consoleBgFullColor;
+        errorBg.raycastTarget = false;
+        consoleBg = errorBg; // 后续动态着色（分栏 / 整块）统一作用在真正的底板上
 
         // 错误文字可视区：RectMask2D 裁剪。文字内容按实测高度向下生长，超出部分靠滚轮翻页查看，
         // 绝不使用 verticalOverflow = Overflow —— 那样多行报错会直接溢出面板、掉到屏幕下沿之外，玩家根本看不到。
@@ -5171,7 +5611,7 @@ public class CodeEditorController : MonoBehaviour
         errMaskRt.anchorMin = Vector2.zero;
         errMaskRt.anchorMax = Vector2.one;
         errMaskRt.offsetMin = new Vector2(12f, 36f);    // 底部让开状态栏（30）与 6px 间隙
-        errMaskRt.offsetMax = new Vector2(-16f, -(ErrorSplitBarHeight + ErrorSplitGripHeight + 6f));  // 顶部让开粗提示条 + 细分界条 + 6px 呼吸位；右侧让开滚动块
+        errMaskRt.offsetMax = new Vector2(-16f, -ErrorTopInset);  // 顶部让开粗提示条 + 细分界条 + 6px 呼吸位；右侧让开滚动块
         errMaskRt.gameObject.AddComponent<RectMask2D>();
         errorMaskRt = errMaskRt;
 
@@ -5194,7 +5634,7 @@ public class CodeEditorController : MonoBehaviour
         errorScrollTrackRt.anchorMax = new Vector2(1f, 1f);
         errorScrollTrackRt.pivot = new Vector2(1f, 0.5f);
         errorScrollTrackRt.offsetMin = new Vector2(-18f, 36f);
-        errorScrollTrackRt.offsetMax = new Vector2(-12f, -(ErrorSplitBarHeight + ErrorSplitGripHeight + 6f));
+        errorScrollTrackRt.offsetMax = new Vector2(-12f, -ErrorTopInset);
         Image errTrackImg = errorScrollTrackRt.gameObject.AddComponent<Image>();
         errTrackImg.color = UITheme.WithAlpha(errorColor, 0f); // 透明：不画轨道，只当点击跳转的命中区
         errTrackImg.raycastTarget = true;
@@ -5214,15 +5654,28 @@ public class CodeEditorController : MonoBehaviour
 
         // ---- 错误区上缘红色分隔条：和教程卡片那条可拖蓝条同样的玩法 —— 按住它上下拖，
         //      「错误区（红）/ 代码区」的高度比例实时互换；拖动结果会被记住，之后不再被内容自适应冲掉 ----
+        // 红线上方的 6px 归属区：与上方蓝色横滚动条之间的空白，现在算作红线的一部分，
+        // 只承担「鼠标压上去整条高亮」与「拉高命中判定」这两件事，颜色保持一层很淡的红，不当实线用。
+        errorSplitTopPadRt = CreateRect("ErrorSplitTopPad", bottomRt, new Vector2(0.5f, 1f), Vector2.zero,
+            new Vector2(0f, ErrorSplitTopGap), new Vector2(0.5f, 1f));
+        errorSplitTopPadRt.anchorMin = new Vector2(0f, 1f);
+        errorSplitTopPadRt.anchorMax = new Vector2(1f, 1f);
+        errorSplitTopPadRt.pivot = new Vector2(0.5f, 1f);
+        errorSplitTopPadRt.anchoredPosition = Vector2.zero;
+        errorSplitTopPadRt.sizeDelta = new Vector2(0f, ErrorSplitTopGap);
+        errorSplitTopPadImg = errorSplitTopPadRt.gameObject.AddComponent<Image>();
+        errorSplitTopPadImg.color = UITheme.WithAlpha(errorColor, ErrorSplitTopPadAlpha);
+        errorSplitTopPadImg.raycastTarget = false; // 不抢指针：上方那条蓝色横滚动条要照常可拖，悬停判定走屏幕坐标
+
         errorSplitBarRt = CreateRect("ErrorSplitBar", bottomRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, ErrorSplitBarHeight), new Vector2(0.5f, 1f));
         errorSplitBarRt.anchorMin = new Vector2(0f, 1f);
         errorSplitBarRt.anchorMax = new Vector2(1f, 1f);
         errorSplitBarRt.pivot = new Vector2(0.5f, 1f);
-        errorSplitBarRt.anchoredPosition = new Vector2(0f, -ErrorSplitGripHeight); // 让位给上方粗提示条：细条紧贴粗条下缘
+        errorSplitBarRt.anchoredPosition = new Vector2(0f, -(ErrorSplitTopGap + ErrorSplitGripHeight)); // 让位给上方粗提示条：细条紧贴粗条下缘
         errorSplitBarRt.sizeDelta = new Vector2(0f, ErrorSplitBarHeight);
-        Image errSplitImg = errorSplitBarRt.gameObject.AddComponent<Image>();
-        errSplitImg.color = UITheme.WithAlpha(errorColor, 0.95f); // 鲜红旗标：一眼看出这里能上下拖
-        errSplitImg.raycastTarget = false; // 3px 细条只负责「显示」，点击/拖动全部交给下面那层更高的透明命中区
+        errorSplitBarImg = errorSplitBarRt.gameObject.AddComponent<Image>();
+        errorSplitBarImg.color = UITheme.WithAlpha(errorColor, 0.95f); // 鲜红旗标：一眼看出这里能上下拖
+        errorSplitBarImg.raycastTarget = false; // 3px 细条只负责「显示」，点击/拖动全部交给下面那层更高的透明命中区
 
         // 红色细条「正上方」的提示条：厚度收到 6px（比底部横向蓝条的 10px 更细），下缘贴住 3px 细条（向下对齐），
         // 整条都能按住上下拖，交互与蓝条完全相同 —— 细条继续画分界，这条负责看得见、抓得住。
@@ -5231,11 +5684,11 @@ public class CodeEditorController : MonoBehaviour
         errorSplitGripRt.anchorMin = new Vector2(0f, 1f);
         errorSplitGripRt.anchorMax = new Vector2(1f, 1f);
         errorSplitGripRt.pivot = new Vector2(0.5f, 1f);
-        errorSplitGripRt.anchoredPosition = Vector2.zero; // 顶格：粗提示条上缘贴住错误区顶边，细条被压在它下面
+        errorSplitGripRt.anchoredPosition = new Vector2(0f, -ErrorSplitTopGap); // 顶格：粗提示条上缘贴住错误区顶边，细条被压在它下面
         errorSplitGripRt.sizeDelta = new Vector2(0f, ErrorSplitGripHeight);
-        Image errGripImg = errorSplitGripRt.gameObject.AddComponent<Image>();
-        errGripImg.color = UITheme.WithAlpha(errorColor, 0.85f); // 与细条同色系，但整条更粗、更像把手
-        errGripImg.raycastTarget = true;
+        errorSplitGripImg = errorSplitGripRt.gameObject.AddComponent<Image>();
+        errorSplitGripImg.color = UITheme.WithAlpha(errorColor, 0.85f); // 与细条同色系，但整条更粗、更像把手
+        errorSplitGripImg.raycastTarget = true;
         errorSplitGripRt.gameObject.AddComponent<ErrorSplitBarDrag>().Setup(this);
 
         // 命中区比红条更高（9px），细条看着细、但依旧好按住 —— 细归细，手感不能丢
@@ -5244,12 +5697,132 @@ public class CodeEditorController : MonoBehaviour
         errorSplitHitRt.anchorMin = new Vector2(0f, 1f);
         errorSplitHitRt.anchorMax = new Vector2(1f, 1f);
         errorSplitHitRt.pivot = new Vector2(0.5f, 1f);
-        errorSplitHitRt.anchoredPosition = Vector2.zero;
-        errorSplitHitRt.sizeDelta = new Vector2(0f, ErrorSplitGripHeight + ErrorSplitBarHeight); // 整块（粗条 + 细条）都能拖
+        errorSplitHitRt.anchoredPosition = new Vector2(0f, -ErrorSplitTopGap);
+        errorSplitHitRt.sizeDelta = new Vector2(0f, ErrorSplitHitHeight); // 真正用上 9px 命中厚度（此前只给了 4px，难怪不好抓）
         Image errSplitHitImg = errorSplitHitRt.gameObject.AddComponent<Image>();
         errSplitHitImg.color = UITheme.WithAlpha(errorColor, 0f);
         errSplitHitImg.raycastTarget = true;
         errorSplitHitRt.gameObject.AddComponent<ErrorSplitBarDrag>().Setup(this);
+
+        // ---- 紫色运行时错误（RE）窗口：叠在红色编译错误窗口之上，结构与红色窗口同构 ----
+        reZoneRt = CreateRect("RuntimeErrorZone", editorRoot.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 0f), new Vector2(0.5f, 0f));
+        reZoneRt.anchorMin = new Vector2(0f, 0f);
+        reZoneRt.anchorMax = new Vector2(1f, 0f);
+        reZoneRt.pivot = new Vector2(0.5f, 0f);
+        reZoneRt.anchoredPosition = Vector2.zero;
+        reZoneRt.sizeDelta = new Vector2(0f, 0f);
+        reZoneRt.gameObject.AddComponent<RectMask2D>();
+        // 背景不再铺满整块 rect：顶部 ReSplitTopGap(6px) 是给上方蓝色横滚动条让出的缝隙，
+        // 这段以前也被紫色背景染上，看起来就是「紫线上方还有一截紫色残留」。背景从紫线下沿开始画，顶边全透明。
+        RectTransform reBgRt = CreateRect("RuntimeErrorBg", reZoneRt, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
+        reBgRt.anchorMin = Vector2.zero;
+        reBgRt.anchorMax = Vector2.one;
+        reBgRt.offsetMin = Vector2.zero;
+        reBgRt.offsetMax = new Vector2(0f, -(ReSplitTopGap + ReSplitLineHeight));
+        Image reBg = reBgRt.gameObject.AddComponent<Image>();
+        reBg.color = Color.Lerp(UITheme.CodeBg, UITheme.Purple, 0.16f);
+        reBg.raycastTarget = true;
+        reBgRt.SetAsFirstSibling(); // 压在文字与紫色滚动条之下
+
+        reMaskRt = CreateRect("RuntimeErrorViewport", reZoneRt, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
+        reMaskRt.anchorMin = Vector2.zero;
+        reMaskRt.anchorMax = Vector2.one;
+        reMaskRt.offsetMin = new Vector2(12f, ReBottomInset);                               // 底部留白 = 呼吸位 6 + 半根紫线 2，与线下方 6px 视觉居中
+        reMaskRt.offsetMax = new Vector2(-16f, -ReTopInset); // 顶部让开 6px 缝 + 紫线 4px + 6px 呼吸位
+        reMaskRt.gameObject.AddComponent<RectMask2D>();
+
+        reListText = CreateText("RuntimeErrorList", reMaskRt, string.Empty, reFontSize, UITheme.Purple, TextAnchor.UpperLeft);
+        RectTransform reTextRt = reListText.rectTransform;
+        reTextRt.anchorMin = new Vector2(0f, 1f);
+        reTextRt.anchorMax = new Vector2(1f, 1f);
+        reTextRt.pivot = new Vector2(0.5f, 1f);
+        reTextRt.anchoredPosition = Vector2.zero;
+        reTextRt.sizeDelta = new Vector2(0f, 0f);
+        reListText.supportRichText = false;
+        reListText.horizontalOverflow = HorizontalWrapMode.Wrap;
+        reListText.verticalOverflow = VerticalWrapMode.Overflow;
+
+        reScrollTrackRt = CreateRect("RuntimeErrorScrollTrack", reZoneRt, new Vector2(1f, 0f), Vector2.zero, new Vector2(6f, 0f), new Vector2(1f, 0.5f));
+        reScrollTrackRt.anchorMin = new Vector2(1f, 0f);
+        reScrollTrackRt.anchorMax = new Vector2(1f, 1f);
+        reScrollTrackRt.pivot = new Vector2(1f, 0.5f);
+        reScrollTrackRt.offsetMin = new Vector2(-18f, ReBottomInset); // 滚动条下端与文字视口同步，吃同一套上下留白
+        reScrollTrackRt.offsetMax = new Vector2(-12f, -ReTopInset);
+        Image reTrackImg = reScrollTrackRt.gameObject.AddComponent<Image>();
+        reTrackImg.color = UITheme.WithAlpha(UITheme.Purple, 0f);
+        reTrackImg.raycastTarget = true;
+        ScrollBarTrackJump reTrackJump = reScrollTrackRt.gameObject.AddComponent<ScrollBarTrackJump>();
+        reTrackJump.Setup(reScrollTrackRt, true, SetReScrollFromBar);
+
+        reScrollHandleRt = CreateRect("RuntimeErrorScrollHandle", reScrollTrackRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(6f, 40f), new Vector2(0.5f, 1f));
+        reScrollHandleRt.anchorMin = new Vector2(0.5f, 1f);
+        reScrollHandleRt.anchorMax = new Vector2(0.5f, 1f);
+        reScrollHandleRt.pivot = new Vector2(0.5f, 1f);
+        reScrollHandleRt.anchoredPosition = Vector2.zero;
+        reScrollHandleRt.sizeDelta = new Vector2(6f, 40f);
+        Image reHandleImg = reScrollHandleRt.gameObject.AddComponent<Image>();
+        reHandleImg.color = UITheme.WithAlpha(UITheme.Purple, 0.6f);
+        reHandleImg.raycastTarget = true;
+        ScrollBarHandle reHandleDrag = reScrollHandleRt.gameObject.AddComponent<ScrollBarHandle>();
+        reHandleDrag.Setup(reScrollTrackRt, true, SetReScrollFromBar);
+
+        // 紫线上方的 6px 归属区：与上方蓝色横滚动条之间的空白，现在算作紫线的一部分，
+        // 只承担「鼠标压上去整条高亮」与「拉高判定」这两件事，颜色保持一层很淡的紫，不当实线用。
+        reSplitTopPadRt = CreateRect("RuntimeErrorSplitTopPad", reZoneRt, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(0.5f, 1f));
+        reSplitTopPadRt.anchorMin = new Vector2(0f, 1f);
+        reSplitTopPadRt.anchorMax = new Vector2(1f, 1f);
+        reSplitTopPadRt.pivot = new Vector2(0.5f, 1f);
+        reSplitTopPadRt.anchoredPosition = Vector2.zero;
+        reSplitTopPadRt.sizeDelta = new Vector2(0f, ReSplitTopGap);
+        reSplitTopPadImg = reSplitTopPadRt.gameObject.AddComponent<Image>();
+        reSplitTopPadImg.color = UITheme.WithAlpha(UITheme.Purple, ReSplitTopPadAlpha);
+        reSplitTopPadImg.raycastTarget = true; // 归属区自己接指针：悬停高亮与拉高判定都落在这块上
+        ReSplitClickClose rePadClick = reSplitTopPadRt.gameObject.AddComponent<ReSplitClickClose>();
+        rePadClick.Setup(this); // 点一下紫线（含这 6px 归属区）= 按一次 F10，紫窗直接收起
+
+        // 紫色分隔条：细条（视觉 2px）+ 提示条（2px，整条可拖）+ 透明命中区（12px，好按住）
+        reSplitBarRt = CreateRect("RuntimeErrorSplitBar", reZoneRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, ReSplitBarHeight), new Vector2(0.5f, 1f));
+        reSplitBarRt.anchorMin = new Vector2(0f, 1f);
+        reSplitBarRt.anchorMax = new Vector2(1f, 1f);
+        reSplitBarRt.pivot = new Vector2(0.5f, 1f);
+        reSplitBarRt.anchoredPosition = new Vector2(0f, -(ReSplitTopGap + ReSplitGripHeight));
+        reSplitBarRt.sizeDelta = new Vector2(0f, ReSplitBarHeight);
+        reSplitBarImg = reSplitBarRt.gameObject.AddComponent<Image>();
+        reSplitBarImg.color = UITheme.WithAlpha(UITheme.Purple, 0.95f);
+        reSplitBarImg.raycastTarget = true; // 紫条本体可点：点一下收起紫窗（等同按一次 F10）
+        ReSplitClickClose reBarClick = reSplitBarRt.gameObject.AddComponent<ReSplitClickClose>();
+        reBarClick.Setup(this);
+
+        reSplitGripRt = CreateRect("RuntimeErrorSplitGrip", reZoneRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, ReSplitGripHeight), new Vector2(0.5f, 1f));
+        reSplitGripRt.anchorMin = new Vector2(0f, 1f);
+        reSplitGripRt.anchorMax = new Vector2(1f, 1f);
+        reSplitGripRt.pivot = new Vector2(0.5f, 1f);
+        reSplitGripRt.anchoredPosition = new Vector2(0f, -ReSplitTopGap);
+        reSplitGripRt.sizeDelta = new Vector2(0f, ReSplitGripHeight);
+        reSplitGripImg = reSplitGripRt.gameObject.AddComponent<Image>();
+        reSplitGripImg.color = UITheme.WithAlpha(UITheme.Purple, 0.85f);
+        reSplitGripImg.raycastTarget = true; // 紫条本体可点：点一下收起紫窗（等同按一次 F10）
+        ReSplitClickClose reGripClick = reSplitGripRt.gameObject.AddComponent<ReSplitClickClose>();
+        reGripClick.Setup(this);
+
+        reSplitHitRt = CreateRect("RuntimeErrorSplitHit", reZoneRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, ReSplitHitHeight), new Vector2(0.5f, 1f));
+        // 关键修正：命中区必须贴住窗口顶边。此前锚点误设为 (0,0.5) + pivot 0.5，
+        // 实际落点跑到了紫窗垂直中线附近，视觉上的紫条按下去常常没反应（表现为「有概率拖不动」）。
+        reSplitHitRt.anchorMin = new Vector2(0f, 1f);
+        reSplitHitRt.anchorMax = new Vector2(1f, 1f);
+        reSplitHitRt.pivot = new Vector2(0.5f, 1f);
+        reSplitHitRt.anchoredPosition = new Vector2(0f, -ReSplitTopGap); // 顶边下移 6px，与上方蓝条留缝，谁也不抢谁的指针
+        reSplitHitRt.sizeDelta = new Vector2(0f, ReSplitHitHeight);
+        Image reHitImg = reSplitHitRt.gameObject.AddComponent<Image>();
+        reHitImg.color = UITheme.WithAlpha(UITheme.Purple, 0f);
+        reHitImg.raycastTarget = false; // 命中区一并停用：紫条不可拖，指针直接穿给下方内容
+
+        SetActiveIfChanged(reSplitTopPadRt, false);
+        SetActiveIfChanged(reSplitBarRt, false);
+        SetActiveIfChanged(reSplitGripRt, false);
+        SetActiveIfChanged(reSplitHitRt, false);
+        SetActiveIfChanged(reMaskRt, false);
+        SetActiveIfChanged(reScrollTrackRt, false);
 
         RectTransform statusRt = CreateRect("StatusBar", bottomRt.transform, new Vector2(0f, 0f), Vector2.zero, new Vector2(0f, 30f), new Vector2(0.5f, 0f));
         statusRt.anchorMin = new Vector2(0f, 0f);
@@ -5459,45 +6032,34 @@ public class CodeEditorController : MonoBehaviour
         }
     }
 
-    /// <summary>错误区上缘红色分隔条的拖动手柄：按住上下拖，实时改变「错误区（红）/ 代码区」的高度比例。</summary>
+    /// <summary>错误区上缘红色分隔条的拖动手柄：按住上下拖，实时改变「错误区（红）/ 代码区」的高度比例。
+    /// 紫色 RE 窗口已改为高度自适应字号，不再挂本组件。</summary>
     private sealed class ErrorSplitBarDrag : MonoBehaviour, IBeginDragHandler, IDragHandler
     {
         private CodeEditorController host;
 
         public void Setup(CodeEditorController owner) { host = owner; }
 
-        public void OnBeginDrag(PointerEventData e) { if (host != null) host.BeginErrorSplitDrag(e); }
-        public void OnDrag(PointerEventData e) { if (host != null) host.DragErrorSplit(e); }
+        public void OnBeginDrag(PointerEventData e) { if (host == null) return; host.BeginErrorSplitDrag(e); }
+        public void OnDrag(PointerEventData e) { if (host == null) return; host.DragErrorSplit(e); }
     }
 
-    /// <summary>
-    /// 底部横滚动条（蓝条）兼作分界把手：红条被压到底与它合并、消失之后，它就是唯一的抓手，
-    /// 按住往上拖即可把错误区重新拉出来。按在滑块上时不接管（那是滚动，不是拉分界）。
-    /// </summary>
-    private sealed class SeamDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler
+    /// <summary>紫线点一下收起：在紫色分隔条（6px 归属区 / 2px 细条 / 2px 提示条）上点一下 = 按一次 F10。
+    /// 紫窗可见时只收紫窗，红窗的高度与屏幕位置一律不动，与 F10 的分支口径完全一致。</summary>
+    private sealed class ReSplitClickClose : MonoBehaviour, IPointerClickHandler
     {
         private CodeEditorController host;
-        private bool active;
 
         public void Setup(CodeEditorController owner) { host = owner; }
 
-        public void OnBeginDrag(PointerEventData e)
+        public void OnPointerClick(PointerEventData e)
         {
-            active = false;
-            if (host == null)
-                return;
-            // 指针拖的是滑块本体（滚动）时不管，只接管「按住轨道拖动」
-            if (e.pointerDrag != null && e.pointerDrag != gameObject)
-                return;
-            host.BeginErrorSplitDrag(e);
-            active = true;
-        }
-
-        public void OnDrag(PointerEventData e)
-        {
-            if (active && host != null)
-                host.DragErrorSplit(e);
+            if (host == null) return;
+            if (e.button != PointerEventData.InputButton.Left) return; // 只认左键，右键留给后续菜单
+            if (host.IsReZoneVisible()) host.CloseReZonePanel();
+            else host.ToggleReZonePanel();
         }
     }
+
 }
 
