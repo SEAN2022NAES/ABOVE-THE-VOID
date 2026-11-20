@@ -1,20 +1,20 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Level 1 - Part 2「编程序章」：夹在「全程用手点方块」与「C# 语法课」之间的过渡讲解关。
+/// Level 1 - Part 1「编程序章」：夹在「全程用手点方块」与「C# 语法课」之间的过渡讲解关。
 ///   · 面向完全不懂代码的玩家：先讲「为什么不要再用手一个一个点」，再讲「把规则交给电脑」，
 ///     最后看一眼真实代码长什么样、接下来两门课怎么学；
-///   · 多页阅读（4 页），底部 ‹ 上一页 / 下一页 › 可来回翻，最后一页「认识编辑器」直接进 Level 1 - Part 3 编辑器界面入门；
-///   · 键盘 ← → 也能翻页；「跳过序章 (S)」按钮 / S 键同样直接进 Level 1 - Part 3；
+///   · 多页阅读（4 页），底部 ‹ 上一页 / 下一页 › 可来回翻，最后一页「认识编辑器」直接进 Level 1 - Part 2 编辑器界面入门；
+///   · 键盘 ← → 也能翻页；「跳过序章 (S)」按钮 / S 键同样直接进 Level 1 - Part 2；
 ///   · 读字期间释放鼠标并冻结视角（鼠标移动不会转动背后场景的朝向），ESC 暂停仍然可用；
 ///   · 本关不打开代码编辑器、不出方块，纯粹读字。
-/// 章节跳转：/level 1 2 n 可直接翻到第 n 页（见 LevelDirector）。
+/// 章节跳转：/level 1 1 n 可直接翻到第 n 页（见 LevelDirector）。
 /// </summary>
 public class CodeIntroTutorialController : MonoBehaviour
 {
-    /// <summary>讲解页数（供 /level 1 2 n 的章节校验与页码显示）。</summary>
+    /// <summary>讲解页数（供 /level 1 1 n 的章节校验与页码显示）。</summary>
     public const int PageCount = 4;
 
     public static CodeIntroTutorialController Instance { get; private set; }
@@ -40,9 +40,9 @@ public class CodeIntroTutorialController : MonoBehaviour
     private Text titleText;         // 页标题
     private Text bodyText;          // 正文
     private Text footerText;        // 底部操作提示（键盘 ← → 也能翻页）
-    private bool transitioning;     // 正在播进入下一关（Part 3 编辑器界面入门）的过渡（忽略重复点击 / 键盘）
+    private bool transitioning;     // 正在播进入下一关（Level 1 - Part 2 编辑器界面入门）的过渡（忽略重复点击 / 键盘）
 
-    // 进入 Level 1 - Part 3 的黑幕过渡时长：与 Level 1 - Part 1 → Part 2（TutorialController）保持一致
+    // 进入 Level 1 - Part 2 的黑幕过渡时长：与 Level 0 - Part 1 → Level 1 - Part 1（TutorialController）保持一致
     private const float FadeOutSeconds = 0.35f;
     private const float FadeInSeconds = 0.5f;
     private Button prevBtn;
@@ -262,7 +262,7 @@ public class CodeIntroTutorialController : MonoBehaviour
             NextPage();
         // 最后一页不给 S：那一页的 Next 本来就是进编辑器界面入门，再跳过等于白跳
         else if (Input.GetKeyDown(SkipKey) && CurrentPage < PageCount - 1)
-            SkipPrologue(); // S：直接跳过序章进 Level 1 - Part 3（与「跳过序章」按钮同效）
+            SkipPrologue(); // S：直接跳过序章进 Level 1 - Part 2（与「跳过序章」按钮同效）
     }
 
     // ================== 对外接口 ==================
@@ -320,14 +320,14 @@ public class CodeIntroTutorialController : MonoBehaviour
             return;
         if (CurrentPage >= PageCount - 1)
         {
-            GoGrammarCourse(); // 已经是最后一页：再按一次就进 Level 1 - Part 3
+            GoGrammarCourse(); // 已经是最后一页：再按一次就进 Level 1 - Part 2
             return;
         }
         CurrentPage++;
         Refresh();
     }
 
-    /// <summary>跳过序章（S 键或「跳过序章」按钮）：不看讲解、直接进 Level 1 - Part 3 编辑器界面入门。</summary>
+    /// <summary>跳过序章（S 键或「跳过序章」按钮）：不看讲解、直接进 Level 1 - Part 2 编辑器界面入门。</summary>
     private void SkipPrologue()
     {
         if (!Active || transitioning)
@@ -365,7 +365,7 @@ public class CodeIntroTutorialController : MonoBehaviour
     }
 
     /// <summary>
-    /// 进入 Level 1 - Part 3 编辑器界面入门。过渡方式与 Level 1 - Part 1 → Part 2 完全一致：
+    /// 进入 Level 1 - Part 2 编辑器界面入门。过渡方式与 Level 0 - Part 1 → Level 1 - Part 1 完全一致：
     /// 黑幕淡出到全黑 → 在全黑那一帧执行 LevelDirector.JumpTo（内部会 End() 收尾并清场）→ 黑幕淡入，
     /// 避免序章面板被硬切掉、语法课突然弹出的生硬感。过渡期间忽略键盘与按钮，防止重复触发。
     /// </summary>
@@ -382,7 +382,7 @@ public class CodeIntroTutorialController : MonoBehaviour
 
         ScreenFade.PlayTransition(FadeOutSeconds, FadeInSeconds, delegate
         {
-            LevelDirector.JumpTo(1, 3, 1); // Level 1 - Part 3 编辑器界面入门，从第 1 页开始
+            LevelDirector.JumpTo(1, 2, 1); // Level 1 - Part 2 编辑器界面入门，从第 1 页开始（原 Level 1 - Part 3）
         });
     }
 

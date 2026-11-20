@@ -2,18 +2,20 @@
 using UnityEngine.UI;
 
 /// <summary>
-/// 关卡 1 - 第 1 部分 引导教学（Tutorial）：
+/// 关卡 0 - 第 1 部分 手动体验关（Tutorial）：
 ///   - 进入关卡先不生成方块（由本控制器接管生成时机）；
-///   - 逐步引导：按 Q 自由视角 → WASD / Space / C 移动 → 左键发射激光；
+///   - 逐步引导：按 Q 自由视角 → WASD / Space / C 移动 → 左键发射激光 → 蓝色 BOMB 块「不能点」提示；
 ///   - 解释方块碰到坐标平面（两根坐标轴夹起来的面：X=0 / Y=0 / Z=0）即消失；
-///   - 用激光消灭 5 个方块后，预告「自动化游玩」（只引导体验，不展示代码）。
+///   - 用激光消灭 5 个方块后，自动顺接进入 Level 0 - Part 2「自由玩耍关」（纯手动点着玩）。
+/// 本关全程 bombEnabled = false（只出红色 ATTACK 块），因此误点蓝块掉 life 导致 game over 的路径已被彻底切断；
+/// 「蓝色方块不能点」仍作为知识性提示保留（讲解 Q&A：遇到蓝块别碰）。
 /// 纯代码构建顶部提示面板；文案随 Localization 中 / 英切换。
 /// </summary>
 public class TutorialController : MonoBehaviour
 {
     public static TutorialController Instance { get; private set; }
 
-    /// <summary>Level 1 - Part 1 教学是否已启动（启动期间禁用 E 键时间冻结）。</summary>
+    /// <summary>Level 0 - Part 1 手动体验关教学是否已启动（启动期间禁用 E 键时间冻结）。</summary>
     public bool Started { get; private set; }
 
     /// <summary>序章是否已教过按 Q（进入自由视角）：教过之后回到原点才该弹「你所在原点 · 按下 Q 解锁」。</summary>
@@ -35,11 +37,13 @@ public class TutorialController : MonoBehaviour
     public int targetKills = 5;
     [Tooltip("欢迎页停留秒数（真实时间）")]
     public float welcomeHoldSeconds = 2.8f;
-    [Tooltip("引导教学完成后，自动顺接进入 Level 1 - Part 2 前在结语页停留的秒数（真实时间，可调）")]
+    [Tooltip("「蓝色方块不能点」提示页停留秒数（真实时间，可调）")]
+    public float bombWarningHoldSeconds = 5.5f;
+    [Tooltip("引导教学完成后，自动顺接进入 Level 0 - Part 2 前在结语页停留的秒数（真实时间，可调）")]
     public float completionHoldSeconds = 4.5f;
-    [Tooltip("进入 Level 1 - Part 2 前的淡出到全黑时长（秒，真实时间，可调；0 = 无淡出）")]
+    [Tooltip("进入 Level 0 - Part 2 前的淡出到全黑时长（秒，真实时间，可调；0 = 无淡出）")]
     public float transitionFadeOutSeconds = 0.35f;
-    [Tooltip("进入 Level 1 - Part 2 后的淡入时长（秒，真实时间，可调；0 = 无淡入）")]
+    [Tooltip("进入 Level 0 - Part 2 后的淡入时长（秒，真实时间，可调；0 = 无淡入）")]
     public float transitionFadeInSeconds = 0.5f;
 
     private enum Step
@@ -48,15 +52,17 @@ public class TutorialController : MonoBehaviour
         PressQ,         // 按 Q 进入自由视角
         Move,           // WASD / Space / C 移动
         FireLaser,      // 左键发射激光
+        BombWarning,    // 蓝色 BOMB 块不能点（别碰）提示
         PlaneKill,      // 解释坐标平面消失 + 消灭 5 个方块
-        CSharpIntro     // 引出 C# 自动化激光
+        CSharpIntro     // 结语 → 自动顺接 Level 0 - Part 2 自由玩耍关
     }
 
     private Step currentStep;
     private bool active;
     private float welcomeTimer;
+    private float bombWarningTimer;
     private bool spawnStarted;
-    // 结语页 → 自动顺接 Level 1 - Part 2 的过渡计时与一次性触发标记（防重复触发）
+    // 结语页 → 自动顺接 Level 0 - Part 2 的过渡计时与一次性触发标记（防重复触发）
     private float nextLessonTimer;
     private bool nextLessonTriggered;
 
@@ -110,7 +116,7 @@ public class TutorialController : MonoBehaviour
             Instance = null;
     }
 
-    /// <summary>进入 Level 1 - Part 1 教学：清场、暂停生成、重置玩家，从欢迎页开始引导。可重复调用以重学。</summary>
+    /// <summary>进入 Level 0 - Part 1 手动体验关教学：清场、暂停生成、重置玩家，从欢迎页开始引导。可重复调用以重学。</summary>
     public void StartTutorial()
     {
         MainMenuController menu = FindObjectOfType<MainMenuController>();
@@ -125,6 +131,7 @@ public class TutorialController : MonoBehaviour
             spawner.ClearAllBlocks();
             spawner.SuspendSpawning(); // 教学前期先不生成方块
             spawner.ResetSession(); // 重置本局会话：消灭计数清零、方块编号从 1 开始
+            spawner.SetLegacyManualProfile(false); // 防御：从 Level 0 - Part 2 自由玩耍关过来时还原常规生成节奏
         }
 
         TimeHintController timeHint = FindObjectOfType<TimeHintController>();
@@ -136,20 +143,28 @@ public class TutorialController : MonoBehaviour
         if (tower != null)
             tower.SetVisualVisible(false);
 
-        // Level 1 教学关表现：不显示 Score 分数 UI、不显示 print 输出面板、不生成蓝色 BOMB 块（只出红块）
-        LevelPresentation.ApplyLevel1();
+        // Level 0 手动体验关表现：显示 Score HUD 与生命条（life）、不显示 print 输出面板、**禁用蓝色 BOMB 块**（只出红块）
+        LevelPresentation.ApplyLevel0();
 
-        // 手动激光（鼠标左键）只在 Level 1 - Part 1 存在：进入本关教学即启用（其他关卡由 LevelDirector 关闭）
-        CommandConsoleController.SetManualLaserAllowed(1, 1);
+        // Level 0 - Part 1 全程禁开代码编辑器（Enter / Alt+O / Open 一律无效），与讲解页只读分支同类处理
+        LevelDirector.MarkManualPlayOnly();
+
+        // 红方块撞原点不扣分也不掉血：关掉漏块扣分。
+        // 生命扣减的唯一来源是「击毁蓝色 BOMB 块」，而本关已禁用蓝块（LevelPresentation.ApplyLevel0 → bombEnabled=false），
+        // 因此本关不可能掉 life、也不可能触发 GAME OVER。
+        ScoreManager.SetLeakPenaltyEnabled(false);
+
+        // 手动激光（鼠标左键）：Level 0 的 Part 1 / Part 2 都存在（其他关卡由 LevelDirector 关闭）
+        CommandConsoleController.SetManualLaserAllowed(0, 1);
 
         spawnStarted = false;
         nextLessonTimer = 0f;
-        nextLessonTriggered = false; // 重学本关时重置顺接标记，保证下一次仍能自动进入 Part 2
+        nextLessonTriggered = false; // 重学本关时重置顺接标记，保证下一次仍能自动进入 Level 1 - Part 1
         active = true;
         Started = true; // 教学进行中：PlayerCameraController 据此禁用 E 键时间冻结
         panelRoot.SetActive(true);
         SetStep(Step.Welcome);
-        Debug.Log("[Tutorial] Level 1 - Part 1 引导教学开始（先不生成方块，等待玩家完成操作引导）。");
+        Debug.Log("[Tutorial] Level 0 - Part 1 手动体验关教学开始（先不生成方块，等待玩家完成操作引导）。");
     }
 
     private void Update()
@@ -173,13 +188,19 @@ public class TutorialController : MonoBehaviour
                 if (AllMoveKeysDone())
                     Advance();
                 break;
+            case Step.BombWarning:
+                // 纯文字提示页：停够时间自动进入下一步（期间方块已经开始生成，玩家可以先练手）
+                bombWarningTimer += Time.unscaledDeltaTime;
+                if (bombWarningTimer >= bombWarningHoldSeconds)
+                    Advance();
+                break;
             case Step.PlaneKill:
                 RefreshPlaneKillProgress();
                 if (spawner != null && spawner.PlayerKills >= targetKills)
                     Advance();
                 break;
             case Step.CSharpIntro:
-                // 结语页（5/5 完成提示）先停留 completionHoldSeconds，再用黑幕淡出 → 跳转 → 淡入，丝滑进入 Level 1 - Part 2
+                // 结语页（5/5 完成提示）先停留 completionHoldSeconds，再用黑幕淡出 → 跳转 → 淡入，丝滑进入 Level 1 - Part 1
                 if (nextLessonTriggered)
                     break;
                 nextLessonTimer += Time.unscaledDeltaTime;
@@ -206,22 +227,25 @@ public class TutorialController : MonoBehaviour
                 SetStep(Step.FireLaser);
                 break;
             case Step.FireLaser:
+                SetStep(Step.BombWarning);
+                BeginSpawningForTutorial(); // 开始生成方块（只出红块）：一边读「蓝块别碰」提示，一边可以先打几枪
+                break;
+            case Step.BombWarning:
                 SetStep(Step.PlaneKill);
-                BeginSpawningForTutorial(); // 开始生成方块：观察平面消失 + 练习消灭
                 break;
             case Step.PlaneKill:
                 SetStep(Step.CSharpIntro);
                 break;
             case Step.CSharpIntro:
-                // 已经是最后一页：保持 active，交由 Update 中的过渡计时在停留结束后自动顺接进入 Level 1 - Part 2
+                // 已经是最后一页：保持 active，交由 Update 中的过渡计时在停留结束后自动顺接进入 Level 1 - Part 1
                 break;
         }
     }
 
     /// <summary>
-    /// 引导教学完成后自动顺接进入 Level 1 - Part 2（编程序章讲解关），之后依次是 Part 3 编辑器入门、Part 4 语法课。
-    /// 流程：先在结语页停留（5/5 完成提示）→ 黑幕淡出到全黑 → 在全黑帧执行 LevelDirector.JumpTo(1, 2)
-    /// （完成清场、表现切换、语法教学从头开始）→ 黑幕淡入，避免关卡切换出现生硬瞬切。
+    /// 手动体验关完成后自动顺接进入 Level 0 - Part 2（自由玩耍关：纯手动点方块、不出蓝块、可长时间玩）。
+    /// 流程：先在结语页停留（5/5 完成提示）→ 黑幕淡出到全黑 → 在全黑帧执行 LevelDirector.JumpTo(0, 2)
+    /// （完成清场、表现切换、切远古手动手感并立即开始持续出块）→ 黑幕淡入，避免关卡切换出现生硬瞬切。
     /// 跳转前先收尾本关教学状态（面板隐藏、Started=false 解除「教学进行中禁止打开代码编辑器」互斥）。
     /// </summary>
     private void GoToNextLesson()
@@ -234,14 +258,17 @@ public class TutorialController : MonoBehaviour
         ScreenFade.PlayTransition(transitionFadeOutSeconds, transitionFadeInSeconds, JumpToNextLesson);
     }
 
-    /// <summary>黑幕全黑的瞬间执行关卡切换：进入 Level 1 - Part 2。</summary>
+    /// <summary>黑幕全黑的瞬间执行关卡切换：进入 Level 0 - Part 2（自由玩耍关）。</summary>
     private void JumpToNextLesson()
     {
-        string result = LevelDirector.JumpTo(1, 2);
+        // 逐级解锁：Level 0 - Part 1 手动体验关走完即视为通关，解锁 Level 1（主页关卡 1 按钮由锁定变为可点）
+        LevelProgress.MarkLevelCompleted(0);
+
+        string result = LevelDirector.JumpTo(0, 2);
         if (string.IsNullOrEmpty(result) || result.Contains("尚未开放"))
-            Debug.LogWarning("[Tutorial] 自动顺接 Level 1 - Part 2 失败：" + result);
+            Debug.LogWarning("[Tutorial] 自动顺接 Level 0 - Part 2 自由玩耍关失败：" + result);
         else
-            Debug.Log("[Tutorial] 引导教学完成，已自动顺接进入 Level 1 - Part 2（" + result + "）");
+            Debug.Log("[Tutorial] 手动体验关完成，已自动顺接进入 Level 0 - Part 2 自由玩耍关（" + result + "）");
     }
 
     // ---------------- 移动教学：六键长按充能 ----------------
@@ -375,6 +402,8 @@ public class TutorialController : MonoBehaviour
         RefreshText();
         if (step == Step.Welcome)
             welcomeTimer = 0f;
+        if (step == Step.BombWarning)
+            bombWarningTimer = 0f;
         // 进入结语页：重置自动顺接计时（此时才允许开始计算停留时间）
         if (step == Step.CSharpIntro)
         {
@@ -402,12 +431,12 @@ public class TutorialController : MonoBehaviour
         if (currentStep == Step.CSharpIntro)
         {
             stepText.text = zh
-                ? "5/5 完成 · 引导教学（关卡 1 · 第 1 部分）"
-                : "5/5 Complete · Tutorial (Level 1 · Part 1)";
+                ? "5/5 完成 · 手动体验关（关卡 0 · 第 1 部分）"
+                : "5/5 Complete · Hands-on (Level 0 · Part 1)";
         }
         else
         {
-            stepText.text = zh ? "引导教学（关卡 1 · 第 1 部分）" : "Tutorial (Level 1 · Part 1)";
+            stepText.text = zh ? "手动体验关（关卡 0 · 第 1 部分）" : "Hands-on (Level 0 · Part 1)";
         }
 
         switch (currentStep)
@@ -432,13 +461,18 @@ public class TutorialController : MonoBehaviour
                     ? "鼠标左键发射激光！\n\n每命中一次吃掉方块 1 层厚度；层数 = 它自身最大 HP（1~6 层）。\n累计吃满自身 HP 层，方块即消灭。\n\n屏幕底部「HP: 剩余/最大」实时显示（6/6 → 5/6 → … → 1/6）。\n\n先空射一枪感受一下（暂未生成方块）。"
                     : "Left-click to fire your laser!\n\nEach hit eats 1 layer; layers = that block's own max HP (1~6).\nA block dies once its own HP is fully eaten.\n\nBottom HUD shows remaining HP (6/6 -> 5/6 -> ... -> 1/6).\n\nFire once to feel it (no blocks yet, dry fire is fine).";
                 break;
+            case Step.BombWarning:
+                bodyText.text = zh
+                    ? "特别注意：蓝色方块【不能点】！\n\n蓝色方块（BOMB）被击毁会扣掉 1 点生命，连碰几个就会 Game Over。\n\n这一关只出红色方块，不会出现蓝块，可以放心练手；\n之后遇到蓝块，记住：别碰、绕开它。"
+                    : "Important: NEVER hit the blue block!\n\nDestroying a blue block (BOMB) costs 1 life — a few of them and it is Game Over.\n\nThis level only spawns red blocks, so you can practise safely.\nLater on, when you see a blue block: do not touch it, just leave it alone.";
+                break;
             case Step.PlaneKill:
                 RefreshPlaneKillProgress();
                 break;
             case Step.CSharpIntro:
                 bodyText.text = zh
-                    ? "5/5 完成！你已经消灭了 " + targetKills + " 个方块。\n\n接下来，我们将走入「自动化游玩」——\n让程序自己控制激光去打方块！\n\n即将进入下一课：C# 基础语法\n（画面将淡出后自动切换，代码编辑器内教学无需任何输入…）"
-                    : "5/5 complete! You destroyed " + targetKills + " blocks.\n\nNext, we move into automated play —\nletting the program control the laser by itself!\n\nEntering the next lesson: C# basics\n(screen fades out and switches automatically; no input needed in the editor tutorial…)";
+                    ? "5/5 完成！你已经消灭了 " + targetKills + " 个方块。\n\n接下来进入【自由玩耍关】（关卡 0 · 第 2 部分）：\n还是只用鼠标左键点方块，不写代码、也不用按 Enter。\n方块会一直出，想玩多久玩多久，也不会掉生命。\n\n（画面将淡出后自动切换…）"
+                    : "5/5 complete! You destroyed " + targetKills + " blocks.\n\nNext up: Free Play (Level 0 · Part 2)\nstill pure left-click shooting — no code, no Enter needed.\nBlocks keep spawning, play as long as you like, and you cannot lose life.\n\n(screen fades out and switches automatically…)";
                 break;
         }
 

@@ -10,7 +10,7 @@ using UnityEngine.EventSystems;
 ///     关闭只保留 ESC 一条路径（输入框聚焦时 Enter 用于提交）；
 ///     其中 ESC 的判定统一在 EscapeRouter。主页调出本指令框的唯一入口是 ` 键
 ///     （主页按 ESC 完全无反应，既不暂停也不会打开本指令框）；
-///   - 识别「开发者指令」：/level &lt;关卡&gt; &lt;部分&gt; 跳转关卡分区（当前已实现 level 1 - part 1），
+///   - 识别「开发者指令」：/level &lt;关卡&gt; &lt;部分&gt; 跳转关卡分区（当前已实现 level 0 - part 1），
 ///     help 查看可用指令；原 laser / tp / timescale 等玩家指令已全部移除；
 ///   - 打开时：Time.timeScale = 0、释放鼠标，并通过
 ///     PlayerCameraController.SetExternalBlock(true) 占用视角输入；
@@ -55,8 +55,8 @@ public class CommandConsoleController : MonoBehaviour
     public float laserMaxLength = 60f;
 
     /// <summary>
-    /// 手动（鼠标左键）激光总开关：只有 Level 1 - Part 1（引导教学关）允许手动发射激光，
-    /// 其余所有关卡（Level 1 - Part 2 / Part 3 讲解关 / Part 4 语法课、Level 2 - Part 1 图鉴关 / Part 2 API 课、Level 3 - Part 1 及后续完整关）一律禁用。
+    /// 手动（鼠标左键）激光总开关：只有 Level 0 的两个分区（Part 1 手动体验关、Part 2 自由玩耍关）允许手动发射激光，
+    /// 其余所有关卡（Level 1 - Part 1 编程序章 / Part 2 编辑器入门 / Part 3 语法课、Level 2 - Part 1 图鉴关 / Part 2 API 课、Level 3 - Part 1 及后续完整关）一律禁用。
     /// 由 LevelDirector / MainMenuController 在进入关卡时通过 SetManualLaserAllowed 设置；
     /// 只拦截「左键 → FireLaser」这一条手动链路，不影响炮台代码 tower.Fire /
     /// 自动打方块脚本 AutoLaserExample / 教学 Step.FireLaser 等调用 console.FireLaser 的链路。
@@ -65,13 +65,13 @@ public class CommandConsoleController : MonoBehaviour
 
     /// <summary>
     /// 设置手动激光开关（唯一入口，避免各关卡入口各写一套判断）：
-    /// 仅当「Level 1 - Part 1」时允许手动发射激光。
+    /// 仅当「Level 0 - Part 1 手动体验关」或「Level 0 - Part 2 自由玩耍关」时允许手动发射激光。
     /// </summary>
     public static void SetManualLaserAllowed(int level, int part)
     {
-        bool allowed = (level == 1 && part == 1);
+        bool allowed = (level == 0 && (part == 1 || part == 2));
         ManualLaserEnabled = allowed;
-        string where = (level <= 0) ? "主页 / 无关卡" : ("Level " + level + " - Part " + part);
+        string where = (level <= 0 && part <= 0) ? "主页 / 无关卡" : ("Level " + level + " - Part " + part);
         Debug.Log("[CommandConsole] 手动激光（鼠标左键）：" + (allowed ? "已启用" : "已禁用") + "（" + where + "）");
     }
     [Tooltip("激光视觉显示时长（秒，用不受时间冻结影响的真实时间）")]
@@ -372,11 +372,11 @@ public class CommandConsoleController : MonoBehaviour
             "开发者指令 / Developer Commands：\n" +
             "  /exit                     - 关闭指令框并返回主页\n" +
             "                              / close console and return to home\n" +
-            "  /level <关卡> <部分>       - 跳转到指定关卡分区（如 /level 1 2、/level 2 1、/level 2 2、/level 3 1）\n" +
-            "                              / jump to level part, e.g. /level 1 2, /level 2 1, /level 2 2, /level 3 1\n" +
+            "  /level <关卡> <部分>       - 跳转到指定关卡分区（如 /level 0 1、/level 0 2、/level 1 1、/level 1 2、/level 2 2、/level 3 1）\n" +
+            "                              / jump to level part, e.g. /level 0 1, /level 0 2, /level 1 1, /level 1 2, /level 2 2, /level 3 1\n" +
             "  /level <关卡> <部分> <章节> - 跳转并直接定位到该关第 n 个 part 章节（n 为整数，从 1 开始）\n" +
-            "                              例：/level 1 2 3 跳到 Level 1 - Part 2 第 3 章；/level 2 2 5 跳到 Level 2 - Part 2 第 5 章\n" +
-            "                              / jump to the n-th task/chapter of that level-part, e.g. /level 1 2 3\n" +
+            "                              例：/level 1 1 3 跳到 Level 1 - Part 1 第 3 章；/level 2 2 5 跳到 Level 2 - Part 2 第 5 章\n" +
+            "                              / jump to the n-th task/chapter of that level-part, e.g. /level 1 1 3\n" +
             "  /unlock                    - 一键解锁全部关卡（中英别名：unlock / 解锁），通关进度仍会正常记录\n" +
             "                              / unlock every level at once (aliases: unlock / 解锁)\n" +
             "  /lock                      - 回厂重置（需二次确认）：首次输入只警告、不清档；15 秒内再次输入 /lock\n" +
@@ -400,7 +400,7 @@ public class CommandConsoleController : MonoBehaviour
             menu.RefreshLevelLocks();
 
         if (changed)
-            AppendOutput("[unlock] 已解锁全部关卡（1 / 2 / 3），进度已保存。/ unlock: all levels unlocked (saved).");
+            AppendOutput("[unlock] 已解锁全部关卡（0 / 1 / 2 / 3），进度已保存。/ unlock: all levels unlocked (saved).");
         else
             AppendOutput("[unlock] 全部关卡此前已解锁。/ unlock: all levels were already unlocked.");
     }
@@ -452,7 +452,7 @@ public class CommandConsoleController : MonoBehaviour
         LevelProgress.ResetProgress();
 
         // ② 游玩进度存档清零：续玩断点（ABOVETHEVOID.ResumeLevel / ResumePart / ResumeSection）
-        //    + 全部关卡最高分（ABOVETHEVOID.HighScore.Level1~3）一次清空，并把会话内的当前位置重置为「不在任何关卡内」。
+        //    + 全部关卡最高分（ABOVETHEVOID.HighScore.Level0~3）一次清空，并把会话内的当前位置重置为「不在任何关卡内」。
         //    必须早于后面的 menu.ShowMenu()：ShowMenu 会结算 Level 3 最高分，先清空才能保证一次 /lock 后主页无最高分残留。
         GameProgress.ClearAll();
 
@@ -486,12 +486,12 @@ public class CommandConsoleController : MonoBehaviour
                          "        / lock: factory reset done — level progress, play progress & best score, settings and editor code wiped. Returning home.");
             CloseAndForceResume();                    // 先收指令框（忽略打开前的暂停 / 冻结状态）
             CodeEditorController.ForceCloseIfOpen();  // 关卡内若代码编辑器还开着，一并收起，避免残留在主页上
-            menu.ShowMenu();                          // 内部会调用 RefreshLevelLocks()，主页按钮立即只剩关卡 1 可玩
+            menu.ShowMenu();                          // 内部会调用 RefreshLevelLocks()，主页按钮立即只剩关卡 0 可玩
         }
         else
         {
-            AppendOutput("[lock] 已恢复出厂设置：关卡进度、游玩进度与最高分、设置、编辑器代码已清空（当前只有关卡 1 可玩）。\n" +
-                         "        / lock: factory reset done — level progress, play progress & best score, settings and editor code wiped (only Level 1 is playable now).");
+            AppendOutput("[lock] 已恢复出厂设置：关卡进度、游玩进度与最高分、设置、编辑器代码已清空（当前只有关卡 0 可玩）。\n" +
+                         "        / lock: factory reset done — level progress, play progress & best score, settings and editor code wiped (only Level 0 is playable now).");
             if (menu != null)
                 menu.RefreshLevelLocks();
         }
@@ -499,8 +499,8 @@ public class CommandConsoleController : MonoBehaviour
 
     /// <summary>
     /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt; [章节]：跳转到指定关卡的分区，
-    /// 可选第三参数 n 表示该分区内的章节序号（1 起）：Level 1 - Part 2 讲解关按页（4 页）、
-    /// Level 1 - Part 3 编辑器入门关按页（8 页）、Level 1 - Part 4 语法课按任务（49 项）、Level 2 - Part 2 API 课按任务（15 项）。
+    /// 可选第三参数 n 表示该分区内的章节序号（1 起）：Level 1 - Part 1 讲解关按页、Level 1 - Part 2 编辑器入门关按页（8 页）、
+    /// Level 1 - Part 1 编程序章按页、Level 1 - Part 2 编辑器入门按页、Level 1 - Part 3 语法课按任务（49 项）、Level 2 - Part 1 方块图鉴按页、Level 2 - Part 2 API 课按任务（15 项）。
     /// 参数非法（非整数 / 章节越界 / 关卡未开放）时只输出提示，不抛异常。
     ///
     /// 与断点续玩存档的优先级：本指令优先级最高。跳转成功时 LevelDirector.JumpTo 会把「本次跳关参数」写入续玩存档，
@@ -511,13 +511,13 @@ public class CommandConsoleController : MonoBehaviour
     {
         if (cmd.Args == null || cmd.Args.Length < 2)
         {
-            AppendOutput("[level] 用法：/level <关卡> <部分> [章节]，如 /level 1 1、/level 1 2 3");
+            AppendOutput("[level] 用法：/level <关卡> <部分> [章节]，如 /level 0 1、/level 1 1 3");
             return;
         }
 
         if (!int.TryParse(cmd.Args[0], out int level) || !int.TryParse(cmd.Args[1], out int part))
         {
-            AppendOutput("[level] 用法：/level <关卡> <部分> [章节]，如 /level 1 1、/level 1 2 3（关卡 / 部分必须为整数）");
+            AppendOutput("[level] 用法：/level <关卡> <部分> [章节]，如 /level 0 1、/level 1 1 3（关卡 / 部分必须为整数）");
             return;
         }
 
@@ -527,12 +527,12 @@ public class CommandConsoleController : MonoBehaviour
         {
             if (!int.TryParse(cmd.Args[2], out section))
             {
-                AppendOutput("[level] 章节参数必须为整数：/level " + level + " " + part + " <章节序号>，如 /level 1 2 3");
+                AppendOutput("[level] 章节参数必须为整数：/level " + level + " " + part + " <章节序号>，如 /level 1 1 3");
                 return;
             }
             if (section < 1)
             {
-                AppendOutput("[level] 章节序号从 1 开始：/level " + level + " " + part + " <章节序号>，如 /level 1 2 1");
+                AppendOutput("[level] 章节序号从 1 开始：/level " + level + " " + part + " <章节序号>，如 /level 1 1 1");
                 return;
             }
         }
@@ -836,7 +836,7 @@ public class CommandConsoleController : MonoBehaviour
         inputText.font = UIFontHelper.LoadForText(inputText.text, inputText.fontSize); // v0.1.1：输入英文指令 → JetBrains Mono
         input.textComponent = inputText;
 
-        Text placeholder = CreateText("Placeholder", inputRt, "输入开发者指令，如 /level 1 1 / help", inputFontSize, UITheme.TextMuted, TextAnchor.MiddleLeft);
+        Text placeholder = CreateText("Placeholder", inputRt, "输入开发者指令，如 /level 0 1 / help", inputFontSize, UITheme.TextMuted, TextAnchor.MiddleLeft);
         Stretch(placeholder.rectTransform);
         placeholder.supportRichText = false;
         placeholder.font = UIFontHelper.LoadForText(placeholder.text, placeholder.fontSize); // v0.1.1：占位含中文 → Noto Sans CJK SC

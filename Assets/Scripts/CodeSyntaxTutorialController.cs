@@ -6,7 +6,7 @@ using UnityEngine.UI;
 
 /// <summary>
 /// 代码编辑器内的顺序式 C# 教学（两门课程，均由 LevelDirector 调用 Begin(course) 进入）：
-///   - Course.Grammar（Level 1 - Part 4）：C# 基础语法全套 49 项 —— 注释、变量声明与类型、var 隐式类型推断、const 常量、
+///   - Course.Grammar（Level 1 - Part 3）：C# 基础语法全套 49 项 —— 注释、变量声明与类型、var 隐式类型推断、const 常量、
 ///     算术运算符、条件与流程控制（关系 / 逻辑运算符 + if / if-else / switch 合成一章）、
 ///     for 循环（三要素）、一维数组、List 集合、foreach 遍历、while 循环、do … while 循环、
 ///     方法定义与参数（局部函数）、方法返回值 return、字符串拼接、string.Format、
@@ -422,7 +422,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
     private GameObject panelRoot;      // 编辑器打开时显示的任务卡（底部指导框）
     private float appliedSplitHeight = -1f; // 最近一次应用的对半分栏高度（用于窗口尺寸变化时重算）
     private RectTransform hintRect;    // 提示条矩形（按文案自适应宽高）
-    private Text headlineText;         // 「关卡 1 · 第 4 部分 · C# 基础语法教学」
+    private Text headlineText;         // 「关卡 1 · 第 3 部分 · C# 基础语法教学」
     private Text progressText;         // 「任务 2/16」
     private Text taskNameText;         // 当前任务名
     private Text bodyText;             // 左栏：目标 / 提示 / 判定 + 完成条件状态
@@ -3229,7 +3229,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             CurrentIndex = completedIndex; // 兜底：理论上走不到
 
         // 断点续玩：章节（任务）推进即把「关卡 + 分区 + 章节」写入存档并 Save()
-        //   · 语法课（Course.Grammar）= Level 1 - Part 4，API 课（Course.Api）= Level 2 - Part 2；
+        //   · 语法课（Course.Grammar）= Level 1 - Part 3，API 课（Course.Api）= Level 2 - Part 2；
         //   · CurrentIndex 是 0 基任务序号，存档中的 section 是 1 起章节号，故 +1；
         //   · 整关通关的情况已在上面清掉断点，这里只处理「还有没做完的」。
         GameProgress.GetCourseLocation(CurrentCourse, out int progressLevel, out int progressPart);
@@ -3272,7 +3272,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         if (reallyAll)
         {
             // 逐级解锁：本次课程全部完成即视为整关通关（PlayerPrefs 持久化，跨重启保留）
-            //   语法课（Level 1 - Part 4）→ 关卡 1 通关，解锁关卡 2；
+            //   语法课（Level 1 - Part 3）→ 关卡 1 通关，解锁关卡 2；
             //   API 课（Level 2 - Part 2）→ 关卡 2 通关，解锁关卡 3。
             LevelProgress.MarkLevelCompleted(CurrentCourse == Course.Api ? 2 : 1);
 
@@ -3434,8 +3434,8 @@ public class CodeSyntaxTutorialController : MonoBehaviour
             else
             {
                 headlineText.text = zh
-                    ? "关卡 1 · 第 4 部分 · C# 基础语法教学"
-                    : "Level 1 · Part 4 · C# Syntax Tutorial";
+                    ? "关卡 1 · 第 3 部分 · C# 基础语法教学"
+                    : "Level 1 · Part 3 · C# Syntax Tutorial";
             }
         }
 
@@ -3728,7 +3728,7 @@ public class CodeSyntaxTutorialController : MonoBehaviour
         StringBuilder sb = new StringBuilder(main.Length + 320);
         sb.Append(main);
 
-        // 蓝色长条提示：只在 Level 1 - Part 4（语法课）的每一章出现 —— 新手不知道卡顶那条蓝线能拖，
+        // 蓝色长条提示：只在 Level 1 - Part 3（语法课）的每一章出现 —— 新手不知道卡顶那条蓝线能拖，
         // 字号固定后文案过长会被截断，必须先告诉他可以把提示区拉高；API 课及之后不再重复提示。
         if (CurrentCourse == Course.Grammar)
         {

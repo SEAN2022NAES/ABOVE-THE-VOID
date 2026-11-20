@@ -35,8 +35,30 @@ public class FlyingBlockSpawner : MonoBehaviour
     public int bombChance = 120;
 
     [Header("关卡生成开关")]
-    [Tooltip("是否生成蓝色 BOMB 块：Level 1 教学关由 LevelPresentation 关闭（只出红色 ATTACK 块），其他关卡保持开启")]
+    [Tooltip("是否生成蓝色 BOMB 块：Level 0（Part 1 / Part 2）与 Level 1 / Level 2 教学关由 LevelPresentation 关闭（只出红色 ATTACK 块），仅 Level 2 - Part 2 API 课与 Level 3 完整玩法保持开启")]
     public bool bombEnabled = true;
+
+    [Header("远古手感（Level 0 - Part 2 自由玩耍关）")]
+    [Tooltip("远古纯手动版生成间隔（秒）：对齐 v0.1.1 纯鼠标点击版节奏，慢而稀疏，看得清也点得到")]
+    public float legacySpawnInterval = 1.2f;
+    [Tooltip("远古纯手动版飞行速度下限（单位/秒）")]
+    public float legacySpeedMin = 0.5f;
+    [Tooltip("远古纯手动版飞行速度上限（单位/秒）")]
+    public float legacySpeedMax = 1.2f;
+    [Tooltip("远古纯手动版活跃方块上限（与 v0.1.1 早期版本同量级，久玩也不会堆成一片）")]
+    public int legacyMaxBlocks = 40;
+
+    /// <summary>是否已切到远古纯手动版手感参数（由 SetLegacyManualProfile 维护）。</summary>
+    public bool IsLegacyManualProfile
+    {
+        get { return legacyProfileApplied; }
+    }
+
+    private bool legacyProfileApplied;
+    private float savedSpawnInterval;
+    private float savedSpeedMin;
+    private float savedSpeedMax;
+    private int savedMaxBlocks;
 
     /// <summary>所有活跃长方体（生成器与检测器共用登记表）。</summary>
     public readonly List<FlyingBlock> ActiveBlocks = new List<FlyingBlock>();
@@ -179,6 +201,48 @@ public class FlyingBlockSpawner : MonoBehaviour
         nextBlockId = 1;
     }
 
+    /// <summary>
+    /// 切换「远古纯手动版」生成手感（Level 0 - Part 2 自由玩耍关专用，幂等）：
+    /// true → 把生成间隔 / 速度区间 / 活跃上限换成 v0.1.1 纯鼠标点击版的参数（慢、稀疏、上限低，纯手点才点得过来）；
+    /// false → 原样还原进入前的参数，保证其它关卡（含 Level 3 完整玩法）手感完全不受影响。
+    /// 由 LevelDirector 在关卡跳转时统一调用，不在各入口分散硬编码。
+    /// </summary>
+    public void SetLegacyManualProfile(bool legacy)
+    {
+        if (legacy)
+        {
+            if (legacyProfileApplied)
+                return;
+
+            savedSpawnInterval = spawnInterval;
+            savedSpeedMin = speedMin;
+            savedSpeedMax = speedMax;
+            savedMaxBlocks = maxBlocks;
+
+            spawnInterval = Mathf.Max(0.05f, legacySpawnInterval);
+            speedMin = Mathf.Min(legacySpeedMin, legacySpeedMax);
+            speedMax = Mathf.Max(legacySpeedMin, legacySpeedMax);
+            maxBlocks = Mathf.Max(1, legacyMaxBlocks);
+
+            legacyProfileApplied = true;
+            Debug.Log("[Spawner] 已切到远古纯手动手感：间隔 " + spawnInterval + " 秒 / 速度 " + speedMin + "~" + speedMax +
+                      " / 上限 " + maxBlocks + " 块。");
+            return;
+        }
+
+        if (!legacyProfileApplied)
+            return;
+
+        spawnInterval = savedSpawnInterval;
+        speedMin = savedSpeedMin;
+        speedMax = savedSpeedMax;
+        maxBlocks = savedMaxBlocks;
+
+        legacyProfileApplied = false;
+        Debug.Log("[Spawner] 已还原常规生成参数：间隔 " + spawnInterval + " 秒 / 速度 " + speedMin + "~" + speedMax +
+                  " / 上限 " + maxBlocks + " 块。");
+    }
+
     /// <summary>目标 AABB 是否与除 ignore 外的任意活跃长方体重叠（生成与运动防重叠共用）。</summary>
     public bool IsPositionFree(Vector3 center, Vector3 halfExtents, FlyingBlock ignore)
     {
@@ -271,7 +335,7 @@ public class FlyingBlockSpawner : MonoBehaviour
     /// 按配置权重选择类型：红(attack) / 蓝(bomb)。绿色 heal 已彻底移除，任何情况下都不会再生成。
     /// 权重按 attackChance : bombChance 归一化到 100%，roll ∈ [0,100) 必然被其中一支覆盖，
     /// 不存在"两者之和不足 100 的空白区间"。当前 160 : 120 → 红 57.1%、蓝 42.9%。
-    /// bombEnabled = false（Level 1 教学关）时只生成红色 ATTACK 块。
+    /// bombEnabled = false（Level 0 Part 1 / Part 2、Level 1 / Level 2 教学关）时只生成红色 ATTACK 块。
     /// </summary>
     private FlyingBlock.BlockType PickBlockType()
     {

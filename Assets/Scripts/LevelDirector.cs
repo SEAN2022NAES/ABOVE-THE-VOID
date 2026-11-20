@@ -2,8 +2,8 @@
 
 /// <summary>
 /// 关卡跳转导演（开发者指令 /level 专用）：
-///   - 负责从任意状态跳转到指定「关卡 - 分区」（已实现 level 1 - part 1 引导教学 /
-///     level 1 - part 2 编程序章 / level 1 - part 3 代码编辑器界面入门 / level 1 - part 4 C# 语法课 / level 2 - part 1 方块图鉴 /
+///   - 负责从任意状态跳转到指定「关卡 - 分区」（已实现 level 0 - part 1 手动体验关 / level 0 - part 2 自由玩耍关 /
+///     level 1 - part 1 编程序章 / level 1 - part 2 代码编辑器界面入门 / level 1 - part 3 C# 语法课 / level 2 - part 1 方块图鉴 /
 ///     level 2 - part 2 炮台 API 课 / level 3 - part 1）；
 ///   - 跳转动作：隐藏主页（若显示）、重置玩家到开局、清空场上长方体并重新开始生成、
 ///     按分区配置顶部时间提示显隐；
@@ -11,6 +11,30 @@
 /// </summary>
 public static class LevelDirector
 {
+    /// <summary>
+    /// 当前是否处于「只能手动游玩」的分区（Level 0 - Part 1 手动体验关 / Level 0 - Part 2 自由玩耍关）。
+    /// 该关禁止打开代码编辑器：CodeEditorController 的 Enter / Alt+O 拦截会因此一律不响应，
+    /// 处理方式与「讲解页阅读中（BlockIntroController.Reading）」同类 —— 直接 return，连提示都不给。
+    /// </summary>
+    public static bool ManualPlayOnly { get; private set; }
+
+    /// <summary>
+    /// 标记「当前处于只能手动游玩的分区」：由主页 / 教学入口在进入 Level 0 - Part 1 时调用
+    /// （开发者指令 /level 0 1 走 JumpTo，已在内部置位）。置位后代码编辑器的 Enter / Alt+O 与 Open() 一律无效。
+    /// </summary>
+    public static void MarkManualPlayOnly()
+    {
+        ManualPlayOnly = true;
+    }
+
+    /// <summary>
+    /// 退出关卡回到主页时清除「只能手动游玩」标记：避免主页停留期间仍把代码编辑器锁在禁编辑状态。
+    /// </summary>
+    public static void ClearManualPlayOnly()
+    {
+        ManualPlayOnly = false;
+    }
+
     /// <summary>跳转到指定关卡分区（从该分区第 1 章开始）。</summary>
     public static string JumpTo(int level, int part)
     {
@@ -19,25 +43,31 @@ public static class LevelDirector
 
     /// <summary>
     /// 跳转到指定关卡分区，并可直接定位到该分区第 section 个 part 章节（1 起；section &lt;= 0 表示从第 1 章开始）。
-    /// 章节拆分仅存在于教学关（Level 1 - Part 2 / Part 3 讲解页 / Level 1 - Part 4 语法课 / Level 2 - Part 1 方块图鉴 / Level 2 - Part 2 API 课），
+    /// 章节拆分仅存在于教学关（Level 1 - Part 1 讲解页 / Level 1 - Part 2 讲解页 / Level 1 - Part 3 语法课 / Level 2 - Part 1 方块图鉴 / Level 2 - Part 2 API 课），
     /// 其他关卡传入 section 时按「无章节拆分、从开头进入」处理并提示。
     /// </summary>
     public static string JumpTo(int level, int part, int section)
     {
-        bool level1 = (level == 1 && part == 1);        // 引导教学关（全程手动点方块）
-        bool levelIntro = (level == 1 && part == 2);    // 编程序章讲解关（多页阅读，最后一页直接进语法课）
-        bool levelEditorIntro = (level == 1 && part == 3); // 代码编辑器界面入门讲解关（8 页，教他怎么用编辑器）
-        bool levelGrammar = (level == 1 && part == 4);  // C# 基础语法教学关（代码编辑器内教学，49 项任务）
-        bool levelBlockIntro = (level == 2 && part == 1); // 方块图鉴关（旋转立方体 + 多页阅读，最后一页直接进 API 课）
-        bool levelApi = (level == 2 && part == 2);      // 炮台 API 调用教学关（代码编辑器内教学，15 项任务）
-        bool level3 = (level == 3 && part == 1);        // 完整玩法关（跳过教学）
-        if (!level1 && !levelIntro && !levelEditorIntro && !levelGrammar && !levelBlockIntro && !levelApi && !level3)
-            return "[level] 该关卡部分尚未开放（当前已实现：level 1 - part 1、level 1 - part 2、level 1 - part 3、" +
-                   "level 1 - part 4、level 2 - part 1、level 2 - part 2、level 3 - part 1）。";
+        // 关卡编号重排（新增 Level 0 手动体验关，原 Level 1 整体后移）：原 1-1 → 0-1、原 1-2 → 1-1、原 1-3 → 1-2、原 1-4 → 1-3
+        bool level0Manual = (level == 0 && part == 1);     // 手动体验关（原「引导教学关」：全程手动点方块，可鼠标左键开火）
+        bool level0Free = (level == 0 && part == 2);       // 自由玩耍关（承接 Part 1 教学结束：纯手动点方块、可长时间玩、不出蓝块）
+        bool level1 = (level == 1 && part == 1);           // 编程序章讲解关（原 Level 1 - Part 2）
+        bool levelEditorIntro = (level == 1 && part == 2); // 代码编辑器界面入门讲解关（8 页，原 Level 1 - Part 3）
+        bool levelGrammar = (level == 1 && part == 3);     // C# 基础语法教学关（代码编辑器内教学，49 项任务，原 Level 1 - Part 4）
+        bool levelBlockIntro = (level == 2 && part == 1);  // 方块图鉴关（旋转立方体 + 多页阅读，最后一页直接进 API 课）
+        bool levelApi = (level == 2 && part == 2);         // 炮台 API 调用教学关（代码编辑器内教学，15 项任务）
+        bool level3 = (level == 3 && part == 1);           // 完整玩法关（跳过教学）
+        if (!level0Manual && !level0Free && !level1 && !levelEditorIntro && !levelGrammar && !levelBlockIntro && !levelApi && !level3)
+            return "[level] 该关卡部分尚未开放（当前已实现：level 0 - part 1、level 0 - part 2、level 1 - part 1、" +
+                   "level 1 - part 2、level 1 - part 3、level 2 - part 1、level 2 - part 2、level 3 - part 1）。";
+
+        // 手动体验关标记：供 CodeEditorController 拦下 Enter / Alt+O（与讲解页只读分支同类处理）。
+        // Level 0 的两个 part 都是「只用鼠标玩」：Part 1 教学 + Part 2 自由玩耍，按 Enter 一律拉不起代码编辑器。
+        ManualPlayOnly = level0Manual || level0Free;
 
         // 章节参数校验：必须在改动任何状态之前完成，越界只提示、不跳转、不崩
         int chapterCount = 0;
-        if (levelIntro)
+        if (level1)
             chapterCount = CodeIntroTutorialController.PageCount; // 讲解关的「章节」= 讲解页
         else if (levelEditorIntro)
             chapterCount = EditorIntroTutorialController.PageCount; // 编辑器入门关的「章节」= 讲解页
@@ -76,7 +106,7 @@ public static class LevelDirector
 
         // 代码编辑器复位（必须在下面各教学 Begin() 之前）：离开上一关时把代码文本、编译结果（runner）、
         // 撤销栈、defaultCodeFilled 全部清回本关初始状态。
-        // 之前没有任何收尾，导致 Level 3 - Part 1 编译运行后跳进 Level 1 - Part 1，上一关的 Run() 仍在每帧驱动炮台。
+        // 之前没有任何收尾，导致 Level 3 - Part 1 编译运行后跳进 Level 0 - Part 1，上一关的 Run() 仍在每帧驱动炮台。
         CodeEditorController levelEditor = Object.FindObjectOfType<CodeEditorController>();
         if (levelEditor != null)
             levelEditor.ResetForLevelChange();
@@ -93,42 +123,54 @@ public static class LevelDirector
 
         TutorialController tutorial = Object.FindObjectOfType<TutorialController>();
 
-        // Level 3 完整玩法 / Level 1 Part 2 讲解关 / Level 1 Part 3 编辑器入门 / Level 2 Part 1 图鉴关 / Level 1 Part 4 语法教学 / Level 2 Part 2 API 教学：
-        // 若正处 Part 1 引导教学，先退出教学，确保教学面板隐藏、Started=false（E 键时间冻结恢复可用；编辑器教学关还需编辑器可打开）
-        if ((level3 || levelIntro || levelEditorIntro || levelBlockIntro || levelGrammar || levelApi) && tutorial != null)
+        // Level 0 Part 1 手动体验关 / Level 1 Part 1 讲解关 / Level 1 Part 2 编辑器入门 / Level 1 Part 3 语法教学 / Level 2 Part 1 图鉴关 / Level 2 Part 2 API 教学 / Level 3 完整玩法：
+        // 若正处 Level 0 Part 1 手动体验关的教学，先退出教学，确保教学面板隐藏、Started=false（E 键时间冻结恢复可用；编辑器教学关还需编辑器可打开）
+        // 跳到 Level 0 Part 2 自由玩耍关同样要退出 Part 1 教学：否则教学面板与「打满 5 个」的统计会跟着自由关一起残留。
+        if ((level3 || level1 || levelEditorIntro || levelBlockIntro || levelGrammar || levelApi || level0Free) && tutorial != null)
             tutorial.ExitToMenu();
 
-        // 清空场上所有长方体；教学关由 Tutorial / 语法教学接管生成时机（先不生成），Level 3 先进入开场停顿
+        // 清空场上所有长方体；手动体验关 / 教学关由 Tutorial / 语法教学接管生成时机，Level 3 先进入开场停顿
         FlyingBlockSpawner spawner = FlyingBlockSpawner.Instance;
         if (spawner != null)
         {
             spawner.ClearAllBlocks();
-            if (level1)
+            if (level0Manual)
             {
+                spawner.SetLegacyManualProfile(false); // 常规生成节奏（Part 1 由教学在开火后开始出块）
                 if (tutorial != null)
                     spawner.SuspendSpawning();
                 else
                     spawner.BeginSpawning();
             }
+            else if (level0Free)
+            {
+                // Level 0 Part 2 自由玩耍关：重开会话（清零计数与编号）→ 切远古纯手动手感 → 立即开始持续出块。
+                // 不设开局缓冲（delay = 0）：玩家刚从教学结语淡入过来，落地就该有方块可点。
+                spawner.SetLegacyManualProfile(true);
+                spawner.ResetSession();
+                spawner.EndOpeningHold();   // 防御：确保没有残留开场停顿挡住生成
+                spawner.BeginSpawning(0f);
+            }
             else
             {
+                spawner.SetLegacyManualProfile(false); // 离开自由玩耍关：还原常规手感参数（幂等）
                 spawner.ResetSession();     // Level 3 / 讲解关 / 语法课 / API 关：重开会话（清零计数与编号）
                 spawner.SuspendSpawning();  // 先暂停生成：Level 3 等玩家代码调用 GameStart() 开场，编辑器教学关等全部任务完成
             }
         }
 
-        // Level 1 Part 1 为引导教学关：启动教学流程（重复跳转即重学）
-        if (level1 && tutorial != null)
+        // Level 0 Part 1 为手动体验关（原引导教学关）：启动教学流程（重复跳转即重学）
+        if (level0Manual && tutorial != null)
             tutorial.StartTutorial();
 
-        // 章节起始序号（0 基）：/level 1 3 3 与 /level 2 2 3 表示从该分区第 3 个章节开始
+        // 章节起始序号（0 基）：/level 1 1 3 与 /level 2 2 3 表示从该分区第 3 个章节开始
         int startIndex = useSection ? (section - 1) : 0;
 
-        // Level 1 Part 2 为「编程序章」讲解关：进入即显示讲解卡片（重复进入即回到第一页 = 重置阅读进度）
-        if (levelIntro)
+        // Level 1 Part 1 为「编程序章」讲解关：进入即显示讲解卡片（重复进入即回到第一页 = 重置阅读进度）
+        if (level1)
             CodeIntroTutorialController.Begin(startIndex);
 
-        // Level 1 Part 3 为「代码编辑器界面入门」讲解关：进入即显示编辑器教学卡片（重复进入即回到第一页）
+        // Level 1 Part 2 为「代码编辑器界面入门」讲解关：进入即显示编辑器教学卡片（重复进入即回到第一页）
         if (levelEditorIntro)
             EditorIntroTutorialController.Begin(startIndex);
 
@@ -136,7 +178,7 @@ public static class LevelDirector
         if (levelBlockIntro)
             BlockIntroController.Begin(startIndex);
 
-        // Level 1 Part 4 为 C# 基础语法教学关：进入即启用编辑器内教学序列（重复进入即重置进度）
+        // Level 1 Part 3 为 C# 基础语法教学关：进入即启用编辑器内教学序列（重复进入即重置进度）
         if (levelGrammar)
             CodeSyntaxTutorialController.Begin(CodeSyntaxTutorialController.Course.Grammar, startIndex);
 
@@ -144,7 +186,7 @@ public static class LevelDirector
         if (levelApi)
             CodeSyntaxTutorialController.Begin(CodeSyntaxTutorialController.Course.Api, startIndex);
 
-        // Level 1（Part 1 / 2 / 3）与 Level 2（Part 1 / 2）不显示顶部时间提示（Level 3 显示，保留实现）；Level 3 重新开始计时
+        // Level 0（手动体验关）与 Level 1（Part 1 讲解 / Part 2 编辑器入门 / Part 3 语法课）与 Level 2（Part 1 图鉴 / Part 2 API）不显示顶部时间提示（Level 3 显示，保留实现）；Level 3 重新开始计时
         TimeHintController timeHint = Object.FindObjectOfType<TimeHintController>();
         if (timeHint != null)
         {
@@ -153,18 +195,24 @@ public static class LevelDirector
                 timeHint.ResetTimer(); // Level 3：顶部时间提示重新从 00:00 开始
         }
 
-        // 炮台实体显隐：Level 1 教学关不显示实体炮台（原点保留炮台功能）；
+        // 炮台实体显隐：Level 0 / Level 1 教学关不显示实体炮台（原点保留炮台功能）；
         // Level 3 完整玩法关同样先隐藏：等玩家代码调用 tower.GameStart() 开场后才开始出块（避免跳转瞬间炮台就出现）
         CodeTower tower = Object.FindObjectOfType<CodeTower>();
         if (tower != null)
             tower.SetVisualVisible(false);
 
-        // 关卡表现开关：Level 1 Part 1 / Part 2（讲解关）不显示 Score / print 输出面板、只出红块；
-        // Level 2 Part 1 方块图鉴关同样按最精简表现（纯阅读，不出方块）；
-        // Part 3 编辑器入门 / Part 4 语法教学关不显示 Score 但显示 print 荧幕（观察 PrintLine 输出）、只出红块；
-        // Level 2 Part 2 API 教学关不显示 Score、显示 print 荧幕，并允许蓝块（教学 Type 取值）；
-        // Level 3 全部恢复
-        if (level1 || levelIntro || levelBlockIntro)
+        // 关卡表现开关：
+        //   Level 0 Part 1 手动体验关 —— 显示 Score HUD 与生命条（life），不显示 print 荧幕，**禁用蓝色 BOMB 块**（只出红块）；
+        //   Level 0 Part 2 自由玩耍关 —— 同 Part 1（HUD + 生命条、只出红块），差别只在生成节奏（远古纯手动手感）；
+        //   Level 1 Part 1 讲解关 / Level 2 Part 1 方块图鉴关 —— 不显示 Score / print 面板、只出红块（纯阅读）；
+        //   Level 1 Part 2 编辑器入门 / Part 3 语法教学 —— 不显示 Score 但显示 print 荧幕（观察 PrintLine 输出）、只出红块；
+        //   Level 2 Part 2 API 教学关 —— 不显示 Score、显示 print 荧幕，并允许蓝块（教学 Type 取值）；
+        //   Level 3 全部恢复
+        if (level0Manual)
+            LevelPresentation.ApplyLevel0();
+        else if (level0Free)
+            LevelPresentation.ApplyLevel0Free();
+        else if (level1 || levelBlockIntro)
             LevelPresentation.ApplyLevel1();
         else if (levelEditorIntro || levelGrammar)
             LevelPresentation.ApplyLevel2();  // 编辑器入门 / 语法课都要看得见 print 荧幕（F6 后的输出）
@@ -174,13 +222,15 @@ public static class LevelDirector
             LevelPresentation.ApplyLevel3();
 
         // 计分：每次跳转关卡都重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
+        // 漏块扣分开关必须在这里显式下发：只有 Level 0（Part 1 教学 / Part 2 自由玩耍）关闭（红块撞原点不扣分），其它关卡一律恢复扣分
+        ScoreManager.SetLeakPenaltyEnabled(!(level0Manual || level0Free));
         ScoreManager.ResetAll();
 
         // 生命值：每次跳转关卡都重开一局生命（默认 5 点），并清掉上一局可能残留的 Game Over 面板
         LivesManager.ResetAll();
 
-        // 鼠标左键手动激光：只有 Level 1 - Part 1（引导教学关，教学 Step.FireLaser 需要左键开火）允许，
-        // 其余所有关卡（Part 2 / Part 3 讲解关 / Part 4 语法课 / API 关 / Level 3 完整玩法关）一律禁用。
+        // 鼠标左键手动激光：Level 0 的两个 part（Part 1 手动体验关 / Part 2 自由玩耍关，主玩法都是鼠标左键开火打方块）允许，
+        // 其余所有关卡（Part 1 讲解关 / Part 2 编辑器入门 / Part 3 语法课 / API 关 / Level 3 完整玩法关）一律禁用。
         // 仅影响「左键 → FireLaser」手动链路，不影响 tower.Fire 等自动化调用。
         CommandConsoleController.SetManualLaserAllowed(level, part);
 
@@ -213,8 +263,8 @@ public static class LevelDirector
         // 断点续玩：位置成功应用后写入存档（关卡 + 分区 + 章节），并 PlayerPrefs.Save()
         //   · /level 跳关优先级最高：这里用「本次跳关参数」无条件覆盖旧存档，跳关后的位置就是新的续玩点；
         //   · 主页点击关卡进入时读的就是这份刚被覆盖的存档，因此绝不可能出现「跳关后又被旧存档拽回旧位置」；
-        //   · 无章节拆分的分区（Level 1 - Part 1、Level 3 - Part 1）section 存 0，表示从该分区开头进入；
-        //     有章节拆分的分区（Part 2 / Part 3 讲解页 / Part 4 语法课 / API 课）section 为 1 起的页码或任务号。
+        //   · 无章节拆分的分区（Level 0 - Part 1 手动体验关、Level 0 - Part 2 自由玩耍关、Level 3 - Part 1）section 存 0，表示从该分区开头进入；
+        //     有章节拆分的分区（Level 1 - Part 1 / Part 2 讲解页、Level 1 - Part 3 语法课、Level 2 - Part 2 API 课）section 为 1 起的页码或任务号。
         GameProgress.SaveResume(level, part, useSection ? section : 0);
 
         Debug.Log("[LevelDirector] 已跳转 Level " + level + " - Part " + part +

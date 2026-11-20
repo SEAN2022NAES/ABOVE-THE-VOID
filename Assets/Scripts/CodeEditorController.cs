@@ -271,7 +271,7 @@ public class CodeEditorController : MonoBehaviour
     /// <summary>
     /// 教学用：运行时错误（RE）真的发生那一刻，如果编辑器此刻是关着的（编译成功后编辑器会自动关闭，
     /// 代码在后台跑），就把编辑器重新打开并把紫色 RE 窗口展开 —— 否则玩家只会在屏幕角落看到一行日志，
-    /// 根本看不到「紫窗」长什么样。Level 1 - Part 3 第 6 页靠它把 RE 演给玩家看。
+    /// 根本看不到「紫窗」长什么样。Level 1 - Part 2 第 6 页靠它把 RE 演给玩家看。
     /// 默认关闭，讲完那一页请记得置回 false。
     /// </summary>
     public bool AutoOpenOnRuntimeError { get; set; }
@@ -614,10 +614,12 @@ public class CodeEditorController : MonoBehaviour
         // Enter 开关：关闭时按 Enter 打开；打开时若输入框未聚焦则按 Enter 关闭（聚焦时 Enter 交给输入框换行，便于编写多行代码）
         if (!IsOpen)
         {
-            // Level 1 - Part 2「编程序章」讲解关 / Level 2 - Part 1「方块图鉴」关：正在读讲解页时
+            // Level 1 - Part 1「编程序章」讲解关 / Level 2 - Part 1「方块图鉴」关：正在读讲解页时
             // 不响应 Enter / Ctrl+O 打开编辑器。否则读字途中按一下 Enter 就会弹出全屏编辑器，
             // 讲解 / 图鉴面板被盖住，玩家会以为界面卡死。
-            if (CodeIntroTutorialController.Reading || BlockIntroController.Reading)
+            // Level 0 - Part 1 手动体验关：这一关的设计就是「只用鼠标玩」，全程不允许打开代码编辑器，
+            // 因此与讲解页只读分支同类处理 —— 直接 return，Enter / Alt+O 一律无效（连提示都不弹）。
+            if (CodeIntroTutorialController.Reading || BlockIntroController.Reading || LevelDirector.ManualPlayOnly)
                 return;
 
             // 一键直接打开代码编辑器（组合键不易误触，且不受 Enter 抑制 / 输入焦点状态影响）
@@ -654,7 +656,7 @@ public class CodeEditorController : MonoBehaviour
                 return;
             if ((Input.GetKeyDown(openKey) || Input.GetKeyDown(openKeyAlt)) && !IsInputFocused())
             {
-                // Level 1 - Part 3「编辑器界面入门」：这一关 Enter 是卡片里指定的「打开编辑器」键，
+                // Level 1 - Part 2「编辑器界面入门」：这一关 Enter 是卡片里指定的「打开编辑器」键，
                 // 玩家照着提示连按时会把已经打开的编辑器又关掉（看着像按 Enter 被踢出去）。
                 // 教学期间 Enter 只负责打开，关闭统一走 Esc 或标题栏的关闭按钮。
                 if (EditorIntroTutorialController.Reading)
@@ -1015,6 +1017,11 @@ public class CodeEditorController : MonoBehaviour
 
         // 限制：主页（Home 面板可见）状态下不打开（Enter 在主页完全无反应）
         if (IsMainMenuBlocking())
+            return;
+
+        // 限制：Level 0 - Part 1 手动体验关全程禁止打开代码编辑器
+        // （这一关的设计目标就是「只用鼠标玩」，Open 走 UI 按钮 / 其它代码路径调用时同样必须挡住）
+        if (LevelDirector.ManualPlayOnly)
             return;
 
         // 限制：教学进行中不弹

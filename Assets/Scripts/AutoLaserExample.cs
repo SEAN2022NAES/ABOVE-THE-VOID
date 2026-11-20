@@ -1,9 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 自动化激光示例（教学引子）：用 C# 让程序自动瞄准并发射激光。
 ///
-/// 教学对应关系（Level 1 - Part 1 最后一步「引出 C# 自动化激光」）：
+/// 教学对应关系（Level 0 - Part 1 手动体验关最后一步「引出 C# 自动化激光」）：
 ///   1. 从玩家视角相机发射一条射线（与鼠标左键同一准心方向）；
 ///   2. 若射线命中 FlyingBlock，则调用 CommandConsoleController.FireLaser(...) 自动开火；
 ///   3. FireLaser 是公开接口，与鼠标左键共用同一套激光逻辑（每击吃掉 1 层，层数 = 该方块最大 HP，吃满即消灭）。

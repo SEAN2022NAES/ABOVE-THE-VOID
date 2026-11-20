@@ -11,12 +11,96 @@ AIGC:
 
 # ABOVE THE VOID - Unity 3D Coordinate System Framework
 
-Current version: **v0.2.6**
+Current version: **v0.3.0**
 
 > **Licence / 许可**：Non-commercial use (study, teaching, research, non-profit open source) is free with
 > attribution and no monetisation of any kind; **commercial use requires a prior written licence**.
 > See [LICENSE](LICENSE) and [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). © 2026 Ma Yixiao (Sean Ma). All rights reserved.
 > **非商业用途免费（须署名、禁任何盈利场景），商业用途必须事先取得书面授权。** 详见下方「12. License / 许可」。
+
+### v0.3.0
+
+**Level 0 - Part 1 manual play**
+
+- The former `Level 1 - Part 1` prologue became a playable level of its own: `TutorialController` still walks the player through `Q` (soul-cam), `WASD` / `Space` / `C` movement and the left-click laser, keeps the "blue `BOMB` block - never touch it" card (`bombWarningHoldSeconds` 5.5 s), counts `targetKills` (5) destroyed blocks and then hands over to Part 2 through `ScreenFade.PlayTransition(transitionFadeOutSeconds` 0.35, `transitionFadeInSeconds` 0.5) behind a one-shot flag, so the fade cannot fire twice.
+- `LevelPresentation.ApplyLevel0()` shows the score HUD and the life bar with `bombEnabled` off (only red `ATTACK` blocks spawn), and `ScoreManager.SetLeakPenaltyEnabled(false)` keeps leaked blocks from costing score in either Level 0 part.
+- The whole part is marked `LevelDirector.MarkManualPlayOnly()`: `Enter`, `Alt+O` and the `Open` entry of the code editor all return early, so the player cannot open code while the hands-on guide is still running.
+
+**Level 0 - Part 2 free play**
+
+- New endless part for pure left-click play: `LevelPresentation.ApplyLevel0Free()` reuses the same HUD / life layout without the guide cards, while `FlyingBlockSpawner.SetLegacyManualProfile(true)` swaps in the hand-play numbers of the early build (`legacySpawnInterval` 1.2 s, speed 0.5 ~ 1.2, `legacyMaxBlocks` 40) and restores the saved profile on `SetLegacyManualProfile(false)`, so no parameters leak between parts.
+- Manual laser is legal in exactly these two parts: `CommandConsoleController` gates it on `level == 0 && (part == 1 || part == 2)`, and `/level 0 1` / `/level 0 2` are listed in the console help along with the renumbered teaching line.
+
+**Level 1 - renumbered**
+
+- The teaching line is now Part 1 (programming prologue) / Part 2 (editor intro) / Part 3 (C# syntax course) instead of the old 2 / 3 / 4, with `GameProgress.MaxPart` = 3, `LevelProgress.MinLevel` = 0, `MaxLevel` covering the four levels 0-3, and `NoLevel` / `NoCompleted` (`-1`) as the "no verified progress" sentinels.
+- Existing saves are pulled forward once by `GameProgress.MigrateLevel0ShiftKey`: the old 1-1 becomes Level 0 - Part 1 and the old Part 2 / 3 / 4 map to the new 1 / 2 / 3. The migration runs before the "does this record belong to this part" check and is marked by a one-shot PlayerPrefs key, so progress is not shifted a second time on later launches.
+
+**Level presentation**
+
+- `LevelPresentation` gained the `ApplyLevel0()` / `ApplyLevel0Free()` presets on top of the four flags of `Apply(hudVisible, printScreenVisible, bombEnabled, livesEnabled)`, so the HUD, the print pane, the blue blocks and the life bar can be switched independently.
+
+**Main menu - author GitHub**
+
+- `MainMenuController.BuildUI` adds an `AuthorGitHubRow` directly below the author line: a 1200 x 28 row at the same centre anchor, laid out by a `HorizontalLayoutGroup` (`MiddleCenter`, 10 px spacing) that packs the official Octocat mark icon and the `AuthorGitHub` text (20 pt, `UITheme.TextSub`) left to right, so the icon always sits immediately left of the wording and the pair stays centred in both languages.
+- The icon is an `Image` with `LayoutElement` locked to 24 x 24 (square, never stretched by the text length) whose sprite comes from `Resources/Sprites/github-mark.png` — a 256 x 256 white mark on a transparent background, tinted through `Image.color` (same colour as the text) so it reads on the dark home screen. `LoadGitHubMarkSprite()` tries `Resources.Load<Sprite>` first, then wraps the texture with `Sprite.Create`, and only if both fail falls back to `BuildFallbackGitHubMark()`, which draws a simplified mark at runtime so the row never loses its icon.
+- Both the icon and the text are click-through links via `MakeClickableLink` / `MakeClickableIcon`: a left click on either calls `OpenAuthorGitHub()`, which runs `Application.OpenURL(AuthorGitHubUrl)` on `https://github.com/SEAN2022NAES`; hovering tints the icon and the text with the accent colour and leaving restores `UITheme.TextSub`.
+- Language switches rebuild the row immediately (`LayoutRebuilder.ForceRebuildLayoutImmediate` after the text / font refresh), so the icon does not lag or drift while the labels change; window resizing is handled by the shared `CanvasScaler` (`ScaleWithScreenSize`, 1920 x 1080), so the icon and its spacing scale with the text.
+- The author line now signs `作者  ·  SEAN MA` / `Author  ·  SEAN MA` (`AuthorName`), with the handle `github.com/SEAN2022NAES` (`AuthorGitHubHandle`) carried by the link row in both languages.
+
+**Main menu - version label**
+
+- A permanent version label sits in the bottom-left corner of the home screen (`Version` text, 18 pt, `UITheme.TextMuted`, anchored to the bottom-left corner, 220 px in from the left edge and 26 px above the bottom) and is filled from the new single source of truth, so it reads `版本  v0.3.0` / `Version  v0.3.0`.
+- `Assets/Scripts/GameVersion.cs` holds `Number` (`"0.3.0"`) and `Display` (`"v" + Number`); `ProjectSettings` `bundleVersion` was bumped to `0.3.0` to match, and the label is refreshed together with the other home-screen texts in the language / font pass.
+
+### v0.2.7
+
+**Tutorials - editor intro**
+
+- Added `EditorIntroTutorialController`, an 8-page `Level 1 - Part 2` course that teaches the editor itself before any C# syntax: how to open it (`Enter` / `Alt+O`), the five regions (title bar, line numbers, code area, red CE pane, purple RE pane and the split line), the caret and line numbers, `F6` compile-and-run, how to tell a red compile error from a purple run-time error, and the close / load / export keys.
+- Pages 1 / 3 / 4 are gated by real actions (open the editor, put the caret into the code area, press `F6`), so `下一页` refuses to advance until the step is actually done; while the editor is open the card collapses to a narrow top strip (`Compact`) and expands back on close; `S` skips the course, `/level 1 2 n` jumps to page n, `PageCount` = 8.
+
+**Tutorials - C# syntax course**
+
+- `Course.Grammar` was expanded to the full 49-task C# syllabus (comments, declarations and types, `var`, `const`, operators, `if` / `else`, `switch`, `for` / `while` / `do`, arrays and `List<T>`, methods and so on), each task still passing on "the editor contains the target syntax **and** this compile succeeds", with the same three detail pages (writing, hand-holding, code animation) and the `‹ 细节 1/3 ›` pager on the card.
+
+**Tutorials - cannon API course**
+
+- `Course.Api` covers 15 tasks with same-family members merged into one lesson (`Print` / `PrintLine` / `ClearPrint`, the `GetAllObjects()` fields, `Fire(normal)`, `GetFireCooldown()`, `GameStart()`, `SetVisualVisible` / `SetPrintScreenVisible`); the receiver in the sample lines is no longer hard-coded to `tower.` but matched through `ApiRecv`, so a variable the player named anything still counts.
+
+**Tutorials - Detail 3 diagrams**
+
+- The third detail page learned to draw diagrams: `DiagramScene` / `DiaNode` / `DiaEdge` / `DiaStep` / `DiaTone` describe boxes and arrows, and concept-type tasks (control flow, call chains, mapping tables, relations) light them up step by step with a one-line "why this happens" narration (the `DS(...)` step scripts) instead of only replaying code.
+- Diagrams share the memory page's slot and navigation: `PageCountOf` prefers `Mem` and falls back to `Dia`, `← →` still pages and `↓` still steps, the header "怎么读这张图" reuses one row (`DiaHeaderH` 46 px), and the stage is pre-built from pools of 14 boxes and 20 edges.
+
+**Code editor - GlobalCode block**
+
+- The editor now understands an in-house `GlobalCode { ... }` block (`GlobalBlockKeyword`, `ParseGlobalCode`): its declarations are hoisted to class level so they survive frames as fields, while everything else stays inside `Run(tower)`; the block is blanked in place so line numbers do not move, and a `templateLineToUser` map points template lines back to the player's own lines.
+- Misuse fails before the compiler runs, with bilingual messages: a missing `{`, an unclosed `}`, more than one block, `tower` inside the block and the old `my_global` / `code_global` spellings are all called out, and the hint spells the right form `GlobalCode { int count = 0; }`.
+- `GlobalCode` is highlighted in its own blue (`UITheme.SyntaxGlobal`, `#4C8CFF`, `UITheme.HexGlobal`) instead of the native keyword cyan, and `DEFAULT_CODE` / `DEFAULT_CODE_EN` now open with `GlobalCode { bool gameStarted = false; }` as the worked example.
+
+**Block guide - cube faces**
+
+- Cube face labels are no longer sized by guessing: `FitFaceLabel` measures the real `TextMesh` mesh bounds and sets `localScale` so the text fits inside `FaceTextMaxWidth` (0.80) of the 1-unit face, while `characterSize` stays pinned to `FaceTextBaseSize`; the label is pushed out by `FaceTextZ` (0.02) and re-fitted every frame after the text or the font changes, which removes both the "one frame of giant text" and the "words sinking into the face" cases.
+- Face quads are built as double-wound geometry - one layer that stays visible whether the material culls back, front or nothing - so no co-planar second face can z-fight and no label pops out when the cube turns away.
+
+**Cannon API - opening gate**
+
+- Added `LevelOpeningGate`: Level 3 no longer starts on entry - the gate hides the cannon, hard-locks spawning and waits (`IsWaitingForGameStart`), and only the player's own code calling `tower.GameStart()` (`RequestStart()`, idempotent) really starts the level; `OpeningSeconds` = 5 s, and leaving the level or returning to the menu calls `Cancel()` to reset the wait.
+
+**Cannon API - surface**
+
+- `CodeTower.Fire(Vector3 normal)` replaces `FireAtPlane(A, B, C)`: the normal is normalised inside and a zero vector simply returns `false`. `GetAllObjects()` returns `TowerObjectInfo` with `Volume` / `InitialVolume` / `MaxHits` / `Size`, and `GameStart()` / `GetFireCooldown()` are the new entries the API course teaches.
+
+**Origin hint**
+
+- `OriginHintController` grew from a single course-entry bar into a state hint bar: it stacks up to two lines - `时间已静止 · 按下 E 解锁` while time is frozen and `你所在原点 · 按下 Q 解锁` while the view is locked to the origin - and hides itself on the home screen, in the pause panel, under the full-screen tutorial cards and while the editor or the course panel occupies the screen; the Level 0 - Part 1 guide card only covers the upper half of the screen, so it does not suppress the bar. `HintFontSize` = 30.
+- The `开始语法课 / Start the course` jump was removed from the bar (it was not a gameplay hint); the entry now lives in the prologue card and on the last page of the editor intro.
+
+**Spawner / presentation plumbing**
+
+- `FlyingBlockSpawner` gained the legacy manual-play profile (`SetLegacyManualProfile`, `legacySpawnInterval` 1.2 s, `legacySpeedMin` / `legacySpeedMax` 0.5 / 1.2, `legacyMaxBlocks` 40, idempotent, with the previous values saved and restored) and its default spacing was retuned (`speedMin` 0.5 -> 0.7, `speedMax` 1.2 -> 2.2).
+- `LevelPresentation.Apply(hudVisible, printScreenVisible, bombEnabled, livesEnabled)` split the life bar away from `hudVisible`, and `ScoreManager.SetLeakPenaltyEnabled` / `IsLeakPenaltyEnabled` let a level mute the leak penalty - the plumbing both Level 0 parts build on.
 
 ### v0.2.6
 
@@ -428,18 +512,21 @@ The core experience includes a 3D coordinate system, an origin camera, mouse loo
 | 3D coordinate system | Coordinate range [-20, 20]. Z is the green vertical axis, Y is the red left axis, and X is the blue right axis. |
 | Origin camera | The Main Camera remains at (0, 0, 0) in Normal mode. |
 | Mouse look | Locked cursor with adjustable sensitivity in the pause/settings panel. |
-| Main menu | Startup menu with project information, language selection, and level entry points. |
-| Level 1 tutorial | Guided introduction to movement, camera control, and flying blocks. |
+| Main menu | Startup menu with project information, language selection, level entry points, an author GitHub link, and a permanent version label in the bottom-left corner. |
+| Level 0 - Part 1 | Hands-on tutorial: `Q` soul-cam, `WASD` / `Space` / `C` movement, left-click laser, and the "never touch the blue block" rule; ends after 5 kills. |
+| Level 0 - Part 2 | Free play: endless left-click shooting with the early hand-play spawn profile, no code and no life loss. |
+| Level 1 - teaching line | Part 1 programming prologue, Part 2 editor intro (8 pages), Part 3 C# syntax course (49 tasks). |
 | Flying blocks | Axis-aligned blocks travel toward the origin with type-specific colors and behavior. |
-| Score system | Earn points for destroying Attack and Heal blocks, receive penalties when Attack blocks leak, and keep Bomb blocks score-neutral. |
+| Score system | Earn points for destroying Attack blocks, receive penalties when Attack blocks leak, and keep Bomb blocks score-neutral. |
 | Lives | A run starts with 5 lives; destroying a Bomb block costs one, and 0 lives shows the defeat panel. |
 | Level progression | Levels unlock one after another on completion and stay unlocked across sessions. |
 | Save data | Resume checkpoint, per-level high scores, sensitivity, field of view, and frame rate cap persist across launches. |
 | Developer console | Inspect state and navigate to supported level parts. |
-| Code editor | Press Enter to edit tower code with syntax highlighting, diagnostics, undo/redo, and runtime execution. |
+| Code editor | Press Enter to edit tower code with syntax highlighting, diagnostics, undo/redo, runtime execution, and an in-house `GlobalCode { ... }` block for state that must survive frames. |
 | Runtime error pane | Runtime (RE) and compile (CE) errors are shown in their own panes, each with an adaptive height, a hover-lit split band, and its own scrollbar. |
-| Origin hint | A `Start the course` bar fades in at the bottom whenever the view is back at the origin and no panel is on screen. |
+| Origin hint | A state hint bar at the bottom: `时间已静止 · 按下 E 解锁` while time is frozen and `你所在原点 · 按下 Q 解锁` while the view is locked to the origin. |
 | Pause | Press ESC in any gameplay mode to pause and resume. |
+| Level 3 opening gate | The level waits for the player's own `tower.GameStart()` before spawning starts. |
 | Q / F1 modes | Strict axis movement or camera-relative free flight. |
 
 ## 2. Requirements
@@ -459,7 +546,7 @@ ABOVE THE VOID/
 │   └── Scripts/
 │       ├── GameBootstrap.cs              # Runtime scene bootstrap
 │       ├── MainMenuController.cs         # Main menu and level entry points
-│       ├── TutorialController.cs         # Level 1 guided tutorial
+│       ├── TutorialController.cs         # Level 0 Part 1 hands-on tutorial
 │       ├── Localization.cs               # English/Chinese UI localization
 │       ├── LevelDirector.cs               # Level and part navigation
 │       ├── FlyingBlock.cs                 # Flying block behavior and visuals
@@ -472,13 +559,16 @@ ABOVE THE VOID/
 │       ├── EscapeRouter.cs                # Single ESC input router
 │       ├── CodeEditorController.cs        # In-game code editor and runner
 │       ├── CodeEditorCaretGuard.cs       # Click-caret guard tick for the editor
-│       ├── CodeSyntaxTutorialController.cs  # Level 1 grammar and Level 2 API course panel
-│       ├── CodeIntroTutorialController.cs   # Level 1 Part 2 programming prologue
+│       ├── CodeSyntaxTutorialController.cs  # Level 1 Part 3 grammar and Level 2 Part 2 API course panel
+│       ├── EditorIntroTutorialController.cs  # Level 1 Part 2 editor intro (8 pages)
+│       ├── CodeIntroTutorialController.cs   # Level 1 Part 1 programming prologue
 │       ├── BlockIntroController.cs          # Level 2 Part 1 block guide (cube faces)
-│       ├── OriginHintController.cs          # "At origin" hint bar that opens the course
+│       ├── OriginHintController.cs          # State hint bar (E = resume time, Q = soul-cam)
 │       ├── CodeTower.cs                   # Code-controlled tower interface
+│       ├── LevelOpeningGate.cs            # Level 3 gate that waits for tower.GameStart()
 │       ├── UIFitScreen.cs                 # Screen-fitting UI helper
 │       ├── UITheme.cs                     # Single colour source for the whole UI
+│       ├── GameVersion.cs                 # Single source of truth for the version number
 │       ├── PlayerCameraController.cs      # Camera and movement state machine
 │       ├── CoordinateAxesDrawer.cs        # 3D coordinate axes
 │       └── SettingsPanelController.cs     # Pause and settings UI

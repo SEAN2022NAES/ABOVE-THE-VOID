@@ -3,14 +3,14 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Level 1 - Part 3「编辑器入门」：在学 C# 语法之前，先把手把手教会玩家"这个黑色窗口怎么用"。
+/// Level 1 - Part 2「编辑器入门」：在学 C# 语法之前，先把手把手教会玩家"这个黑色窗口怎么用"。
 ///   · 8 页：认识编辑器（Enter / Alt+O 打开）→ 认五大区域（标题栏 / 行号列 / 代码区 / 红色 CE / 紫色 RE / 蓝条）
 ///     → 点出光标与行号 → F6 编译运行 → 红色编译错误怎么读 → 紫色运行时错误怎么读 → 关闭 / 载入 / 导出等常用键
 ///     → 小结并接语法课；
 ///   · 第 1 / 3 / 4 页带真实操作门控：打开编辑器、点出光标、按下 F6 才算过关（不满足时「下一页」给出提示，不硬推）；
 ///   · 打开编辑器时卡片自动缩成顶部窄卡（Compact），不挡代码区；关闭后恢复全屏阅读卡；
-///   · 键盘 ← → 翻页，S 跳过本关直接进 Level 1 - Part 4 C# 语法课；
-///   · 章节跳转：/level 1 3 n 可直接翻到第 n 页（见 LevelDirector）。
+///   · 键盘 ← → 翻页，S 跳过本关直接进 Level 1 - Part 3 C# 语法课；
+///   · 章节跳转：/level 1 2 n 可直接翻到第 n 页（见 LevelDirector）。
 /// </summary>
 public class EditorIntroTutorialController : MonoBehaviour
 {
@@ -42,7 +42,7 @@ public class EditorIntroTutorialController : MonoBehaviour
     private Text footerText;        // 底部操作提示（键盘 ← → 也能翻页）
     private bool transitioning;     // 正在播进入语法课的过渡（忽略重复点击 / 键盘）
 
-    // 进入 Level 1 - Part 4 的黑幕过渡时长：与 Level 1 - Part 1 → Part 2（TutorialController）保持一致
+    // 进入 Level 1 - Part 3 的黑幕过渡时长：与 Level 1 - Part 1 → Level 1 - Part 2（TutorialController）保持一致
     private const float FadeOutSeconds = 0.35f;
     private const float FadeInSeconds = 0.5f;
     private Button prevBtn;
@@ -678,7 +678,7 @@ public class EditorIntroTutorialController : MonoBehaviour
             : "Keyboard arrows also page through · S skips this stage · finish the last page to start the grammar course";
     }
 
-    /// <summary>跳过本关（S 键或「跳过本关 (S)」按钮）：不看讲解、直接进 Level 1 - Part 4 语法课。</summary>
+    /// <summary>跳过本关（S 键或「跳过本关 (S)」按钮）：不看讲解、直接进 Level 1 - Part 3 语法课。</summary>
     private void SkipPrologue()
     {
         if (!Active || transitioning)
@@ -716,7 +716,7 @@ public class EditorIntroTutorialController : MonoBehaviour
     }
 
     /// <summary>
-    /// 进入 Level 1 - Part 4 语法课。过渡方式与 Level 1 - Part 1 → Part 2 完全一致：
+    /// 进入 Level 1 - Part 3 语法课。过渡方式与 Level 1 - Part 1 → Level 1 - Part 2 完全一致：
     /// 黑幕淡出到全黑 → 在全黑那一帧执行 LevelDirector.JumpTo（内部会 End() 收尾并清场）→ 黑幕淡入，
     /// 避免序章面板被硬切掉、语法课突然弹出的生硬感。过渡期间忽略键盘与按钮，防止重复触发。
     /// </summary>
@@ -733,7 +733,7 @@ public class EditorIntroTutorialController : MonoBehaviour
 
         ScreenFade.PlayTransition(FadeOutSeconds, FadeInSeconds, delegate
         {
-            LevelDirector.JumpTo(1, 4, 1); // Level 1 - Part 4 语法课，从第 1 个任务开始
+            LevelDirector.JumpTo(1, 3, 1); // Level 1 - Part 3 语法课，从第 1 个任务开始
         });
     }
 

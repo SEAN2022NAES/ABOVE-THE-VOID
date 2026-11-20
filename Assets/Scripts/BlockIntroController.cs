@@ -789,9 +789,13 @@ public class BlockIntroController : MonoBehaviour
 
         MeshRenderer mr = plate.AddComponent<MeshRenderer>();
         // 不用 CreatePrimitive：内置 Quad 自带碰撞体（图鉴关不想要），朝向还取决于引擎内置资源
-        Shader sh = Shader.Find("Unlit/Color");
+        // 用工程自带的不透明着色器：内置 Unlit/Color 没被任何 Material 资产引用，打包时会被剥离，
+        // exe 里 Shader.Find 返回 null 后会回退到透明的 Sprites/Default，色块变成半透明。
+        Shader sh = Shader.Find("Custom/OpaqueColor");
         if (sh == null)
-            sh = Shader.Find("Sprites/Default");
+            sh = Resources.Load<Shader>("Shaders/OpaqueColor");
+        if (sh == null)
+            sh = Shader.Find("Unlit/Color");
         if (sh == null)
             sh = Shader.Find("Standard");
         Material mat = new Material(sh);

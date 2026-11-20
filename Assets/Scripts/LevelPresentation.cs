@@ -1,10 +1,13 @@
 ﻿using UnityEngine;
 
 /// <summary>
-/// 关卡表现统一开关（分数 HUD / print 输出荧幕 / 蓝色 BOMB 块生成）：
-///   - Level 1 - Part 1 教学关：不显示 Score 分数 UI、不显示炮台 print 输出荧幕、
+/// 关卡表现统一开关（分数 HUD / 生命条 / print 输出荧幕 / 蓝色 BOMB 块生成）：
+///   - Level 0 - Part 1 手动体验关（原 Level 1 - Part 1 引导教学关）：显示 Score 分数 UI 与生命条（life），
+///     不显示炮台 print 输出荧幕，**禁用蓝色 BOMB 块**（蓝块是唯一掉 life 的来源，禁用后不会误触 game over）；
+///   - Level 0 - Part 2 自由玩耍关：与 Part 1 表现完全一致（HUD + 生命条、只出红块），差别只在生成节奏；
+///   - Level 1 - Part 1 编程序章讲解关（原 Level 1 - Part 2）：不显示 Score 分数 UI、不显示炮台 print 输出荧幕、
 ///     不生成蓝色 BOMB 块（该关只出红色 ATTACK 块）；
-///   - Level 1 - Part 3 编辑器入门 / Part 4 语法教学关：不显示 Score 分数 UI，但**显示** print 输出荧幕
+///   - Level 1 - Part 2 编辑器入门 / Part 3 语法教学关：不显示 Score 分数 UI，但**显示** print 输出荧幕
 ///     （玩家要能看见 tower.PrintLine 的输出），同样只出红色 ATTACK 块；
 ///   - Level 2 - Part 2 炮台 API 教学关：不显示 Score 分数 UI，显示 print 输出荧幕，
 ///     并允许生成蓝色 BOMB 块（教学 TowerObjectInfo.Type 的两种取值）；
@@ -14,13 +17,35 @@
 /// </summary>
 public static class LevelPresentation
 {
-    /// <summary>Level 1 - Part 1 教学关表现：隐藏分数与 print 荧幕，只生成红色块。</summary>
+    /// <summary>
+    /// Level 0 - Part 1 手动体验关表现：显示 Score 分数 HUD 与生命条（life）、隐藏 print 荧幕，
+    /// **蓝色 BOMB 块在本关禁用**（bombEnabled = false，只出红色 ATTACK 块）。
+    /// 原因：新手在教学关误点蓝块会直接掉 1 点 life，连掉几次即 game over，与「只认识鼠标开火」的教学目标冲突。
+    /// 该关「红块撞原点不扣分」由 LevelDirector 关闭漏块扣分（ScoreManager.SetLeakPenaltyEnabled(false)）实现。
+    /// 蓝块禁用的唯一落点是下面这行传参 + Apply 末尾 spawner.bombEnabled = bombEnabled。
+    /// </summary>
+    public static void ApplyLevel0()
+    {
+        Apply(true, false, false, true);
+    }
+
+    /// <summary>
+    /// Level 0 - Part 2 自由玩耍关表现：与 Part 1 相同 —— 显示 Score 分数 HUD 与生命条、隐藏 print 荧幕、
+    /// **不生成蓝色 BOMB 块**（蓝块是唯一掉 life 的来源，禁用后随意玩也不会 game over）。
+    /// 与 Part 1 的差别只在生成节奏：由 FlyingBlockSpawner.SetLegacyManualProfile(true) 切到远古纯手动版参数。
+    /// </summary>
+    public static void ApplyLevel0Free()
+    {
+        Apply(true, false, false, true);
+    }
+
+    /// <summary>Level 1 - Part 1 编程序章讲解关表现：隐藏分数与 print 荧幕，只生成红色块。</summary>
     public static void ApplyLevel1()
     {
         Apply(false, false);
     }
 
-    /// <summary>Level 1 - Part 3 编辑器入门 / Part 4 语法教学关表现：隐藏分数、显示 print 荧幕（观察 PrintLine 输出），只生成红色块。</summary>
+    /// <summary>Level 1 - Part 2 编辑器入门 / Part 3 语法教学关表现：隐藏分数、显示 print 荧幕（观察 PrintLine 输出），只生成红色块。</summary>
     public static void ApplyLevel2()
     {
         Apply(false, true);
@@ -81,10 +106,20 @@ public static class LevelPresentation
 
     private static void Apply(bool hudVisible, bool printScreenVisible)
     {
-        Apply(hudVisible, printScreenVisible, hudVisible);
+        // 生命条默认与分数 HUD 同开同关（仅 Level 3 完整玩法两者都开）
+        Apply(hudVisible, printScreenVisible, hudVisible, hudVisible);
     }
 
     private static void Apply(bool hudVisible, bool printScreenVisible, bool bombEnabled)
+    {
+        Apply(hudVisible, printScreenVisible, bombEnabled, hudVisible);
+    }
+
+    /// <summary>
+    /// 关卡表现总开关。livesEnabled 允许与 hudVisible 解耦：Level 0 - Part 1 手动体验关
+    /// 需要「显示生命条」但不允许红块撞原点掉血（掉血由漏块扣分开关关闭后自然不会再发生）。
+    /// </summary>
+    private static void Apply(bool hudVisible, bool printScreenVisible, bool bombEnabled, bool livesEnabled)
     {
         // 进入任意关卡：先恢复三维坐标轴（与主页隐藏配对，保证从主页进入关卡后轴一定可见）
         RestoreAxes();
@@ -92,9 +127,9 @@ public static class LevelPresentation
         // 分数 HUD：教学关隐藏（计分逻辑照常，重新显示时数值正确）
         ScoreManager.SetHudVisible(hudVisible);
 
-        // 生命值：与分数 HUD 同开同关 —— 只有显示分数 HUD 的关卡（Level 3 完整玩法）才启用；
+        // 生命值：与分数 HUD 同开同关 —— 只有显示分数 HUD 的关卡（Level 0 手动体验关 / Level 3 完整玩法）才启用；
         // Level 1 / Level 2 教学关不掉血、不判负，保持原有「击毁蓝块零分零罚」的精简规则
-        LivesManager.SetEnabled(hudVisible);
+        LivesManager.SetEnabled(livesEnabled);
 
         // print 输出荧幕：Part 1 不显示；Part 2 / 完整玩法显示
         CodeTower tower = UnityEngine.Object.FindObjectOfType<CodeTower>();

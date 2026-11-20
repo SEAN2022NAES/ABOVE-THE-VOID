@@ -6,9 +6,15 @@ using UnityEngine.EventSystems;
 /// 主页（主菜单）：
 ///   - 展示 ABOVE THE VOID 主题（标题 / 副标题 / 三坐标轴色彩点缀）；
 ///   - 项目目的介绍：培养学生的编程兴趣与数学思维（扩写段落）；
-///   - 作者署名 SEAN2022NAES；
-///   - 关卡入口：关卡1 可点击进入游戏，关卡2 / 关卡3 占位（敬请期待）。
-/// 进入关卡1后：隐藏主页、解除视角输入占用、通知生成器开始出块（保留进游戏前5秒缓冲）。
+///   - 作者署名 SEAN MA，并在署名下面挂一条可点击的 GitHub 引导（Application.OpenURL 打开
+///     https://github.com/SEAN2022NAES，中英双语，样式与署名行一致）；
+///   - 关卡入口：关卡 0（Part 1 手动体验关 / Part 2 自由玩耍关）/ 关卡 1（教学线：Part 1 编程序章、
+///     Part 2 编辑器入门、Part 3 语法课）/ 关卡 2（Part 1 方块图鉴、Part 2 API 课）/ 关卡 3（完整玩法）；
+///     首次进入只有关卡 0 可玩，逐级解锁。
+///   - 左下角常驻版本号（读 GameVersion.Display，全工程唯一来源）。
+/// 进入关卡 0 后：隐藏主页、解除视角输入占用、启动教学并允许鼠标左键手动开火；
+/// 关卡 1 / 关卡 2 统一走 LevelDirector 路由（与 /level 指令同一条路径）；
+/// 关卡 3 保留主页侧的会话复位与统一开场入口（LevelDirector.BeginFullLevelOpening）。
 /// </summary>
 public class MainMenuController : MonoBehaviour
 {
@@ -31,15 +37,47 @@ public class MainMenuController : MonoBehaviour
     private Text subtitleText;
     private Text bodyText;
     private Text authorText;
+
+    /// <summary>作者 GitHub 引导行（可点击，样式与署名行一致，中英双语）。</summary>
+    private Text githubText;
+
+    /// <summary>作者 GitHub 引导行的容器：把 Octocat mark 图标与文案水平排布在同一行（图标在左、垂直居中）。</summary>
+    private RectTransform githubRow;
+
+    /// <summary>作者 GitHub 引导行的官方 Octocat mark 图标（与文案同一点击行为：点图标即打开作者主页）。</summary>
+    private Image githubIcon;
+
+    /// <summary>左下角常驻版本号（内容取自 GameVersion.Display，全工程唯一来源）。</summary>
+    private Text versionText;
+
+    /// <summary>作者署名（正文用）与作者 GitHub 主页地址（点击引导用）。</summary>
+    public const string AuthorName = "SEAN MA";
+    public const string AuthorGitHubUrl = "https://github.com/SEAN2022NAES";
+    public const string AuthorGitHubHandle = "github.com/SEAN2022NAES";
+
+    /// <summary>作者 GitHub 引导行图标边长（px；参考分辨率 1920x1080 下与 20 px 文案的行高匹配）。</summary>
+    private const float GitHubIconSize = 24f;
+
+    /// <summary>图标与文案之间的水平间距（px，随 CanvasScaler 等比缩放）。</summary>
+    private const float GitHubIconGap = 10f;
+
+    /// <summary>官方 Octocat mark 的 PNG 资源路径（对应 Assets/Resources/Sprites/github-mark.png）。</summary>
+    private const string GitHubMarkResourcePath = "Sprites/github-mark";
+
+    /// <summary>官方 mark 贴图缓存（主页可能被反复重建，避免重复 Sprite.Create）。</summary>
+    private static Sprite githubMarkSprite;
+
     private Text levelTitleText;
 
+    private Text level0Label;
     private Text level1Label;
     private Text level2Label;
     private Text level3Label;
-    // 逐级解锁：关卡按钮 / 底图 / 文本引用（下标 = 关卡序号 - 1），用于解锁后即时刷新灰显与锁定状态
-    private readonly Button[] levelButtons = new Button[3];
-    private readonly Image[] levelButtonImages = new Image[3];
-    private readonly Text[] levelButtonLabels = new Text[3];
+    // 逐级解锁：关卡按钮 / 底图 / 文本引用（下标 = 关卡序号 - LevelProgress.MinLevel，MinLevel = 0 即关卡 0），
+    // 用于解锁后即时刷新灰显与锁定状态
+    private readonly Button[] levelButtons = new Button[4];
+    private readonly Image[] levelButtonImages = new Image[4];
+    private readonly Text[] levelButtonLabels = new Text[4];
     private Text langZhLabel;
     private Text langEnLabel;
     private FlyingBlockSpawner spawner;
@@ -128,7 +166,7 @@ public class MainMenuController : MonoBehaviour
         LevelPresentation.RestoreAxes();
 
         // 断点续玩：主页点击某关时，若存在「属于该关」的合法存档，就从记录的 part / section 续玩，而不是从该关开头重来。
-        //   · 只有带章节拆分的分区（Level 1 - Part 2 / Part 3 讲解关 / Part 4 语法课 / Level 2 - Part 1 图鉴关 / Part 2 API 课）才需要按章节定位，
+        //   · 只有带章节拆分的分区（Level 1 - Part 1 编程序章 / Part 2 编辑器入门 / Part 3 语法课 / Level 2 - Part 1 图鉴关 / Part 2 API 课）才需要按章节定位，
         //     这里统一交给 LevelDirector.JumpTo 路由，与 /level 走完全同一条路径，避免两套逻辑不一致；
         //   · 优先级：/level 跳关成功后已用跳关参数覆盖存档，所以这里读到的必然是「最后一次到达的位置」，
         //     存档不会把玩家拽回跳关之前的旧位置；
@@ -144,18 +182,32 @@ public class MainMenuController : MonoBehaviour
             return;
         }
 
-        // 关卡 2 - 1 方块图鉴（图鉴读完自动进 Part 2 API 课）：统一走 LevelDirector 路由，保证表现开关 / 生成控制与指令框一致
-        if (levelIndex == 2)
+        // 关卡 1（Part 1 讲解关起）/ 关卡 2 - 1 方块图鉴（图鉴读完自动进 Part 2 API 课）：
+        // 统一走 LevelDirector 路由，保证表现开关 / 生成控制 / 教学进度与指令框、/level 完全一致
+        if (levelIndex == 1 || levelIndex == 2)
         {
-            string msg = LevelDirector.JumpTo(2, 1);
-            Debug.Log("[MainMenu] 进入关卡2：" + msg);
+            string msg = LevelDirector.JumpTo(levelIndex, 1);
+            Debug.Log("[MainMenu] 进入关卡" + levelIndex + "：" + msg);
             return;
         }
 
-        if (levelIndex != 1 && levelIndex != 3)
+        if (levelIndex != 0 && levelIndex != 3)
             return;
 
-        // 断点续玩：主页直接进入的两个分区（Level 1 - Part 1 引导教学、Level 3 - Part 1 完整玩法）没有章节拆分，
+        // Level 0 - Part 2 自由玩耍关：玩家上次停在自由玩耍关（体验关已走完、自动顺接或 /level 0 2 进过）时，
+        // 主页点「关卡 0」直接回到自由玩耍关，而不是每次都强迫重听 Part 1 教学。
+        // 统一交给 LevelDirector.JumpTo 路由（清场 / 表现开关 / 远古手动手感 / 立即出块都在里面），
+        // 与 /level 0 2 走同一条路径，避免两套逻辑不一致；无此处存档（首次进入）则落到下面的 Part 1 教学流程。
+        if (levelIndex == 0 &&
+            GameProgress.TryGetResume(levelIndex, out int level0Part, out int level0Section) &&
+            level0Part == 2)
+        {
+            string freePlayMessage = LevelDirector.JumpTo(levelIndex, level0Part, level0Section);
+            Debug.Log("[MainMenu] 断点续玩：Level 0 - Part 2 自由玩耍关 → " + freePlayMessage);
+            return;
+        }
+
+        // 断点续玩：主页直接进入的两个分区（Level 0 - Part 1 手动体验关、Level 3 - Part 1 完整玩法）没有章节拆分，
         // 位置固定从该分区开头开始；这里把「关卡 + 分区」写入存档（section = 0），
         // 既作为续玩点，也作为 /lock 清档范围与 Level 3 最高分结算所需的「当前关卡」会话标识。
         GameProgress.SaveResume(levelIndex, 1, 0);
@@ -181,32 +233,38 @@ public class MainMenuController : MonoBehaviour
 
         SetCursorLocked(true);
 
-        // 鼠标左键手动激光：只有 Level 1 - Part 1 允许（主页关卡 1 即 Level 1 - Part 1 引导教学关），
+        // 鼠标左键手动激光：只有 Level 0（主页按钮进入的是 Part 1 手动体验关）允许，
         // Level 3 等其余关卡一律禁用（改由代码编辑器 / 炮台自动开火接管）。
         // 仅影响「左键 → FireLaser」手动链路，不影响 tower.Fire 等自动化调用。
         CommandConsoleController.SetManualLaserAllowed(levelIndex, 1);
 
         // 计分：进入关卡即重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
+        // 漏块扣分开关：只有 Level 0（Part 1 教学 / Part 2 自由玩耍）关闭（红方块撞原点不扣分），其它关卡恢复扣分。
+        // 必须在 ResetAll() 之前下发，且必须显式写 true，避免从关卡 0 返回主页后再进关卡 3 仍带着「不扣分」的残留状态。
+        ScoreManager.SetLeakPenaltyEnabled(levelIndex != 0);
         ScoreManager.ResetAll();
 
         // 生命值：进入关卡即重开一局生命（默认 5 点）
         LivesManager.ResetAll();
 
         TutorialController tutorial = FindObjectOfType<TutorialController>();
-        if (levelIndex == 1)
+        if (levelIndex == 0)
         {
-            // Level 1 由教学控制器接管：先不生成方块，逐步引导操作（无教学组件时回退旧逻辑）
+            // Level 0 - Part 1 手动体验关（原「引导教学关」）：由教学控制器接管，逐步引导鼠标左键手动开火打方块；
+            // 表现 = 显示 Score HUD 与生命条（life）、不显示 print 荧幕、**禁用蓝色 BOMB 块**（只出红块，
+            // 蓝块是唯一掉 life 的来源，禁用后新手误点也不会 game over），红块撞原点不扣分（漏块扣分关掉）
             if (tutorial != null)
             {
-                tutorial.StartTutorial(); // 内部会关闭 Score / print 荧幕与蓝块生成
+                tutorial.StartTutorial(); // 内部会下发 ApplyLevel0（HUD + life + 禁用蓝块）与手动激光开关
             }
             else
             {
-                LevelPresentation.ApplyLevel1(); // 无教学组件时同样保证教学关表现一致
+                LevelPresentation.ApplyLevel0();  // 无教学组件时同样保证手动体验关表现一致
+                ScoreManager.SetLeakPenaltyEnabled(false); // 红块撞原点不扣分
                 if (spawner != null)
-                    spawner.BeginSpawning(); // 开始出块（保留进游戏前5秒缓冲）
+                    spawner.BeginSpawning();      // 开始出块（保留进游戏前5秒缓冲）
             }
-            Debug.Log("[MainMenu] 进入关卡1：主页隐藏，游戏开始。");
+            Debug.Log("[MainMenu] 进入关卡0：主页隐藏，手动体验开始。");
         }
         else
         {
@@ -259,20 +317,27 @@ public class MainMenuController : MonoBehaviour
         if (tutorial != null)
             tutorial.ExitToMenu();
 
-        // 终止代码编辑器内的 C# 语法教学（隐藏任务卡与提示条；下次进入 Part 4 时进度重置）
+        // 终止代码编辑器内的 C# 语法教学（隐藏任务卡与提示条；下次进入 Level 1 - Part 3 时进度重置）
         CodeSyntaxTutorialController.End();
 
         // 回到主页：不在任何关卡内，手动激光（鼠标左键）一律禁用
         CommandConsoleController.SetManualLaserAllowed(0, 0);
 
+        // 回到主页：清掉「只能手动游玩（Level 0 - Part 1）」标记，
+        // 否则主页停留期间代码编辑器仍被锁在禁编辑状态，「继续游戏 / 其它入口」将无法打开编辑器
+        LevelDirector.ClearManualPlayOnly();
+
         // 回到主页：终止仍在进行的开场停顿（否则停顿到期会把生成器重新打开，主页上又开始出块）
         LevelOpeningGate.Cancel();
 
-        // 主页不刷方块：暂停生成并清空场上
+        // 主页不刷方块：暂停生成并清空场上；同时把「远古纯手动手感」（Level 0 - Part 2 自由玩耍关）参数还原，
+        // 否则从自由玩耍关返回主页后，再进 Level 3 / 关卡 0 会带着 1.2 秒出块间隔与 40 块上限的旧手感。
+        // （/level 指令路径由 LevelDirector.JumpTo 还原，这里补上「主页按钮」这条路径。）
         if (spawner != null)
         {
             spawner.SuspendSpawning();
             spawner.ClearAllBlocks();
+            spawner.SetLegacyManualProfile(false);
         }
 
         // 解除暂停 / 冻结并回原点；随后主页接管输入（禁止游戏按键与暂停）
@@ -357,6 +422,32 @@ public class MainMenuController : MonoBehaviour
         authorText = CreateText("Author", root.transform, "", authorFontSize, UITheme.Value, TextAnchor.MiddleCenter, false);
         SetRect(authorText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -235f), new Vector2(1200f, 48f));
 
+        // ---- 作者 GitHub 引导（点击用 Application.OpenURL 打开作者 GitHub 主页）----
+        // 官方 Octocat mark 图标 + 文案放在同一个水平排布容器里（图标在文案左侧、垂直居中）：
+        // 图标尺寸固定、文案长度随语言切换变化，交给 HorizontalLayoutGroup 自动排版，
+        // 因此中英文切换时图标始终紧跟文案左侧、不会跑位；窗口缩放走 CanvasScaler 等比缩放，间距同步缩放。
+        // CreateText 默认 raycastTarget = false，可点击行必须在 MakeClickableLink 里单独打开射线；
+        // 图标同样单独打开射线并挂同一点击回调（点图标 = 点文案，都打开作者 GitHub 主页）。
+        githubRow = CreateRect("AuthorGitHubRow", root.transform, new Vector2(0.5f, 0.5f), new Vector2(0f, -266f), new Vector2(1200f, 28f), new Vector2(0.5f, 0.5f));
+        HorizontalLayoutGroup rowLayout = githubRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+        rowLayout.childAlignment = TextAnchor.MiddleCenter; // 整行居中：文案变长变短，图标与文案作为整体保持居中
+        rowLayout.spacing = GitHubIconGap;
+        rowLayout.childControlWidth = true;
+        rowLayout.childControlHeight = true;
+        rowLayout.childForceExpandWidth = false;  // 不拉伸子项，图标保持正方形比例
+        rowLayout.childForceExpandHeight = false;
+
+        githubIcon = CreateGitHubMarkIcon(githubRow, GitHubIconSize);
+
+        githubText = CreateText("AuthorGitHub", githubRow, "", 20, UITheme.TextSub, TextAnchor.MiddleCenter, false);
+        MakeClickableLink(githubText, OpenAuthorGitHub);
+        MakeClickableIcon(githubIcon, OpenAuthorGitHub); // 点图标 = 点文案：同一回调打开作者 GitHub 主页
+
+        // ---- 左下角常驻版本号（唯一来源：GameVersion.Display）----
+        versionText = CreateText("Version", root.transform, "", 18, UITheme.TextMuted, TextAnchor.MiddleLeft, true);
+        // 锚点挂在屏幕左下角（屏幕空间固定，不随主内容纵向排布移动）：左 220 px、底 26 px
+        SetRect(versionText.rectTransform, Vector2.zero, new Vector2(220f, 26f), new Vector2(400f, 26f));
+
         // ---- 语言选择：中文 / English ----
         CreateLanguageSelector();
 
@@ -364,9 +455,11 @@ public class MainMenuController : MonoBehaviour
         levelTitleText = CreateText("LevelTitle", root.transform, "", levelTitleFontSize, UITheme.TextSub, TextAnchor.MiddleCenter, false);
         SetRect(levelTitleText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -304f), new Vector2(1200f, 44f));
 
-        CreateLevelButton("Level1", new Vector2(-280f, -382f), 1, out level1Label);
-        CreateLevelButton("Level2", new Vector2(0f, -382f), 2, out level2Label);
-        CreateLevelButton("Level3", new Vector2(280f, -382f), 3, out level3Label);
+        // 关卡 0 手动体验关 / 关卡 1 教学线 / 关卡 2 图鉴与 API / 关卡 3 完整玩法（四个按钮等距排布）
+        CreateLevelButton("Level0", new Vector2(-390f, -382f), 0, out level0Label);
+        CreateLevelButton("Level1", new Vector2(-130f, -382f), 1, out level1Label);
+        CreateLevelButton("Level2", new Vector2(130f, -382f), 2, out level2Label);
+        CreateLevelButton("Level3", new Vector2(390f, -382f), 3, out level3Label);
 
         // ---- 第三方字体署名（SIL OFL 1.1 要求署名 + 随包附带许可全文）----
         // 两款字体均以 SIL Open Font License 1.1 授权，许可全文见 Assets/Resources/Fonts/OFL.txt。
@@ -389,7 +482,7 @@ public class MainMenuController : MonoBehaviour
 
     /// <summary>
     /// 创建关卡按钮（按 LevelProgress 判断是否已解锁：未解锁自动灰显 + 不可点击，并在文本末尾标注「锁定」）。
-    /// 按钮 / 底图 / 文本的引用按下标（关卡序号 - 1）保存，供解锁后 RefreshLevelLocks 即时刷新。
+    /// 按钮 / 底图 / 文本的引用按下标（关卡序号 - LevelProgress.MinLevel）保存，供解锁后 RefreshLevelLocks 即时刷新。
     /// </summary>
     private void CreateLevelButton(string name, Vector2 pos, int levelIndex, out Text labelText)
     {
@@ -414,7 +507,7 @@ public class MainMenuController : MonoBehaviour
         Stretch(labelText.rectTransform);
         labelText.lineSpacing = 0.9f;
 
-        int index = levelIndex - 1;
+        int index = levelIndex - LevelProgress.MinLevel;
         if (index >= 0 && index < levelButtons.Length)
         {
             levelButtons[index] = btn;
@@ -432,7 +525,7 @@ public class MainMenuController : MonoBehaviour
     {
         for (int i = 0; i < levelButtons.Length; i++)
         {
-            int levelIndex = i + 1;
+            int levelIndex = i + LevelProgress.MinLevel;
             bool unlocked = LevelProgress.IsLevelUnlocked(levelIndex);
 
             Button btn = levelButtons[i];
@@ -478,8 +571,11 @@ public class MainMenuController : MonoBehaviour
         bool zh = Localization.IsChinese;
         switch (levelIndex)
         {
+            case 0:
+                // 副标题只体现「手动」这一玩法属性：不再出现 Free / 自由玩字样（避免与「自由玩耍关」混淆）。
+                return zh ? "关卡 0\n手动体验" : "Level 0\nHands-on";
             case 1:
-                return zh ? "关卡 1" : "Level 1";
+                return zh ? "关卡 1\n教学" : "Level 1\nLessons";
             case 2:
                 return zh ? "关卡 2\n方块 · API" : "Level 2\nBlocks · API";
             case 3:
@@ -544,8 +640,20 @@ public class MainMenuController : MonoBehaviour
 
         if (authorText != null)
             authorText.text = zh
-                ? "作者  ·  SEAN2022NAES"
-                : "Author  ·  SEAN2022NAES";
+                ? "作者  ·  " + AuthorName
+                : "Author  ·  " + AuthorName;
+
+        // 作者 GitHub 引导（中英双语；整行可点击，点击即打开作者 GitHub 主页）
+        if (githubText != null)
+            githubText.text = zh
+                ? "GitHub  ·  " + AuthorGitHubHandle + "  （点击打开）"
+                : "GitHub  ·  " + AuthorGitHubHandle + "  (click to open)";
+
+        // 左下角常驻版本号：内容只取 GameVersion.Display，不在这里另写版本字符串
+        if (versionText != null)
+            versionText.text = zh
+                ? "版本  " + GameVersion.Display
+                : "Version  " + GameVersion.Display;
 
         if (levelTitleText != null)
             levelTitleText.text = zh
@@ -557,6 +665,11 @@ public class MainMenuController : MonoBehaviour
 
         // v0.1.1：语言切换刷新文案时同步刷新字体（中文 → Noto Sans CJK SC，英文/数字 → JetBrains Mono）
         RefreshTextFonts();
+
+        // GitHub 引导行：文案长度与字体都随语言变化，立刻按新宽度重排一次，
+        // 图标始终紧贴文案左侧、整行保持居中（不等下一帧重排，避免切换瞬间图标跑位）
+        if (githubRow != null)
+            LayoutRebuilder.ForceRebuildLayoutImmediate(githubRow);
 
         ApplyLanguage();
     }
@@ -572,8 +685,14 @@ public class MainMenuController : MonoBehaviour
             bodyText.font = UIFontHelper.LoadForText(bodyText.text, bodyText.fontSize);
         if (authorText != null)
             authorText.font = UIFontHelper.LoadForText(authorText.text, authorText.fontSize);
+        if (githubText != null)
+            githubText.font = UIFontHelper.LoadForText(githubText.text, githubText.fontSize);
+        if (versionText != null)
+            versionText.font = UIFontHelper.LoadForText(versionText.text, versionText.fontSize);
         if (levelTitleText != null)
             levelTitleText.font = UIFontHelper.LoadForText(levelTitleText.text, levelTitleText.fontSize);
+        if (level0Label != null)
+            level0Label.font = UIFontHelper.LoadForText(level0Label.text, level0Label.fontSize);
         if (level1Label != null)
             level1Label.font = UIFontHelper.LoadForText(level1Label.text, level1Label.fontSize);
         if (level2Label != null)
@@ -593,6 +712,197 @@ public class MainMenuController : MonoBehaviour
     }
 
     // ---------------- 基础 UI 辅助 ----------------
+
+    /// <summary>
+    /// 把一行文本做成可点击链接：左键点击触发 onClick（用于作者 GitHub 引导），悬停时文字由
+    /// 常规色提亮到强调色，移出还原 —— 样式沿用现有作者页文本，只是多一层交互反馈。
+    /// CreateText 里统一把 raycastTarget 关掉（避免挡住按钮），这里的可点击行必须单独打开射线。
+    /// </summary>
+    private void MakeClickableLink(Text target, UnityEngine.Events.UnityAction onClick)
+    {
+        if (target == null)
+            return;
+
+        target.raycastTarget = true;
+
+        Color normal = target.color;
+        EventTrigger trigger = target.gameObject.AddComponent<EventTrigger>();
+
+        EventTrigger.Entry click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+        click.callback.AddListener(_ => onClick());
+        trigger.triggers.Add(click);
+
+        EventTrigger.Entry hoverIn = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+        hoverIn.callback.AddListener(_ => target.color = accentColor);
+        trigger.triggers.Add(hoverIn);
+
+        EventTrigger.Entry hoverOut = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+        hoverOut.callback.AddListener(_ => target.color = normal);
+        trigger.triggers.Add(hoverOut);
+    }
+
+    /// <summary>
+    /// 把图标做成可点击：点击行为与 GitHub 文案完全一致（打开作者主页），悬停时同样提亮到强调色。
+    /// Image 与 Text 都要单独打开 raycastTarget 才有射线（主页背景不拦鼠标）。
+    /// </summary>
+    private void MakeClickableIcon(Image target, UnityEngine.Events.UnityAction onClick)
+    {
+        if (target == null)
+            return;
+
+        target.raycastTarget = true;
+
+        Color normal = target.color;
+        EventTrigger trigger = target.gameObject.AddComponent<EventTrigger>();
+
+        EventTrigger.Entry click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+        click.callback.AddListener(_ => onClick());
+        trigger.triggers.Add(click);
+
+        EventTrigger.Entry hoverIn = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+        hoverIn.callback.AddListener(_ => target.color = accentColor);
+        trigger.triggers.Add(hoverIn);
+
+        EventTrigger.Entry hoverOut = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+        hoverOut.callback.AddListener(_ => target.color = normal);
+        trigger.triggers.Add(hoverOut);
+    }
+
+    /// <summary>
+    /// 创建作者 GitHub 引导行左侧的官方 Octocat mark 图标。
+    /// 尺寸由 LayoutElement 固定为边长 size（不随文案长度变化），由 HorizontalLayoutGroup 与文案垂直居中对齐；
+    /// 资源优先取 Resources 里的官方 PNG（白色 glyph + 透明底，适配深色背景），取不到则退化为代码绘制的简易 mark。
+    /// </summary>
+    private Image CreateGitHubMarkIcon(Transform parent, float size)
+    {
+        GameObject go = new GameObject("AuthorGitHubIcon", typeof(RectTransform));
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(size, size);
+
+        Image img = go.AddComponent<Image>();
+        img.raycastTarget = true;    // 图标与文案一样可点击（MakeClickableIcon 里再挂事件）
+        img.preserveAspect = true;   // 保持 mark 原始比例，避免被拉伸变形
+        img.color = UITheme.TextSub; // 与文案同色：资源本身是白色 glyph，染成同色文字色即可；悬停时提亮为强调色
+
+        LayoutElement layout = go.AddComponent<LayoutElement>();
+        layout.minWidth = size;
+        layout.minHeight = size;
+        layout.preferredWidth = size;
+        layout.preferredHeight = size;
+        layout.flexibleWidth = 0f;
+        layout.flexibleHeight = 0f;
+
+        Sprite mark = LoadGitHubMarkSprite();
+        img.sprite = mark != null ? mark : BuildFallbackGitHubMark();
+        return img;
+    }
+
+    /// <summary>
+    /// 加载官方 mark：先按 Sprite 资源取，其次把贴图手工包成 Sprite（应对贴图被导入成 Default 类型的情况）；
+    /// 两者都失败返回 null，由调用方退化为代码绘制的简易 mark。
+    /// </summary>
+    private Sprite LoadGitHubMarkSprite()
+    {
+        if (githubMarkSprite != null)
+            return githubMarkSprite;
+
+        Sprite loaded = Resources.Load<Sprite>(GitHubMarkResourcePath);
+        if (loaded != null)
+        {
+            githubMarkSprite = loaded;
+            return loaded;
+        }
+
+        Texture2D tex = Resources.Load<Texture2D>(GitHubMarkResourcePath);
+        if (tex != null)
+        {
+            try
+            {
+                githubMarkSprite = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+                return githubMarkSprite;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[MainMenu] 官方 GitHub mark 贴图无法转成 Sprite，改为代码绘制：" + e.Message);
+            }
+        }
+
+        Debug.LogWarning("[MainMenu] 未找到官方 GitHub mark（Resources/" + GitHubMarkResourcePath + "），改为代码绘制简易 mark。");
+        return null;
+    }
+
+    /// <summary>
+    /// 兜底 mark：官方 PNG 不可用时，用代码把简易 Octocat 头像（圆头 + 两只耳朵 + 两个透明眼睛）
+    /// 画进一张 64x64 贴图，白色 glyph + 透明底，颜色与官方版本保持一致（同样吃 Image.color 染色）。
+    /// </summary>
+    private Sprite BuildFallbackGitHubMark()
+    {
+        const int size = 64; // 64 px 足够 24 px 显示尺寸，放大也不糊
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.name = "GitHubMarkFallback";
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Color[] pixels = new Color[size * size];
+        Color clear = new Color(1f, 1f, 1f, 0f);
+        for (int i = 0; i < pixels.Length; i++)
+            pixels[i] = clear;
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float px = (x + 0.5f) / size;
+                float py = (y + 0.5f) / size;
+
+                // 简易 Octocat mark = 上方圆头（dome）+ 左侧、右侧两条向下垂的「手臂」，中下方留空与官方 mark 一致
+                bool dome = NormalizedDistance(px, py, 0.5f, 0.615f) <= 0.315f;
+                bool armLeft = CapsuleDistance(px, py, 0.243f, 0.455f, 0.243f, 0.145f) <= 0.085f;
+                bool armRight = CapsuleDistance(px, py, 0.757f, 0.455f, 0.757f, 0.145f) <= 0.085f;
+
+                if (dome || armLeft || armRight)
+                    pixels[y * size + x] = Color.white;
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+    }
+
+    /// <summary>归一化坐标下两点距离（兜底 mark 画圆用）。</summary>
+    private static float NormalizedDistance(float x, float y, float centerX, float centerY)
+    {
+        float dx = x - centerX;
+        float dy = y - centerY;
+        return Mathf.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>归一化坐标下点到线段的距离（兜底 mark 画「手臂」这种胶囊形状用）。</summary>
+    private static float CapsuleDistance(float x, float y, float ax, float ay, float bx, float by)
+    {
+        float abx = bx - ax;
+        float aby = by - ay;
+        float apx = x - ax;
+        float apy = y - ay;
+        float lengthSq = abx * abx + aby * aby;
+        float t = lengthSq > 0f ? (apx * abx + apy * aby) / lengthSq : 0f;
+        t = Mathf.Clamp01(t);
+        float dx = apx - abx * t;
+        float dy = apy - aby * t;
+        return Mathf.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>打开作者 GitHub 主页（主页作者页 GitHub 引导行的点击回调）。</summary>
+    private void OpenAuthorGitHub()
+    {
+        Application.OpenURL(AuthorGitHubUrl);
+        Debug.Log("[MainMenu] 打开作者 GitHub：" + AuthorGitHubUrl);
+    }
 
     private void EnsureEventSystem()
     {

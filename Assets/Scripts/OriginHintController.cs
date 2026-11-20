@@ -8,14 +8,14 @@ using UnityEngine.UI;
 ///   1. 时间静止（PlayerCameraController.IsTimeFrozen）→ 「时间已静止 · 按下 E 解锁」，按 E 恢复时间流动。
 ///      这条不分场景：教学关、语法课、代码编辑器打开时同样提示，只有主页菜单与 ESC 暂停面板不叠。
 ///   2. 视角锁定在原点（Mode == Normal 或 Mode == Frozen）→ 「你所在原点 · 按下 Q 解锁」，按 Q 进入灵魂出窍自由飞行。
-///      序章（Level 1 Part 1）按 Q 教过、进入移动步骤之后就开始生效，此后所有关卡全程生效；
+///      序章（Level 0 Part 1 手动体验关）按 Q 教过、进入移动步骤之后就开始生效，此后所有关卡全程生效；
 ///      只有全屏教学关 / 代码编辑器 / 语法课占满屏幕的时段不叠。
 /// 时间静止时视角本就停在原点（Mode == Frozen），此刻两条提示同时成立，上下两行一起提示，
 /// 不要用互斥的 if/else 只留一条。
 ///
-/// 其它情况一律不显示：主页菜单、暂停、全屏教学关（Level 1 Part 2~4 / Level 2 Part 1~2）、
+/// 其它情况一律不显示：主页菜单、暂停、全屏教学关（Level 1 Part 1~3 / Level 2 Part 1~2 / Level 0 Part 1 手动体验关）、
 /// 代码编辑器与语法课面板占屏时都不弹，避免叠成两层。
-/// 例外：序章 Part 1 的引导面板只占上半屏、底部留空，与底部提示条不重叠，因此不拦截原点提示。
+/// 例外：Level 0 Part 1 手动体验关的引导面板只占上半屏、底部留空，与底部提示条不重叠，因此不拦截原点提示。
 /// 原本的「开始语法课 / Start the course」跳转入口已移除：它不属于完整关的玩法提示，
 /// 语法课入口保留在序章面板与编辑器入门末页。
 /// </summary>
@@ -159,7 +159,7 @@ public class OriginHintController : MonoBehaviour
     /// <summary>正被全屏教学面板或代码编辑器盖住屏幕：原点提示先让位。</summary>
     private bool IsOverlayTutorialActive()
     {
-        // 注意：Level 1 Part 1 的引导教学面板只占上半屏、底部留空，
+        // 注意：Level 0 Part 1 手动体验关的引导教学面板只占上半屏、底部留空，
         // 与底部提示条不重叠，所以这里不拦 TutorialController.Started。
         if (CodeIntroTutorialController.Reading)
             return true;

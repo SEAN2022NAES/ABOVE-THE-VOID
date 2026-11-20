@@ -221,7 +221,7 @@ public class PlayerCameraController : MonoBehaviour
             return;
 
         // E 键：仅切换时间冻结（timeScale 0<->1），绝不改变移动 / 飞行模式
-        // Level 1 - Part 1 教学进行中禁用 E 键（TutorialController.Instance.Started）
+        // Level 0 - Part 1 手动体验关教学进行中禁用 E 键（TutorialController.Instance.Started）
         if (Input.GetKeyDown(timeStopKey) && (TutorialController.Instance == null || !TutorialController.Instance.Started))
         {
             ToggleTimeStop();

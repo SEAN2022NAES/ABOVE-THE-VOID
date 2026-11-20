@@ -588,10 +588,19 @@ public class FlyingBlock : MonoBehaviour
     private Material CreateBlockMaterial()
     {
         // 必须用不透明材质：实心方块 6 个面是独立 submesh，若用半透明（Sprites/Default，
-        // 不写深度、Blend 混合），后绘制的面会叠加混合到先绘制的白色行进面上，白面被盖掉。
-        Shader shader = Shader.Find("Unlit/Color");
+        // 不写深度、Blend 混合、Cull Off），后绘制的面会叠加到先绘制的面上，
+        // 且白色行进面不写深度、双面绘制 → 从任何方向都能透过红色方块看到白面（v0.3.0 exe 实测 bug）。
+        //
+        // 根因：材质是运行时 new 出来的，内置着色器没有被任何 Material 资产引用、也不在
+        // Always Included Shaders 里，打包时会被剥离 → exe 里 Shader.Find("Unlit/Color") 返回 null，
+        // 回退到 Sprites/Default 就出现了上述现象（编辑器里内置着色器始终可用，所以只在 exe 复现）。
+        // 现在优先用工程自带、随 Resources 打包的 Custom/OpaqueColor（Opaque + ZWrite On + Cull Off），
+        // 内置着色器只作兜底，且兜底链不再落到透明的 Sprites/Default。
+        Shader shader = Shader.Find("Custom/OpaqueColor");
         if (shader == null)
-            shader = Shader.Find("Sprites/Default");
+            shader = Resources.Load<Shader>("Shaders/OpaqueColor"); // 兜底：直接按资源路径加载
+        if (shader == null)
+            shader = Shader.Find("Unlit/Color");
         if (shader == null)
             shader = Shader.Find("Standard");
         return new Material(shader);

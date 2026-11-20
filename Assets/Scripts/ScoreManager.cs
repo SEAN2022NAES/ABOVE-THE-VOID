@@ -40,6 +40,7 @@ public class ScoreManager : MonoBehaviour
     private int shownDelta;
     private GameObject hudRoot;                       // 分数 HUD 根物体（SetHudVisible 控制显隐）
     private static bool hudVisibleRequested = true;    // HUD 显隐期望值（关卡可能在 Awake 前下发状态）
+    private static bool leakPenaltyEnabled = true;      // 漏块扣分开关（Level 0 - Part 1 手动体验关关闭）
 
     // ---------------- static entry points (null-safe) ----------------
 
@@ -58,6 +59,20 @@ public class ScoreManager : MonoBehaviour
             return;
         Instance.ApplyLeak(remainVolume);
     }
+
+    /// <summary>
+    /// 漏块扣分开关（默认开启）：Level 0 - Part 1 手动体验关关闭它 ——
+    /// 红色 ATTACK 块撞到原点（炮台位置）既不加分也不扣分，让玩家专心体验手动开火手感。
+    /// 仅影响「红块漏过扣分」，击毁红块的加分逻辑不受影响；关闭期间漏块也不会刷新 HUD 增量提示。
+    /// 每次进关由 LevelDirector 显式下发，避免上一关的关闭状态泄漏到其它关卡。
+    /// </summary>
+    public static void SetLeakPenaltyEnabled(bool enabled)
+    {
+        leakPenaltyEnabled = enabled;
+    }
+
+    /// <summary>当前漏块是否扣分（只读，便于其它系统查询表现一致性）。</summary>
+    public static bool IsLeakPenaltyEnabled => leakPenaltyEnabled;
 
     /// <summary>Reset score of this run (called when a level starts / restarts).</summary>
     public static void ResetAll()
@@ -102,6 +117,10 @@ public class ScoreManager : MonoBehaviour
 
     private void ApplyLeak(float remainVolume)
     {
+        // Level 0 - Part 1 手动体验关：漏块不扣分（红块撞原点零影响）
+        if (!leakPenaltyEnabled)
+            return;
+
         if (remainVolume < 0f)
             remainVolume = 0f;
         int penalty = leakBasePenalty + Mathf.RoundToInt(leakVolumeFactor * remainVolume);
