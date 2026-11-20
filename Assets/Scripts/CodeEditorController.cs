@@ -81,7 +81,8 @@ public class CodeEditorController : MonoBehaviour
     private float errorScrollY;           // 错误文字上移量（0 = 顶部对齐；内容高于可视区时才有值）
     private const float ErrorZoneMinHeight = 160f;   // 空错误 / 单行错误时的默认高度（与旧版一致）
     private const float ErrorSplitBarHeight = 2f;    // 错误区上缘分界条「视觉」粗细（只画 3px，拖拽命中区另有一层更高的透明层）
-    private const float ErrorSplitHitHeight = 9f;    // 分界条拖拽命中区高度 = 3px 细条 + 6px 呼吸位（不遮挡下方错误文字）
+    private const float ErrorSplitHitHeight = 18f;   // 分界条拖拽命中区高度：细条只有 4px，命中带要够厚才抓得住
+    private const float ErrorSplitInputSlack = 4f;   // 命中带在视觉红条外再放宽的像素（自管拖动判定同样吃这个容差）
     // 红色细条「上方」再叠一条提示条：下缘贴住 3px 细条，细条负责画分界，这条负责一眼可见 + 好按住（整条都能上下拖）。
     // 粗细由 10px 收细到 6px（原先与底部横条同粗细、显得太厚），命中区高度不受影响，照样好抓。
     private const float ErrorSplitGripHeight = 2f;
@@ -158,6 +159,8 @@ public class CodeEditorController : MonoBehaviour
     private float errorZoneManualHeight;       // 用户拖红条设定的错误区高度（0 = 未手动调过，跟随内容自适应）
     private float errorSplitStartMouseY;       // 分隔条拖动起点（屏幕像素）
     private float errorSplitStartHeight;       // 分隔条拖动起始错误区高度（UI 单位）
+    private bool errorSplitInputDrag;          // 自管拖动中：按下红条即进入，不依赖 EventSystem 的拖动阈值
+    private float errorSplitInputDragTime;     // 自管拖动的按下时刻：万一漏掉抬起事件，超时自动松手
     private bool errorZoneCollapsed;           // 错误区被压到底、与底部横条合并后收起；有新报错才自动弹回
     private readonly List<string> undoList = new List<string>();  // 撤销栈（自实现，兜底原生）
     private readonly List<string> redoList = new List<string>();  // 重做栈
@@ -266,6 +269,14 @@ public class CodeEditorController : MonoBehaviour
     public static event System.Action<string> OnCompiledSuccessfully;
 
     /// <summary>
+    /// 教学用：运行时错误（RE）真的发生那一刻，如果编辑器此刻是关着的（编译成功后编辑器会自动关闭，
+    /// 代码在后台跑），就把编辑器重新打开并把紫色 RE 窗口展开 —— 否则玩家只会在屏幕角落看到一行日志，
+    /// 根本看不到「紫窗」长什么样。Level 1 - Part 3 第 6 页靠它把 RE 演给玩家看。
+    /// 默认关闭，讲完那一页请记得置回 false。
+    /// </summary>
+    public bool AutoOpenOnRuntimeError { get; set; }
+
+    /// <summary>
     /// 教学用：把编辑器内容设为指定代码（并标记默认示例已填过，避免首次打开时被示例代码覆盖）。
     /// 用于 Level 1 - Part 2 语法教学开局清空 / 放置代码骨架。
     /// </summary>
@@ -370,6 +381,10 @@ public class CodeEditorController : MonoBehaviour
     private const string C_NUMBER = UITheme.HexNumber;   // 数字粉
     private const string C_COMMENT = UITheme.HexComment;  // 注释灰绿
     private const string C_DEFAULT = UITheme.HexDefault;  // 默认白
+    private const string C_GLOBAL = UITheme.HexGlobal;    // 扩展关键字 GlobalCode 蓝（本作自制语法，非 C# 关键字）
+
+    /// <summary>本作扩展关键字：玩家用它在代码最前面声明「全局区」，块内内容会被提升到类体级别成为字段（跨帧存活）。</summary>
+    private const string GlobalBlockKeyword = "GlobalCode";
 
     private static readonly HashSet<string> keywords = new HashSet<string>
     {
@@ -383,18 +398,29 @@ public class CodeEditorController : MonoBehaviour
         "unchecked","unsafe","ushort","using","var","virtual","void","volatile","while"
     };
 
-    /// <summary>默认示例代码（首次打开填入，简洁演示三个新接口，不含每帧自动循环；输出走 +X 前方 print 荧幕，不写 Debug 日志）。</summary>
+    /// <summary>
+    /// 默认示例代码（首次打开填入，简洁演示公开接口，不含每帧自动循环；输出走 +X 前方 print 荧幕，不写 Debug 日志）。
+    /// 第一段是「本关开场」：GlobalCode 里放一次性标记，每帧入口只在第一次调用 tower.GameStart()，
+    /// 玩家删掉这段（或删掉 GameStart 那行）关卡就不会开始出块。
+    /// </summary>
     private const string DEFAULT_CODE =
-        "// 炮台接口示例：GetAllObjects / FireAtPlane / GetFireCooldown（简洁版，不自动循环）\n" +
+        "GlobalCode { bool gameStarted = false; }   // 全局区：跨帧保留的一次性开场标记\n" +
+        "// 本关由你的代码开场：tower.GameStart() 就是「本关正式开始」，不调用就永远不出方块\n" +
+        "// 炮台接口示例：GameStart / GetAllObjects / Fire / GetFireCooldown（简洁版，不自动循环）\n" +
         "// 输出走 print 荧幕（X 轴前方），不写 Debug 日志；print 支持 printf 风格格式化 {0} {1}\n" +
         "// 引擎每帧调用 Run(tower)；如需循环 / 限频，请自行编写 while / if 条件\n" +
-        "// 注意：FireAtPlane(A,B,C) 的平面 Ax+By+Cz=0 必过原点，只需给出法向量 (A,B,C)\n" +
+        "// 注意：Fire(new Vector3(A, B, C)) 的平面 Ax+By+Cz=0 必过原点，只需给出法向量 (A,B,C)\n" +
+        "if (!gameStarted)\n" +
+        "{\n" +
+        "    gameStarted = true;   // 标记只打一次：每帧入口不会反复调用\n" +
+        "    tower.GameStart();    // 本关正式开始（删掉这一行，游戏就不会开始）\n" +
+        "}\n" +
         "tower.ClearPrint();\n" +
         "tower.PrintLine(\"== 炮台接口示例 ==\");\n" +
         "float cd = tower.GetFireCooldown();\n" +
         "tower.PrintLine(\"GetFireCooldown={0:F3}\", cd);\n" +
-        "bool fired1 = tower.FireAtPlane(0f, 1f, 0f);   // 法线 (0,1,0)：平面过原点，沿 +Y 发射\n" +
-        "tower.PrintLine(\"FireAtPlane fired={0}\", fired1);\n" +
+        "bool fired1 = tower.Fire(new Vector3(0f, 1f, 0f));   // 法线 (0,1,0)：平面过原点，沿 +Y 发射\n" +
+        "tower.PrintLine(\"Fire fired={0}\", fired1);\n" +
         "var objects = tower.GetAllObjects();\n" +
         "tower.PrintLine(\"GetAllObjects count={0}\", objects.Count);\n" +
         "for (int i = 0; i < objects.Count && i < 5; i++)\n" +
@@ -407,16 +433,23 @@ public class CodeEditorController : MonoBehaviour
     /// 代码本体完全一致 —— 英文界面下打开 Level 3 - Part 1 的代码演示，注释不该还是中文。
     /// </summary>
     private const string DEFAULT_CODE_EN =
-        "// Tower API demo: GetAllObjects / FireAtPlane / GetFireCooldown (minimal, no auto loop)\n" +
+        "GlobalCode { bool gameStarted = false; }   // global block: one-shot start flag, survives frames\n" +
+        "// Your code starts this level: tower.GameStart() means the level really begins; without it no blocks ever spawn\n" +
+        "// Tower API demo: GameStart / GetAllObjects / Fire / GetFireCooldown (minimal, no auto loop)\n" +
         "// Output goes to the print screen (in front on +X), not Debug.Log; print supports printf-style {0} {1}\n" +
         "// The engine calls Run(tower) every frame; write your own while / if when you need looping or rate limits\n" +
-        "// Note: the plane Ax+By+Cz=0 of FireAtPlane(A,B,C) always passes the origin, so only the normal (A,B,C) is needed\n" +
+        "// Note: the plane Ax+By+Cz=0 of Fire(new Vector3(A, B, C)) always passes the origin, so only the normal (A,B,C) is needed\n" +
+        "if (!gameStarted)\n" +
+        "{\n" +
+        "    gameStarted = true;   // mark only once, so the per-frame entry never calls it repeatedly\n" +
+        "    tower.GameStart();    // the level really begins (delete this line and the game never starts)\n" +
+        "}\n" +
         "tower.ClearPrint();\n" +
         "tower.PrintLine(\"== Tower API demo ==\");\n" +
         "float cd = tower.GetFireCooldown();\n" +
         "tower.PrintLine(\"GetFireCooldown={0:F3}\", cd);\n" +
-        "bool fired1 = tower.FireAtPlane(0f, 1f, 0f);   // normal (0,1,0): plane through origin, fires along +Y\n" +
-        "tower.PrintLine(\"FireAtPlane fired={0}\", fired1);\n" +
+        "bool fired1 = tower.Fire(new Vector3(0f, 1f, 0f));   // normal (0,1,0): plane through origin, fires along +Y\n" +
+        "tower.PrintLine(\"Fire fired={0}\", fired1);\n" +
         "var objects = tower.GetAllObjects();\n" +
         "tower.PrintLine(\"GetAllObjects count={0}\", objects.Count);\n" +
         "for (int i = 0; i < objects.Count && i < 5; i++)\n" +
@@ -621,6 +654,11 @@ public class CodeEditorController : MonoBehaviour
                 return;
             if ((Input.GetKeyDown(openKey) || Input.GetKeyDown(openKeyAlt)) && !IsInputFocused())
             {
+                // Level 1 - Part 3「编辑器界面入门」：这一关 Enter 是卡片里指定的「打开编辑器」键，
+                // 玩家照着提示连按时会把已经打开的编辑器又关掉（看着像按 Enter 被踢出去）。
+                // 教学期间 Enter 只负责打开，关闭统一走 Esc 或标题栏的关闭按钮。
+                if (EditorIntroTutorialController.Reading)
+                    return;
                 Close();
                 return;
             }
@@ -762,6 +800,7 @@ public class CodeEditorController : MonoBehaviour
             // Ctrl+Z / Ctrl+Y（撤销 / 重做）：自实现栈兜底，失焦屏蔽原生撤销防止双触发
             HandleUndoRedoShortcuts();
 
+            TickErrorSplitInputDrag(); // 红条的自管拖动：按下即接管，不靠 EventSystem 的拖动阈值
             UpdateScrollBars(); // 每帧兜底：内容溢出即显示滚动块，放得下即隐藏
             UpdateSplitHoverHighlights(); // 鼠标压到红色 / 紫色分隔条就提亮，提示这里能拖
         }
@@ -785,6 +824,13 @@ public class CodeEditorController : MonoBehaviour
                 AppendRuntimeError(msg);
                 Debug.LogError("[CodeEditor] 运行时错误：" + msg);
                 Debug.LogException(e);
+
+                // 教学演示：把编辑器重新打开，让玩家当场看到紫色 RE 窗口（不重开就只有日志，紫窗在关着的编辑器里）
+                if (AutoOpenOnRuntimeError && !IsOpen)
+                {
+                    Open();
+                    OpenReZonePanel();
+                }
             }
         }
     }
@@ -1139,7 +1185,17 @@ public class CodeEditorController : MonoBehaviour
             return;
         }
 
-        string fullSource = WrapUserCode(userCode, out string className, out int userCodeStartLine);
+        // GlobalCode 全局区解析：误用（后面缺 {、缺配对 }、出现多个块、块内用 tower）一律致命失败，不送进编译器
+        UserCodeLayout layout = ParseUserCode(userCode);
+        if (!string.IsNullOrEmpty(layout.FatalError))
+        {
+            AppendError(layout.FatalError);
+            if (AutoOpenOnRuntimeError && !IsOpen)
+                Open();
+            return;
+        }
+
+        string fullSource = WrapUserCode(layout, out string className, out int[] templateLineToUser);
 
         StopRunner(); // 编译前停掉旧 runner，避免重复运行
         ClearRuntimeErrorPanel(); // 每次编译清空紫色 RE 窗口：CE（红）与 RE（紫）互不混淆
@@ -1182,7 +1238,8 @@ public class CodeEditorController : MonoBehaviour
                         CompilerError e = results.Errors[i];
                         if (e.IsWarning)
                             continue;
-                        int userLine = e.Line - userCodeStartLine;
+                        // 行号映射回玩家代码：全局区与每帧语句是两段拼接，靠 templateLineToUser 精确指回原文行
+                        int userLine = MapTemplateLine(templateLineToUser, e.Line);
                         // mcs/csc 的 ErrorNumber 自带 "CS" 前缀，这里统一掉，避免显示成 CSCS0103
                         string errNo = e.ErrorNumber ?? string.Empty;
                         if (errNo.StartsWith("CS", System.StringComparison.OrdinalIgnoreCase))
@@ -1201,6 +1258,10 @@ public class CodeEditorController : MonoBehaviour
                             break;
                     }
                     AppendError(sb.ToString().TrimEnd('\n'));
+                    // 教学演示：玩家可能先把编辑器关了再按 F6 —— 错误写在关着的面板里等于没写，
+                    // 这时候把编辑器打开，红色错误区才真的看得见。
+                    if (AutoOpenOnRuntimeError && !IsOpen)
+                        Open();
                     return;
                 }
 
@@ -1266,8 +1327,337 @@ public class CodeEditorController : MonoBehaviour
             SetStatus(Localization.Pick("已停止运行", "Stopped"), false);
     }
 
-    /// <summary>用模板包裹用户代码，返回完整源码，并输出类名与 USER CODE START 标记所在模板行号（1-based）。</summary>
-    private static string WrapUserCode(string userCode, out string className, out int userCodeStartLine)
+    // ================== 玩家代码分区：GlobalCode 全局区 ==================
+
+    /// <summary>
+    /// 玩家代码分区结果：GlobalCode 块内的声明（提升到类体级别成为字段，跨帧存活）+ 剩下的每帧语句（留在 Run 方法体内）。
+    /// 两段各自带「模板行 → 玩家代码行号」映射，编译报错才能指回玩家真正写的那一行。
+    /// </summary>
+    private sealed class UserCodeLayout
+    {
+        public List<string> FieldLines = new List<string>();      // 全局区每行原文
+        public List<int> FieldUserLines = new List<int>();        // 与 FieldLines 一一对应的玩家行号（1-based）
+        public List<string> BodyLines = new List<string>();       // 每帧语句每行原文
+        public List<int> BodyUserLines = new List<int>();         // 与 BodyLines 一一对应的玩家行号（1-based）
+        public bool HasGlobalBlock;
+        public string FatalError;                                 // 非 null：GlobalCode 误用，编译前直接致命失败
+    }
+
+    /// <summary>标识符字符判定（词边界用）。</summary>
+    private static bool IsIdentChar(char c)
+    {
+        return char.IsLetterOrDigit(c) || c == '_';
+    }
+
+    /// <summary>字符偏移 → 1-based 行号。</summary>
+    private static int LineOf(string code, int pos)
+    {
+        int limit = pos < 0 ? 0 : (pos > code.Length ? code.Length : pos);
+        int line = 1;
+        for (int i = 0; i < limit; i++)
+            if (code[i] == '\n') line++;
+        return line;
+    }
+
+    /// <summary>找某个「完整标识符」在全文中首次出现的下标（不在别的标识符内部），没有则返回 -1；入参须是已抹掉注释/字符串的 masked 文本。</summary>
+    private static int IndexOfToken(string masked, string token)
+    {
+        if (string.IsNullOrEmpty(masked) || string.IsNullOrEmpty(token))
+            return -1;
+        int scan = 0;
+        while (scan < masked.Length)
+        {
+            int at = masked.IndexOf(token, scan, System.StringComparison.Ordinal);
+            if (at < 0) return -1;
+            scan = at + token.Length;
+            bool leftOk = at == 0 || !IsIdentChar(masked[at - 1]);
+            bool rightOk = scan >= masked.Length || !IsIdentChar(masked[scan]);
+            if (leftOk && rightOk) return at;
+        }
+        return -1;
+    }
+
+    /// <summary>同 IndexOfToken，但忽略大小写（用于提示「关键字区分大小写：要写 GlobalCode」）。</summary>
+    private static int IndexOfTokenIgnoreCase(string masked, string token)
+    {
+        if (string.IsNullOrEmpty(masked) || string.IsNullOrEmpty(token))
+            return -1;
+        int scan = 0;
+        while (scan < masked.Length)
+        {
+            int at = masked.IndexOf(token, scan, System.StringComparison.OrdinalIgnoreCase);
+            if (at < 0) return -1;
+            scan = at + token.Length;
+            bool leftOk = at == 0 || !IsIdentChar(masked[at - 1]);
+            bool rightOk = scan >= masked.Length || !IsIdentChar(masked[scan]);
+            if (leftOk && rightOk) return at;
+        }
+        return -1;
+    }
+
+    /// <summary>构造 GlobalCode 误用的致命错误文案（中英），并点明「不是 C# 的功能，是本作刻意设计」。</summary>
+    private static string GlobalFatal(int line, string zh, string en)
+    {
+        return Localization.Pick(
+            "致命错误（第 " + line + " 行）：" + zh
+            + "\n注意：GlobalCode 不是 C# 的功能，是本作刻意设计的扩展语法，写错会直接报错，不会被当成普通代码放过。",
+            "Fatal error (L" + line + "): " + en
+            + "\nNote: GlobalCode is NOT a C# feature - it is an extension designed on purpose for this game; misuse is a hard error, never silently ignored.");
+    }
+
+    /// <summary>把注释、字符串、字符字面量抹成空格（保留换行，长度不变），供括号配对与关键字扫描使用。</summary>
+    private static string MaskLiteralsAndComments(string code)
+    {
+        char[] buf = code.ToCharArray();
+        int n = buf.Length;
+        int i = 0;
+        while (i < n)
+        {
+            char c = buf[i];
+
+            // 行注释 //
+            if (c == '/' && i + 1 < n && buf[i + 1] == '/')
+            {
+                while (i < n && buf[i] != '\n') { buf[i] = ' '; i++; }
+                continue;
+            }
+
+            // 块注释 /* */
+            if (c == '/' && i + 1 < n && buf[i + 1] == '*')
+            {
+                buf[i] = ' '; buf[i + 1] = ' ';
+                i += 2;
+                while (i < n && !(buf[i] == '*' && i + 1 < n && buf[i + 1] == '/'))
+                {
+                    if (buf[i] != '\n') buf[i] = ' ';
+                    i++;
+                }
+                if (i < n) { buf[i] = ' '; i++; }
+                if (i < n) { buf[i] = ' '; i++; }
+                continue;
+            }
+
+            // 逐字字符串 @"..."（内部 "" 表示一个引号）
+            if (c == '@' && i + 1 < n && buf[i + 1] == '"')
+            {
+                buf[i] = ' '; buf[i + 1] = ' ';
+                i += 2;
+                while (i < n)
+                {
+                    if (buf[i] == '"')
+                    {
+                        if (i + 1 < n && buf[i + 1] == '"') { buf[i] = ' '; buf[i + 1] = ' '; i += 2; continue; }
+                        buf[i] = ' '; i++; break;
+                    }
+                    if (buf[i] != '\n') buf[i] = ' ';
+                    i++;
+                }
+                continue;
+            }
+
+            // 普通字符串 "..."
+            if (c == '"')
+            {
+                buf[i] = ' '; i++;
+                while (i < n)
+                {
+                    if (buf[i] == '\\' && i + 1 < n) { buf[i] = ' '; buf[i + 1] = ' '; i += 2; continue; }
+                    if (buf[i] == '"') { buf[i] = ' '; i++; break; }
+                    if (buf[i] != '\n') buf[i] = ' ';
+                    i++;
+                }
+                continue;
+            }
+
+            // 字符字面量 '...'
+            if (c == '\'')
+            {
+                buf[i] = ' '; i++;
+                while (i < n)
+                {
+                    if (buf[i] == '\\' && i + 1 < n) { buf[i] = ' '; buf[i + 1] = ' '; i += 2; continue; }
+                    if (buf[i] == '\'') { buf[i] = ' '; i++; break; }
+                    if (buf[i] != '\n') buf[i] = ' ';
+                    i++;
+                }
+                continue;
+            }
+
+            i++;
+        }
+        return new string(buf);
+    }
+
+    /// <summary>在 masked 的 [from, to) 区间里找独立标识符 token（词边界严格匹配，避免 tower 命中 towerHp）。</summary>
+    private static bool ContainsToken(string masked, int from, int to, string token)
+    {
+        int scan = from;
+        while (scan < to)
+        {
+            int at = masked.IndexOf(token, scan, System.StringComparison.Ordinal);
+            if (at < 0 || at + token.Length > to) return false;
+            scan = at + token.Length;
+            bool leftOk = at == 0 || !IsIdentChar(masked[at - 1]);
+            bool rightOk = scan >= masked.Length || !IsIdentChar(masked[scan]);
+            if (leftOk && rightOk) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 解析玩家代码：找出 GlobalCode { ... } 块，块内内容作为「全局区字段」，其余保持原样（块位置用空格占位，行号不变）。
+    /// GlobalCode 是本作定制语法（C# 本身不允许在方法体内声明字段），误用一律返回致命错误，绝不降级成普通代码。
+    /// </summary>
+    private static UserCodeLayout ParseUserCode(string userCode)
+    {
+        UserCodeLayout layout = new UserCodeLayout();
+        string code = (userCode ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+        string masked = MaskLiteralsAndComments(code);
+
+        // 友好纠错：关键字定名 GlobalCode。若玩家照着早期草稿写成 my_global / code_global 之类，直接点明正确名字
+        int aliasAt = IndexOfToken(masked, "my_global");
+        if (aliasAt < 0) aliasAt = IndexOfToken(masked, "code_global");
+        if (aliasAt >= 0)
+        {
+            layout.FatalError = GlobalFatal(LineOf(code, aliasAt),
+                "关键字是 GlobalCode，不是 my_global / code_global —— 正确写法：GlobalCode { int count = 0; }",
+                "The keyword is GlobalCode, not my_global / code_global - write: GlobalCode { int count = 0; }");
+            return layout;
+        }
+
+        // 大小写纠错：GlobalCode 区分大小写（globalCode / Globalcode 都不是关键字），写错大小写直接点明
+        if (IndexOfToken(masked, GlobalBlockKeyword) < 0)
+        {
+            int caseAt = IndexOfTokenIgnoreCase(masked, "globalcode");
+            if (caseAt >= 0)
+            {
+                layout.FatalError = GlobalFatal(LineOf(code, caseAt),
+                    "关键字区分大小写：要写 GlobalCode（G 和 C 都要大写）—— 不区分大小写的写法不会被当成全局区。",
+                    "The keyword is case sensitive: write GlobalCode (capital G and C); other spellings are not the global block.");
+                return layout;
+            }
+        }
+
+        int kwStart = -1, braceOpen = -1, braceClose = -1;
+        int found = 0;
+        int scan = 0;
+        while (scan < masked.Length)
+        {
+            int at = masked.IndexOf(GlobalBlockKeyword, scan, System.StringComparison.Ordinal);
+            if (at < 0) break;
+            scan = at + GlobalBlockKeyword.Length;
+
+            bool leftOk = at == 0 || !IsIdentChar(masked[at - 1]);
+            bool rightOk = scan >= masked.Length || !IsIdentChar(masked[scan]);
+            if (!leftOk || !rightOk) continue; // GlobalCode_1 / xGlobalCode 之类只是普通标识符，不参与解析
+
+            found++;
+            int kwLine = LineOf(code, at);
+            if (found > 1)
+            {
+                layout.FatalError = GlobalFatal(kwLine,
+                    "只能有一个 GlobalCode 全局区，请把多个块合并成一个。",
+                    "only one GlobalCode block is allowed; merge them into a single block.");
+                return layout;
+            }
+
+            int p = scan;
+            while (p < masked.Length && char.IsWhiteSpace(masked[p])) p++;
+            if (p >= masked.Length || masked[p] != '{')
+            {
+                layout.FatalError = GlobalFatal(kwLine,
+                    "GlobalCode 后面必须紧跟 { —— 正确写法是 GlobalCode { int count = 0; }；它不是变量名，不能写 = 值，也不能省大括号。",
+                    "GlobalCode must be followed by { - e.g. GlobalCode { int count = 0; }. It is not a variable name: no '= value', no missing braces.");
+                return layout;
+            }
+
+            kwStart = at;
+            braceOpen = p;
+            braceClose = -1;
+            int depth = 0;
+            for (int q = p; q < masked.Length; q++)
+            {
+                if (masked[q] == '{') depth++;
+                else if (masked[q] == '}')
+                {
+                    depth--;
+                    if (depth == 0) { braceClose = q; break; }
+                }
+            }
+            if (braceClose < 0)
+            {
+                layout.FatalError = GlobalFatal(kwLine,
+                    "GlobalCode 全局区缺少配对的 } —— 大括号必须成对，请在块尾补一个 }。",
+                    "the GlobalCode block is missing its closing } - braces must pair up; add } at the end of the block.");
+                return layout;
+            }
+        }
+
+        // 没有全局区：整份代码原样进 Run 方法体，行号 = 行序
+        if (found == 0)
+        {
+            string[] plain = code.Split('\n');
+            for (int i = 0; i < plain.Length; i++)
+            {
+                layout.BodyLines.Add(plain[i]);
+                layout.BodyUserLines.Add(i + 1);
+            }
+            return layout;
+        }
+
+        layout.HasGlobalBlock = true;
+
+        // 全局区里不能出现 tower：它是 Run(tower) 的参数，只在每帧语句里存在
+        if (ContainsToken(masked, braceOpen + 1, braceClose, "tower"))
+        {
+            layout.FatalError = GlobalFatal(LineOf(code, braceOpen),
+                "GlobalCode 全局区里不能用 tower —— tower 只在 Run(tower) 里存在。全局区只写字段声明（int / float / bool / string / 数组 / List），要用炮台请写到下面的每帧语句里。",
+                "tower cannot be used inside GlobalCode - it only exists in Run(tower). Declare fields only (int / float / bool / string / arrays / List) and use tower in the per-frame code below.");
+            return layout;
+        }
+
+        // ---- 全局区：逐行取出，逐行记录玩家行号 ----
+        int curLine = LineOf(code, braceOpen + 1);
+        int segStart = braceOpen + 1;
+        for (int i = braceOpen + 1; i <= braceClose; i++)
+        {
+            bool cut = i == braceClose || code[i] == '\n';
+            if (!cut) continue;
+            layout.FieldLines.Add(code.Substring(segStart, i - segStart));
+            layout.FieldUserLines.Add(curLine);
+            curLine++;
+            segStart = i + 1;
+            if (i == braceClose) break;
+        }
+        // 去掉块内首尾纯空白行（只是排版，不含玩家代码）
+        while (layout.FieldLines.Count > 0 && layout.FieldLines[0].Trim().Length == 0)
+        {
+            layout.FieldLines.RemoveAt(0);
+            layout.FieldUserLines.RemoveAt(0);
+        }
+        while (layout.FieldLines.Count > 0 && layout.FieldLines[layout.FieldLines.Count - 1].Trim().Length == 0)
+        {
+            layout.FieldLines.RemoveAt(layout.FieldLines.Count - 1);
+            layout.FieldUserLines.RemoveAt(layout.FieldUserLines.Count - 1);
+        }
+
+        // ---- 每帧语句：全局区原地挖空（保留换行），行号与原文完全一致 ----
+        char[] bodyBuf = code.ToCharArray();
+        int blankEnd = braceClose < bodyBuf.Length ? braceClose : bodyBuf.Length - 1;
+        for (int i = kwStart; i <= blankEnd; i++)
+            if (bodyBuf[i] != '\n') bodyBuf[i] = ' ';
+        string[] bodyLines = new string(bodyBuf).Split('\n');
+        for (int i = 0; i < bodyLines.Length; i++)
+        {
+            if (bodyLines[i].Trim().Length == 0) continue;
+            layout.BodyLines.Add(bodyLines[i]);
+            layout.BodyUserLines.Add(i + 1);
+        }
+        return layout;
+    }
+
+    /// <summary>用模板包裹玩家代码：全局区字段拼到类体级别，其余语句留在 Run 方法体内；同时输出「模板行 → 玩家行」映射表。</summary>
+    private static string WrapUserCode(UserCodeLayout layout, out string className, out int[] templateLineToUser)
     {
         StringBuilder idSb = new StringBuilder(8);
         const string hexChars = "0123456789abcdef";
@@ -1275,33 +1665,55 @@ public class CodeEditorController : MonoBehaviour
             idSb.Append(hexChars[Random.Range(0, hexChars.Length)]);
         className = "UserTowerCode_" + idSb.ToString();
 
-        string template =
-            "using UnityEngine;\n" +
-            "using System;\n" +
-            "using System.Collections;\n" +
-            "using System.Collections.Generic;\n" +
-            "\n" +
-            "public class " + className + "\n" +
-            "{\n" +
-            "    public void Run(CodeTower tower)\n" +
-            "    {\n" +
-            "// ===== USER CODE START =====\n" +
-            userCode + "\n" +
-            "// ===== USER CODE END =====\n" +
-            "    }\n" +
-            "}\n";
+        List<string> outLines = new List<string>(layout.FieldLines.Count + layout.BodyLines.Count + 16);
+        List<int> map = new List<int>(layout.FieldLines.Count + layout.BodyLines.Count + 16);
 
-        userCodeStartLine = 10;
-        string[] lines = template.Split('\n');
-        for (int i = 0; i < lines.Length; i++)
+        System.Action<string, int> add = (text, userLine) => { outLines.Add(text); map.Add(userLine); };
+
+        add("using UnityEngine;", 0);
+        add("using System;", 0);
+        add("using System.Collections;", 0);
+        add("using System.Collections.Generic;", 0);
+        add("", 0);
+        add("public class " + className, 0);
+        add("{", 0);
+        add("// ===== USER GLOBAL START ===== (GlobalCode block: hoisted to class-level fields, survives frames)", 0);
+        for (int i = 0; i < layout.FieldLines.Count; i++)
+            add(layout.FieldLines[i], layout.FieldUserLines[i]);
+        add("// ===== USER GLOBAL END =====", 0);
+        add("    public void Run(CodeTower tower)", 0);
+        add("    {", 0);
+        add("// ===== USER CODE START =====", 0);
+        for (int i = 0; i < layout.BodyLines.Count; i++)
+            add(layout.BodyLines[i], layout.BodyUserLines[i]);
+        add("// ===== USER CODE END =====", 0);
+        add("    }", 0);
+        add("}", 0);
+
+        templateLineToUser = map.ToArray();
+
+        StringBuilder sb = new StringBuilder(1024);
+        for (int i = 0; i < outLines.Count; i++)
         {
-            if (lines[i].Contains("USER CODE START"))
-            {
-                userCodeStartLine = i + 1;
-                break;
-            }
+            sb.Append(outLines[i]);
+            if (i < outLines.Count - 1) sb.Append('\n');
         }
-        return template;
+        sb.Append('\n');
+        return sb.ToString();
+    }
+
+    /// <summary>模板行号 → 玩家代码行号：取该行本身或 upward/downward 最近的玩家行；找不到返回 0（模板行）。</summary>
+    private static int MapTemplateLine(int[] templateLineToUser, int templateLine)
+    {
+        if (templateLineToUser == null || templateLineToUser.Length == 0) return 0;
+        int idx = templateLine - 1;
+        if (idx < 0) idx = 0;
+        if (idx >= templateLineToUser.Length) idx = templateLineToUser.Length - 1;
+        for (int i = idx; i >= 0; i--)
+            if (templateLineToUser[i] > 0) return templateLineToUser[i];
+        for (int i = idx; i < templateLineToUser.Length; i++)
+            if (templateLineToUser[i] > 0) return templateLineToUser[i];
+        return 0;
     }
 
     /// <summary>解析 netstandard.dll 编译引用路径：优先编辑器 Mono 运行时 Facades（与运行时同源同版本、类型转发不产生 CS0433），
@@ -1436,7 +1848,11 @@ public class CodeEditorController : MonoBehaviour
                 int start = i;
                 while (i < n && (char.IsLetterOrDigit(code[i]) || code[i] == '_')) i++;
                 string word = code.Substring(start, i - start);
-                AppendToken(sb, word, keywords.Contains(word) ? C_KEYWORD : C_DEFAULT, smallSize);
+                // GlobalCode 是本作扩展关键字（不是 C# 关键字）：单独给蓝色，和原生关键字的青区分开
+                string wordColor = word == GlobalBlockKeyword
+                    ? C_GLOBAL
+                    : (keywords.Contains(word) ? C_KEYWORD : C_DEFAULT);
+                AppendToken(sb, word, wordColor, smallSize);
                 continue;
             }
 
@@ -5146,9 +5562,68 @@ public class CodeEditorController : MonoBehaviour
         RefreshTitleBarChrome(); // 同步按钮前导箭头（▸ 收起 / ▾ 展开）与宽度
     }
 
+    /// <summary>
+    /// 红条的自管拖动：不依赖 EventSystem 的 IBeginDrag。
+    /// EventSystem 要等指针移动超过 pixelDragThreshold 才发 BeginDrag，而 OnBeginDrag 里拿到的
+    /// position 是「越过阈值那一帧」的位置，不是按下点；红条命中带又只有十几像素，一划就出界，
+    /// 于是表现为「按住了、也拖了，但有时候整条纹丝不动」。这里改成按下那一刻就用屏幕坐标判定并记起点，
+    /// 拖动全程用当前指针算增量，指针移出红条范围也不中断，与系统滚动条的手感一致。
+    /// </summary>
+    private void TickErrorSplitInputDrag()
+    {
+        if (!IsOpen)
+        {
+            errorSplitInputDrag = false;
+            return;
+        }
+
+        if (Input.GetMouseButtonDown(0) && CanStartErrorSplitInputDrag())
+        {
+            errorSplitInputDrag = true;
+            errorSplitInputDragTime = Time.unscaledTime;
+            errorSplitStartMouseY = Input.mousePosition.y;
+            errorSplitStartHeight = errorZoneHeightCurrent();
+            if (errorZoneManualHeight <= 0f)
+                errorZoneManualHeight = errorSplitStartHeight;
+        }
+
+        if (!errorSplitInputDrag)
+            return;
+
+        // 按住超过 10 秒就当作抬起事件丢了，强制松手，免得松掉鼠标后红条还黏在指针上
+        if (Time.unscaledTime - errorSplitInputDragTime > 10f)
+        {
+            errorSplitInputDrag = false;
+            return;
+        }
+
+        if (Input.GetMouseButton(0))
+            DragErrorSplitCore(Input.mousePosition.y);
+        else
+            errorSplitInputDrag = false;
+    }
+
+    /// <summary>按下点是否落在红条命中带内（含上下各 ErrorSplitInputSlack 的容差）。</summary>
+    private bool CanStartErrorSplitInputDrag()
+    {
+        if (errorSplitHitRt == null || !errorSplitHitRt.gameObject.activeInHierarchy)
+            return false; // 红条被压在底部收起时不接管指针，让蓝条自己去拉
+
+        Vector2 local;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(errorSplitHitRt, Input.mousePosition, null, out local))
+            return false;
+
+        Rect r = errorSplitHitRt.rect;
+        return local.x >= r.xMin && local.x <= r.xMax
+            && local.y >= r.yMin - ErrorSplitInputSlack && local.y <= r.yMax + ErrorSplitInputSlack;
+    }
+
     /// <summary>按下红色分隔条：记下起点（屏幕像素）与当时的错误区高度。</summary>
     private void BeginErrorSplitDrag(PointerEventData ev)
     {
+        // 自管拖动已经在按下那一刻记好起点了：这里再写一次会把「按下点到越过拖动阈值」的那段位移吞掉。
+        if (errorSplitInputDrag)
+            return;
         errorSplitStartMouseY = ev.position.y;
         errorSplitStartHeight = errorZoneHeightCurrent();
         if (errorZoneManualHeight <= 0f)
@@ -5161,9 +5636,15 @@ public class CodeEditorController : MonoBehaviour
     /// </summary>
     private void DragErrorSplit(PointerEventData ev)
     {
+        DragErrorSplitCore(ev.position.y);
+    }
+
+    /// <summary>红条拖动的唯一核心：无论事件来自 EventSystem 还是自管输入，都按「当前指针 Y - 按下时指针 Y」算增量。</summary>
+    private void DragErrorSplitCore(float pointerScreenY)
+    {
         Canvas canvas = GetComponentInParent<Canvas>();
         float scale = (canvas != null && canvas.scaleFactor > 0f) ? canvas.scaleFactor : 1f;
-        float dy = (ev.position.y - errorSplitStartMouseY) / scale;
+        float dy = (pointerScreenY - errorSplitStartMouseY) / scale;
         float target = Mathf.Clamp(errorSplitStartHeight + dy, 0f, GetErrorZoneMaxHeight());
         errorZoneManualHeight = target;              // 记住手动设定值，后续报错自适应不再覆盖它
         // 压到合并阈值以下就算「收起」：红条与蓝条已经并成一条，再来报错时才自动弹回，避免卡在半收不放的怪状态
@@ -5697,8 +6178,10 @@ public class CodeEditorController : MonoBehaviour
         errorSplitHitRt.anchorMin = new Vector2(0f, 1f);
         errorSplitHitRt.anchorMax = new Vector2(1f, 1f);
         errorSplitHitRt.pivot = new Vector2(0.5f, 1f);
-        errorSplitHitRt.anchoredPosition = new Vector2(0f, -ErrorSplitTopGap);
-        errorSplitHitRt.sizeDelta = new Vector2(0f, ErrorSplitHitHeight); // 真正用上 9px 命中厚度（此前只给了 4px，难怪不好抓）
+        // 命中带从「红条上沿再往上 4px」一直铺到红条下方 —— 按住红条本体、或按到它上下边缘几像素都不会落空。
+        errorSplitHitRt.anchoredPosition = new Vector2(0f, -(ErrorSplitTopGap - ErrorSplitInputSlack));
+        errorSplitHitRt.sizeDelta = new Vector2(0f, ErrorSplitHitHeight);
+        errorSplitHitRt.SetAsLastSibling(); // 压在最上层：红条、提示条、归属区都不许抢指针
         Image errSplitHitImg = errorSplitHitRt.gameObject.AddComponent<Image>();
         errSplitHitImg.color = UITheme.WithAlpha(errorColor, 0f);
         errSplitHitImg.raycastTarget = true;

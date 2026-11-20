@@ -56,9 +56,9 @@ public class CommandConsoleController : MonoBehaviour
 
     /// <summary>
     /// 手动（鼠标左键）激光总开关：只有 Level 1 - Part 1（引导教学关）允许手动发射激光，
-    /// 其余所有关卡（Level 1 - Part 2 讲解关 / Part 3 语法课、Level 2 - Part 1 图鉴关 / Part 2 API 课、Level 3 - Part 1 及后续完整关）一律禁用。
+    /// 其余所有关卡（Level 1 - Part 2 / Part 3 讲解关 / Part 4 语法课、Level 2 - Part 1 图鉴关 / Part 2 API 课、Level 3 - Part 1 及后续完整关）一律禁用。
     /// 由 LevelDirector / MainMenuController 在进入关卡时通过 SetManualLaserAllowed 设置；
-    /// 只拦截「左键 → FireLaser」这一条手动链路，不影响炮台代码 tower.FireAtPlane /
+    /// 只拦截「左键 → FireLaser」这一条手动链路，不影响炮台代码 tower.Fire /
     /// 自动打方块脚本 AutoLaserExample / 教学 Step.FireLaser 等调用 console.FireLaser 的链路。
     /// </summary>
     public static bool ManualLaserEnabled = false;
@@ -500,7 +500,7 @@ public class CommandConsoleController : MonoBehaviour
     /// <summary>
     /// 开发者指令 /level &lt;关卡&gt; &lt;部分&gt; [章节]：跳转到指定关卡的分区，
     /// 可选第三参数 n 表示该分区内的章节序号（1 起）：Level 1 - Part 2 讲解关按页（4 页）、
-/// Level 1 - Part 3 语法课按任务（18 项）、Level 2 - Part 2 API 课按任务（13 项）。
+    /// Level 1 - Part 3 编辑器入门关按页（8 页）、Level 1 - Part 4 语法课按任务（49 项）、Level 2 - Part 2 API 课按任务（15 项）。
     /// 参数非法（非整数 / 章节越界 / 关卡未开放）时只输出提示，不抛异常。
     ///
     /// 与断点续玩存档的优先级：本指令优先级最高。跳转成功时 LevelDirector.JumpTo 会把「本次跳关参数」写入续玩存档，

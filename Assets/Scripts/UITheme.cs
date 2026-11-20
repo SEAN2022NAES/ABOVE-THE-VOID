@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 全局 UI 视觉主题（纯配色层，不改任何布局与渲染逻辑）。
@@ -99,6 +99,8 @@ public static class UITheme
     public static readonly Color SyntaxNumber = Hex(0xB46BE6, 1f);
     /// <summary>语法高亮：注释</summary>
     public static readonly Color SyntaxComment = Hex(0x5D7488, 1f);
+    /// <summary>语法高亮：本作扩展关键字 GlobalCode（蓝，刻意区别于 C# 原生关键字的青）</summary>
+    public static readonly Color SyntaxGlobal = Hex(0x4C8CFF, 1f);
 
     // ── 语法高亮 hex 字符串（供 UGUI 富文本 &lt;color=#xxxxxx&gt; 使用） ──────
     /// <summary>关键字 #5CD8F2</summary>
@@ -111,6 +113,8 @@ public static class UITheme
     public const string HexComment = "#5D7488";
     /// <summary>普通代码正文 #8FA6B8</summary>
     public const string HexDefault = "#8FA6B8";
+    /// <summary>扩展关键字 GlobalCode 蓝 #4C8CFF</summary>
+    public const string HexGlobal = "#4C8CFF";
 
     // ── 语义色（坐标轴 X/Y/Z） ──────────────────────────────────────
     /// <summary>X 轴：青</summary>

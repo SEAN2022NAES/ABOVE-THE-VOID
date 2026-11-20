@@ -54,6 +54,15 @@ public class BlockIntroController : MonoBehaviour
     private const float FaceOffset = 0.5f;    // 立方体半边长（单位立方体）
     private const int TextureSize = 768;      // RenderTexture 边长
 
+    // ---- 面上的文字：尺寸一律按 TextMesh 实测网格包围盒缩，不按字符宽度估算 ----
+    private const float FaceTextMaxWidth = 0.80f;   // 面片 1 单位见方，文字允许占用的最大宽 / 高
+    private const float FaceTextMaxHeight = 0.64f;
+    private const float FaceTextBaseSize = 0.1f;    // characterSize 固定基准，字号适配只交给 localScale
+    private const float FaceTextZ = 0.02f;          // 文字离面片的距离（贴在色块外侧）
+    private const int FaceTextFontSize = 64;        // 字体图集字号：只影响清晰度，不影响最终尺寸
+
+    private static Mesh facePlateMesh;              // 六个面共用的双面平面网格
+
     private const float FadeOutSeconds = 0.35f;
     private const float FadeInSeconds = 0.5f;
     private const KeyCode SkipKey = KeyCode.S;   // 跳过整段图鉴（与「跳过图鉴 (S)」按钮同一条链路）
@@ -88,7 +97,7 @@ public class BlockIntroController : MonoBehaviour
     private const float NavSkipW = 240f;
     private const float NavLabelPadding = 48f;
     private const float NavBtnH = 62f;
-    private const float NavBtnY = 40f;
+    private const float NavBtnY = 36f;   // 离面板底的中心距：与上方图例（最后一行底约距顶 862）留出空隙，避免压字
     private readonly Image[] legendBgs = new Image[6];
     private readonly Text[] legendTexts = new Text[6];
     private PlayerCameraController playerController; // 看页期间接管视角：释放鼠标、禁止鼠标转朝向
@@ -261,7 +270,7 @@ public class BlockIntroController : MonoBehaviour
         + "判定看的是坐标，不是碰撞体：\n"
         + "    if (b.Position.z < 0f)   // 已经越过基地平面\n"
         + "（沿 X 轴来的看 x，沿 Y 轴来的看 y，三轴同理）\n\n"
-        + "所以 FireAtPlane(A, B, C) 的三个参数，就是「在这个平面上开炮」；\n"
+        + "所以 Fire(new Vector3(A, B, C)) 的三个参数，就是「在这个平面上开炮」；\n"
         + "提前量算的就是「方块到达这个平面时，炮口该指向哪」。",
 
         "名称当前只有两种：\n"
@@ -309,7 +318,7 @@ public class BlockIntroController : MonoBehaviour
         + "The check uses coordinates, not colliders:\n"
         + "    if (b.Position.z < 0f)   // already past the base plane\n"
         + "(blocks coming along X check x, along Y check y - same idea on every axis)\n\n"
-        + "So FireAtPlane(A, B, C) means \"fire at this plane\",\n"
+        + "So Fire(new Vector3(A, B, C)) means \"fire at this plane\",\n"
         + "and leading a target is just predicting where the turret should aim when the block arrives there.",
 
         "There are two names for now:\n"
@@ -356,7 +365,8 @@ public class BlockIntroController : MonoBehaviour
         }
 
         // S 键：跳过整段图鉴，直接进入 Level 2 - Part 2 炮台 API 课
-        if (Input.GetKeyDown(SkipKey))
+        // 最后一页不给 S：那一页的 Next 本来就是进 API 课，再跳过等于白跳
+        if (Input.GetKeyDown(SkipKey) && CurrentPage < PageCount - 1)
         {
             SkipAll();
             return;
@@ -364,6 +374,12 @@ public class BlockIntroController : MonoBehaviour
 
         SpinCube();
         UpdateFrontFace();
+
+        // 面的文字尺寸按实测网格包围盒算：TextMesh 在文本 / 字体刚被改写的那一帧，网格与包围盒还是上一版，
+        // 只在创建时算一次就会把字撑出面片（换语言 / 翻页后变成满屏大字，被相邻面遮成碎片）。
+        // 这里每帧只对「当前正对镜头的那一张」重算，滞后一帧自动纠正；其余五张本来就不显示。
+        if (frontFace >= 0 && frontFace < faceLabels.Length)
+            FitFaceLabel(faceLabels[frontFace]);
     }
 
     // ================== 对外接口 ==================
@@ -518,6 +534,7 @@ public class BlockIntroController : MonoBehaviour
     {
         bool zh = Localization.IsChinese;
         int page = Mathf.Clamp(CurrentPage, 0, PageCount - 1);
+        bool lastPage = page >= PageCount - 1;
 
         if (pageDone != null && page < pageDone.Length && !pageDone[page])
         {
@@ -542,15 +559,27 @@ public class BlockIntroController : MonoBehaviour
                 + bodySize + "（正文框 " + (int)BodyBoxWidth + "×" + (int)BodyBoxHeight + "）");
         }
 
-        SetLabel(footerText, zh
-            ? "键盘 ← → 翻页　·　按 S 跳过图鉴　·　读完最后一页即可进入炮台 API 课"
-            : "Arrows page through · press S to skip the guide · finish the last page to start the API course");
+        // 本关不再显示页脚玩法提示（翻页 / 按 S 跳过图鉴 / 末页进 API 课）：
+        // 按钮上已经写着「跳过图鉴 (S)」「开始 API 课 ›」，再挂一行灰字纯属占地方，
+        // 而且会挤到右侧图鉴的排版，玩家自己一看按钮就知道怎么走。这里直接清空并隐藏。
+        if (footerText != null)
+        {
+            SetLabel(footerText, string.Empty);
+            if (footerText.gameObject.activeSelf)
+                footerText.gameObject.SetActive(false);
+        }
 
         SetLabel(prevLabel, zh ? "‹ 上一页" : "‹ Back");
-        SetLabel(nextLabel, page >= PageCount - 1
+        SetLabel(nextLabel, lastPage
             ? (zh ? "开始 API 课 ›" : "Start the API course ›")
             : (zh ? "下一页 ›" : "Next ›"));
         SetLabel(skipLabel, zh ? "跳过图鉴 (S)" : "Skip guide (S)");
+
+        // 末页把「跳过图鉴」整颗按钮撤掉（只 SetActive、不销毁），翻回前面几页再显示；
+        // LayoutNavButtons 按 activeSelf 重排，所以必须在它之前改显隐
+        if (skipRt != null)
+            skipRt.gameObject.SetActive(!lastPage);
+
         LayoutNavButtons();
 
         if (prevBtn != null)
@@ -564,7 +593,7 @@ public class BlockIntroController : MonoBehaviour
             FaceDef f = Faces[i];
             string faceName = zh ? f.nameZh : f.nameEn;
 
-            string faceLabelText = faceName + "\n" + f.value;
+            string faceLabelText = ComposeFaceText(faceName, f.value);
             SetFaceLabelText(faceLabels[i], faceLabelText);
 
             if (legendTexts[i] != null)
@@ -703,11 +732,12 @@ public class BlockIntroController : MonoBehaviour
         Vector3 up = Mathf.Abs(Vector3.Dot(f.normal, Vector3.up)) > 0.9f ? Vector3.forward : Vector3.up;
         faceNode.transform.localRotation = Quaternion.LookRotation(f.normal, up);
 
-        // 一张 Quad 只有单面可见，而 Unity 内置 Quad 的正面朝哪一侧属于引擎实现细节（不同版本 / 不同
-        // 内置资源可能不一致）。这里直接正反各铺一张同色 Quad：无论正面朝 +Z 还是 -Z，绕 Y 转 180°
-        // 的另一张都会把另一侧补上，因此从立方体外任意方向看过去都一定是实体色块，不会出现整面透明。
-        CreateQuad(faceNode.transform, "Color" + index + "A", 0f, f.faceColor);
-        CreateQuad(faceNode.transform, "Color" + index + "B", 180f, f.faceColor);
+        // 面片必须「一张就够、两面都看得见」：
+        //   · 早先是在同一个挂点下正反各铺一张同色 Quad（0° + 180°），两张严格共面：只要材质不剔背面
+        //     或用了受光材质，两个面就是在同一深度上抢像素，面色会一块块地闪（青色 / 粉色边沿乱跳）；
+        //   · 现在自己建一个 1 单位见方、正反两套三角面的平面网格（法线统一朝 +Z）：单个物体、单个材质，
+        //     不依赖内置 Quad 的正面朝向，也不存在同深度的第二张面片可以打架。
+        CreateFacePlate(faceNode.transform, "Color" + index, f.faceColor);
 
         // 面上文字：只放一张，朝向 = 面挂点的 +Z（即外法线方向），贴在色块外侧一点，
         // 从立方体外看是正读的；内壁不再放镜像字，避免转过来时看到双重 / 背面反字。
@@ -716,36 +746,61 @@ public class BlockIntroController : MonoBehaviour
         faceTransforms[index] = faceNode.transform;
     }
 
-    /// <summary>在面挂点下铺一张单位 Quad（去掉碰撞体、关阴影），yRotation 控制正面朝向。</summary>
-    private void CreateQuad(Transform parent, string name, float yRotation, Color color)
+    /// <summary>
+    /// 六个面共用的「双面平面」网格：1 单位见方、4 个顶点、法线统一朝 +Z，三角面正反各一套绕序。
+    /// 双绕序意味着无论材质是 Cull Back / Front / Off 都一定看得见，同时几何只有一层，不会有共面冲突。
+    /// </summary>
+    private static Mesh GetFacePlateMesh()
     {
-        GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        quad.name = name;
-        quad.transform.SetParent(parent, false);
-        quad.transform.localPosition = Vector3.zero;
-        quad.transform.localRotation = Quaternion.Euler(0f, yRotation, 0f);
-        quad.transform.localScale = Vector3.one;
+        if (facePlateMesh != null)
+            return facePlateMesh;
 
-        Collider col = quad.GetComponent<Collider>();
-        if (col != null)
-            Destroy(col); // 图鉴关没有碰撞需求，销毁碰撞体避免被炮台 / 射线误判
-
-        MeshRenderer mr = quad.GetComponent<MeshRenderer>();
-        if (mr != null)
+        Mesh m = new Mesh();
+        m.name = "BlockIntroFacePlate";
+        m.vertices = new[]
         {
-            Shader sh = Shader.Find("Unlit/Color");
-            if (sh == null)
-                sh = Shader.Find("Standard");
-            if (sh == null)
-                sh = Shader.Find("Sprites/Default");
-            Material mat = new Material(sh);
-            mat.color = color;
-            mr.sharedMaterial = mat;
-            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            mr.receiveShadows = false;
-            mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-            mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
-        }
+            new Vector3(-0.5f, -0.5f, 0f),
+            new Vector3(0.5f, -0.5f, 0f),
+            new Vector3(0.5f, 0.5f, 0f),
+            new Vector3(-0.5f, 0.5f, 0f)
+        };
+        m.normals = new[] { Vector3.forward, Vector3.forward, Vector3.forward, Vector3.forward };
+        m.uv = new[]
+        {
+            new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(0f, 1f)
+        };
+        m.triangles = new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0 };
+        m.RecalculateBounds();
+        facePlateMesh = m;
+        return m;
+    }
+
+    /// <summary>在面挂点下铺一张 1 单位见方的双面色块（自建网格，不依赖内置 Quad 的正面朝向）。</summary>
+    private void CreateFacePlate(Transform parent, string name, Color color)
+    {
+        GameObject plate = new GameObject(name);
+        plate.transform.SetParent(parent, false);
+        plate.transform.localPosition = Vector3.zero;
+        plate.transform.localRotation = Quaternion.identity;
+        plate.transform.localScale = Vector3.one;
+
+        MeshFilter mf = plate.AddComponent<MeshFilter>();
+        mf.sharedMesh = GetFacePlateMesh();
+
+        MeshRenderer mr = plate.AddComponent<MeshRenderer>();
+        // 不用 CreatePrimitive：内置 Quad 自带碰撞体（图鉴关不想要），朝向还取决于引擎内置资源
+        Shader sh = Shader.Find("Unlit/Color");
+        if (sh == null)
+            sh = Shader.Find("Sprites/Default");
+        if (sh == null)
+            sh = Shader.Find("Standard");
+        Material mat = new Material(sh);
+        mat.color = color;
+        mr.sharedMaterial = mat;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+        mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+        mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
     }
 
     /// <summary>
@@ -758,13 +813,14 @@ public class BlockIntroController : MonoBehaviour
         GameObject labelGo = new GameObject("FaceLabel" + index);
         labelGo.transform.SetParent(parent, false);
         labelGo.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);     // TextMesh 正面 = 局部 -Z，转 180° 后朝外
-        labelGo.transform.localPosition = new Vector3(0f, 0f, 0.02f);          // 贴在色块外侧，避免与面片 Z 冲突
+        labelGo.transform.localPosition = new Vector3(0f, 0f, FaceTextZ);      // 贴在色块外侧，避免与面片 Z 冲突
+        labelGo.transform.localScale = new Vector3(0.01f, 0.01f, 1f);          // 先压小：网格还没生成时宁可看不见，也不要在第一帧糊一屏大字
 
         TextMesh tm = labelGo.AddComponent<TextMesh>();
-        tm.text = f.nameZh + "\n" + f.value;
-        tm.font = UIFontHelper.LoadForText(tm.text, 56);
-        tm.fontSize = 56;
-        tm.characterSize = 0.042f;
+        tm.text = ComposeFaceText(f.nameZh, f.value);
+        tm.font = UIFontHelper.LoadForText(tm.text, FaceTextFontSize);
+        tm.fontSize = FaceTextFontSize;
+        tm.characterSize = FaceTextBaseSize;   // 固定基准：真正的尺寸由 FitFaceLabel 按实测包围盒给 localScale
         tm.anchor = TextAnchor.MiddleCenter;
         tm.alignment = TextAlignment.Center;
         tm.color = f.textColor;
@@ -778,35 +834,109 @@ public class BlockIntroController : MonoBehaviour
     }
 
     /// <summary>
-    /// 按实测文字包围盒把字号缩放到「不超出面宽」：中英文 / 长短不同的面名（如「数据类型 int float Vector3」）
-    /// 都能贴合到同一块面上，不会有大有小或者顶出方块边缘。
+    /// 估算一行文字的宽度（单位：一个字号宽）。只用来判断「这句取值要不要折行」，
+    /// 绝不用来算字号 —— 字号一律交给 FitFaceLabel 按实测网格包围盒缩。
+    /// </summary>
+    private static float EstimateWidth(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0f;
+        float w = 0f;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch == ' ')
+                w += 0.32f;                  // 空格
+            else if (ch >= 0x2E80)
+                w += 1.00f;                  // 中日韩等全角字符，宽度 ≈ 一个字
+            else if (ch >= 'A' && ch <= 'Z')
+                w += 0.68f;                  // 大写字母比小写略宽
+            else
+                w += 0.56f;                  // 小写字母 / 数字 / 半角符号
+        }
+        return w;
+    }
+
+    /// <summary>
+    /// 面名 + 取值拼成面上的文字。取值太长（如「int float Vector3」）时按空格折成两行：
+    /// 面片只有 1 单位见方，一行越长字号就越小，折行能把字号抬回来，读到清楚的字。
+    /// </summary>
+    private static string ComposeFaceText(string faceName, string value)
+    {
+        string head = faceName ?? string.Empty;
+        string val = value ?? string.Empty;
+        const float WrapWidth = 8.0f;   // 阈值定在 8 个字宽：只有「int float Vector3」这类长串才折行，
+                                        // 坐标「(0, 8, -2)」等短值保持一行（从中间拆开会读不懂）
+        if (EstimateWidth(val) > WrapWidth)
+        {
+            int split = -1;
+            float bestDiff = float.MaxValue;
+            for (int i = 0; i < val.Length; i++)
+            {
+                if (val[i] != ' ')
+                    continue;
+                float diff = Mathf.Abs(EstimateWidth(val.Substring(0, i)) - EstimateWidth(val.Substring(i + 1)));
+                if (diff < bestDiff)
+                {
+                    bestDiff = diff;
+                    split = i;
+                }
+            }
+            if (split > 0)
+                val = val.Substring(0, split) + "\n" + val.Substring(split + 1);
+        }
+        return head + "\n" + val;
+    }
+
+    /// <summary>
+    /// 按实测网格包围盒把整段文字缩放到「刚好落在面片内」，用 localScale 缩放，不改 characterSize。
+    ///
+    /// 为什么不用字符宽度估算：TextMesh 的世界尺寸 = characterSize × 字体像素尺寸 × 引擎内部系数，
+    /// 而这个系数跟字体资产（Noto / JetBrains / 系统兜底字体）、fontSize、字号是否被烘进顶点都有关，
+    /// 用「0.78 / 最宽行字数」这类纯字符估算会算出一个偏大好几倍的值 —— 字直接撑出面片、压到相邻面上，
+    /// 屏幕上只剩几个被切碎的大字母（"DE"/"T"/"A"）。
+    /// 为什么不改 characterSize 而改成缩 transform：characterSize 一改，网格要重建，包围盒还是旧值，
+    /// 想按包围盒反推就得等一帧，两次测量互相追赶会来回抖；把 characterSize 固定成基准、只动 localScale，
+    /// 网格只随「文本 / 字体」变化，缩放值就可以每帧重算，滞后一帧也自愈。
     /// </summary>
     private static void FitFaceLabel(TextMesh tm)
     {
         if (tm == null)
             return;
-        tm.characterSize = 0.05f; // 基准字号，再按实测包围盒等比缩放
-        Renderer r = tm.GetComponent<Renderer>();
-        if (r == null)
+
+        MeshFilter mf = tm.GetComponent<MeshFilter>();
+        Mesh mesh = mf != null ? mf.sharedMesh : null;
+        if (mesh == null)
             return;
-        Vector3 size = r.bounds.size; // 父级只有旋转、没有缩放，世界尺寸即局部尺寸
+
+        Vector3 size = mesh.bounds.size;   // 局部空间尺寸：父级只有旋转，不受立方体旋转影响
         if (size.x <= 0.0001f || size.y <= 0.0001f)
             return;
-        float k = Mathf.Min(0.80f / size.x, 0.60f / size.y); // 面宽 1 单位，留 10% 边距
-        tm.characterSize = Mathf.Clamp(0.05f * k, 0.004f, 0.2f);
+
+        float k = Mathf.Min(FaceTextMaxWidth / size.x, FaceTextMaxHeight / size.y);
+        if (k <= 0f || float.IsNaN(k) || float.IsInfinity(k))
+            return;
+
+        tm.transform.localScale = new Vector3(k, k, 1f);
+
+        // 缩放同时把包围盒中心拉回面片正中：多行 / 行尾空格会让包围盒偏离原点，不修正就会偏出边缘。
+        // 偏移量在标签自己的局部空间算，再按标签的旋转（绕 Y 180°）转到挂点空间，最后补上朝外的 Z 偏移。
+        Vector3 c = mesh.bounds.center;
+        Vector3 offset = tm.transform.localRotation * new Vector3(-c.x * k, -c.y * k, 0f);
+        tm.transform.localPosition = offset + new Vector3(0f, 0f, FaceTextZ);
     }
 
-    /// <summary>改写面上文字（换语言 / 换页时同步正反两面），并按新文本重新配字体图集。</summary>
+    /// <summary>改写面上文字（换语言 / 换页时），并按新文本重新配字体图集与缩放。</summary>
     private static void SetFaceLabelText(TextMesh tm, string text)
     {
         if (tm == null)
             return;
         tm.text = text;
-        tm.font = UIFontHelper.LoadForText(text, 56);
+        tm.font = UIFontHelper.LoadForText(text, FaceTextFontSize);
         MeshRenderer mr = tm.GetComponent<MeshRenderer>();
         if (mr != null && tm.font != null)
             mr.sharedMaterial = tm.font.material;
-        FitFaceLabel(tm);
+        FitFaceLabel(tm);   // 这一帧网格还是旧文本，Update 里每帧会再算一次，一帧内纠正
     }
 
     private void ReleaseViewport()
@@ -962,8 +1092,8 @@ public class BlockIntroController : MonoBehaviour
             int col = i % 2;
             int row = i / 2;
             RectTransform rowRt = CreateRect("Legend" + i, panelRt, new Vector2(0f, 1f),
-                new Vector2(56f + col * (colW + 12f), -(800f + row * 26f)),
-                new Vector2(colW, 24f), new Vector2(0f, 1f));
+                new Vector2(56f + col * (colW + 12f), -(794f + row * 23f)),
+                new Vector2(colW, 22f), new Vector2(0f, 1f));
             Image bg = rowRt.gameObject.AddComponent<Image>();
             bg.sprite = WhiteSprite();
             bg.color = UITheme.WithAlpha(UITheme.PanelSunk, 0.55f);
@@ -1042,14 +1172,23 @@ public class BlockIntroController : MonoBehaviour
 
         float nextW = Mathf.Clamp(MeasureNavLabelWidth() + NavLabelPadding, NavNextWMin, NavNextWMax);
 
-        float groupW = NavPrevW + nextW + NavSkipW + NavGap * 2f;
+        // 按「当前实际显示的按钮」排布：末页把 Skip 关掉后，剩下两颗要重新居中，不能留空位
+        bool showPrev = prevRt.gameObject.activeSelf;
+        bool showNext = nextRt.gameObject.activeSelf;
+        bool showSkip = skipRt.gameObject.activeSelf;
+
+        int visible = (showPrev ? 1 : 0) + (showNext ? 1 : 0) + (showSkip ? 1 : 0);
+        float groupW = 0f;
+        if (showPrev) groupW += NavPrevW;
+        if (showNext) groupW += nextW;
+        if (showSkip) groupW += NavSkipW;
+        if (visible > 1) groupW += NavGap * (visible - 1);
+
         float cursor = -groupW * 0.5f; // 整组左边界（相对面板中心）
 
-        PlaceNavButton(prevRt, cursor, NavPrevW);
-        cursor += NavPrevW + NavGap;
-        PlaceNavButton(nextRt, cursor, nextW);
-        cursor += nextW + NavGap;
-        PlaceNavButton(skipRt, cursor, NavSkipW);
+        if (showPrev) { PlaceNavButton(prevRt, cursor, NavPrevW); cursor += NavPrevW + NavGap; }
+        if (showNext) { PlaceNavButton(nextRt, cursor, nextW); cursor += nextW + NavGap; }
+        if (showSkip) PlaceNavButton(skipRt, cursor, NavSkipW);
     }
 
     private static void PlaceNavButton(RectTransform rt, float leftOffset, float width)

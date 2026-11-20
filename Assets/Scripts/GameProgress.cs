@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 /// <summary>
 /// 玩家游玩进度存档（断点续玩 + 各关最高分），全部基于 PlayerPrefs 持久化，跨重启保留。
@@ -40,13 +40,16 @@ public static class GameProgress
     /// <summary>PlayerPrefs 键：续玩断点的章节号（1 起；0 = 该分区无章节拆分）。</summary>
     public const string ResumeSectionKey = "ABOVETHEVOID.ResumeSection";
 
+    /// <summary>PlayerPrefs 键：教学分区重排（语法课 Part 3 → Part 4）的一次性存档迁移标记。</summary>
+    private const string MigrateEditorIntroKey = "GameProgress.Migrate.EditorIntro.v1";
+
     /// <summary>PlayerPrefs 键前缀：各关最高分，完整键名 = 前缀 + 关卡号（如 ABOVETHEVOID.HighScore.Level3）。</summary>
     public const string HighScoreKeyPrefix = "ABOVETHEVOID.HighScore.Level";
 
     /// <summary>PlayerPrefs 键前缀：各课程「已完成任务」记录，完整键名 = 前缀 + 课程名（如 ABOVETHEVOID.Done.Api）。</summary>
     public const string TaskDoneKeyPrefix = "ABOVETHEVOID.Done.";
 
-    /// <summary>C# 语法课（Level 1 - Part 3）的任务完成记录键名。</summary>
+    /// <summary>C# 语法课（Level 1 - Part 4）的任务完成记录键名。</summary>
     public const string TaskDoneKeyGrammar = TaskDoneKeyPrefix + "Grammar";
 
     /// <summary>炮台 API 课（Level 2 - Part 2）的任务完成记录键名。</summary>
@@ -58,8 +61,8 @@ public static class GameProgress
     /// <summary>分区号最小值。</summary>
     public const int MinPart = 1;
 
-    /// <summary>分区号最大值（Level 1 有 part 1 / 2 / 3，Level 2 有 part 1 / 2，其余关卡只有 part 1）。</summary>
-    public const int MaxPart = 3;
+    /// <summary>分区号最大值（Level 1 有 part 1 / 2 / 3 / 4，Level 2 有 part 1 / 2，其余关卡只有 part 1）。</summary>
+    public const int MaxPart = 4;
 
     /// <summary>本次运行的当前位置：关卡号（0 = 不在任何关卡内，例如停在主页）。</summary>
     public static int CurrentLevel { get; private set; }
@@ -80,7 +83,8 @@ public static class GameProgress
 
     /// <summary>
     /// 该「关卡 - 分区」是否为已实现的分区（与 LevelDirector.JumpTo 的分区集合保持一致：
-    /// level 1 - part 1（引导教学）、level 1 - part 2（编程序章讲解）、level 1 - part 3（C# 语法课）、
+    /// level 1 - part 1（引导教学）、level 1 - part 2（编程序章讲解）、level 1 - part 3（代码编辑器界面入门）、
+    /// level 1 - part 4（C# 语法课）、
     /// level 2 - part 1（方块图鉴）、level 2 - part 2（炮台 API 课）、level 3 - part 1）。
     /// </summary>
     public static bool IsSupportedLocation(int level, int part)
@@ -90,17 +94,17 @@ public static class GameProgress
         if (part < MinPart || part > MaxPart)
             return false;
         if (level == 1)
-            return part == 1 || part == 2 || part == 3;
+            return part == 1 || part == 2 || part == 3 || part == 4;
         if (level == 2)
             return part == 1 || part == 2;
         return part == 1;
     }
 
-    /// <summary>该关卡的分区总数（Level 1 为 3、Level 2 为 2，其余为 1）。</summary>
+    /// <summary>该关卡的分区总数（Level 1 为 4、Level 2 为 2，其余为 1）。</summary>
     public static int GetPartCount(int level)
     {
         if (level == 1)
-            return 3;
+            return 4;
         if (level == 2)
             return 2;
         return 1;
@@ -108,14 +112,17 @@ public static class GameProgress
 
     /// <summary>
     /// 该「关卡 - 分区」的章节（section）总数；返回 0 表示该分区没有章节拆分。
-    /// 章节拆分：Level 1 - Part 2 编程序章（页数，可翻页）、Level 1 - Part 3 C# 语法课（18 项任务）、
-    /// Level 2 - Part 1 方块图鉴（页数）、Level 2 - Part 2 API 课（13 项任务）。
+    /// 章节拆分：Level 1 - Part 2 编程序章（页数，可翻页）、Level 1 - Part 3 代码编辑器界面入门（8 页）、
+    /// Level 1 - Part 4 C# 语法课（49 项任务）、
+    /// Level 2 - Part 1 方块图鉴（页数）、Level 2 - Part 2 API 课（15 项任务）。
     /// </summary>
     public static int GetSectionCount(int level, int part)
     {
         if (level == 1 && part == 2)
             return CodeIntroTutorialController.PageCount;
         if (level == 1 && part == 3)
+            return EditorIntroTutorialController.PageCount;
+        if (level == 1 && part == 4)
             return CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Grammar);
         if (level == 2 && part == 1)
             return BlockIntroController.PageCount;
@@ -124,7 +131,7 @@ public static class GameProgress
         return 0;
     }
 
-    /// <summary>教学课程 → 「关卡 - 分区」映射（语法课 = Level 1 - Part 3，API 课 = Level 2 - Part 2）。</summary>
+    /// <summary>教学课程 → 「关卡 - 分区」映射（语法课 = Level 1 - Part 4，API 课 = Level 2 - Part 2）。</summary>
     public static void GetCourseLocation(CodeSyntaxTutorialController.Course course, out int level, out int part)
     {
         if (course == CodeSyntaxTutorialController.Course.Api)
@@ -135,7 +142,7 @@ public static class GameProgress
         else
         {
             level = 1;
-            part = 3;
+            part = 4;
         }
     }
 
@@ -287,19 +294,27 @@ public static class GameProgress
         if (savedLevel != level)
             return false; // 存档属于别的关卡：与本关无关，从本关开头进入
 
-        // 存档迁移（教学关重排）：旧版本里「Level 1 - Part 2」是 C# 语法课（18 项任务），
-        // 现在语法课整体挪到 Level 1 - Part 3，Part 2 改为「编程序章」讲解关（4 页）。
-        // 旧存档的 part=2 一定指旧语法课，因此原样迁移到 part=3（章节号保留，越界则回落到第 1 章），
-        // 迁移后立即写回盘，保证玩家进度不因这次重排而回退，也不会被反复迁移。
-        if (savedLevel == 1 && savedPart == 2)
+        // 存档迁移（教学关二次重排）：上一版的「Level 1 - Part 3」是 C# 语法课（18 项任务），
+        // 这一版把语法课整体挪到 Level 1 - Part 4，Part 3 让位给新的「代码编辑器界面入门」（8 页）。
+        // 旧存档 part=3 一定指旧语法课，因此原样迁移到 part=4（章节号保留，越界则回落到第 1 章）。
+        // 迁移只做一次：用 PlayerPrefs 一次性标记，否则新版本里玩家在 Part 3 的正常进度
+        //（编辑器入门第 n 页，n ≤ 8，与语法的 1~18 页范围重叠）会在每次启动时被反复拽到 Part 4。
+        if (PlayerPrefs.GetInt(MigrateEditorIntroKey, 0) == 0)
         {
-            int grammarCount = CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Grammar);
-            int migrateSection = (savedSection >= 1 && savedSection <= grammarCount) ? savedSection : 1;
-            Debug.Log("[GameProgress] 旧存档迁移：Level 1 - Part 2（旧语法课）第 " + savedSection +
-                      " 章 → Level 1 - Part 3 第 " + migrateSection + " 章。");
-            savedPart = 3;
-            savedSection = migrateSection;
-            SaveResume(savedLevel, savedPart, savedSection);
+            PlayerPrefs.SetInt(MigrateEditorIntroKey, 1);
+
+            if (savedLevel == 1 && savedPart == 3)
+            {
+                int grammarCount = CodeSyntaxTutorialController.GetTaskCount(CodeSyntaxTutorialController.Course.Grammar);
+                int migrateSection = (savedSection >= 1 && savedSection <= grammarCount) ? savedSection : 1;
+                Debug.Log("[GameProgress] 旧存档迁移：Level 1 - Part 3（旧语法课）第 " + savedSection +
+                          " 章 → Level 1 - Part 4 第 " + migrateSection + " 章。");
+                savedPart = 4;
+                savedSection = migrateSection;
+                SaveResume(savedLevel, savedPart, savedSection);
+            }
+
+            PlayerPrefs.Save();
         }
 
         if (!IsSupportedLocation(savedLevel, savedPart))

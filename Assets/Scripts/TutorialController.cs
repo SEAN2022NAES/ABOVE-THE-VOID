@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
@@ -15,6 +15,9 @@ public class TutorialController : MonoBehaviour
 
     /// <summary>Level 1 - Part 1 教学是否已启动（启动期间禁用 E 键时间冻结）。</summary>
     public bool Started { get; private set; }
+
+    /// <summary>序章是否已教过按 Q（进入自由视角）：教过之后回到原点才该弹「你所在原点 · 按下 Q 解锁」。</summary>
+    public bool TaughtQ => Started && currentStep >= Step.Move;
 
     [Header("UI")]
     public int titleFontSize = 32;
@@ -216,7 +219,7 @@ public class TutorialController : MonoBehaviour
     }
 
     /// <summary>
-    /// 引导教学完成后自动顺接进入 Level 1 - Part 2（C# 基础语法教学）。
+    /// 引导教学完成后自动顺接进入 Level 1 - Part 2（编程序章讲解关），之后依次是 Part 3 编辑器入门、Part 4 语法课。
     /// 流程：先在结语页停留（5/5 完成提示）→ 黑幕淡出到全黑 → 在全黑帧执行 LevelDirector.JumpTo(1, 2)
     /// （完成清场、表现切换、语法教学从头开始）→ 黑幕淡入，避免关卡切换出现生硬瞬切。
     /// 跳转前先收尾本关教学状态（面板隐藏、Started=false 解除「教学进行中禁止打开代码编辑器」互斥）。

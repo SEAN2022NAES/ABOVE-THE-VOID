@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
@@ -128,7 +128,7 @@ public class MainMenuController : MonoBehaviour
         LevelPresentation.RestoreAxes();
 
         // 断点续玩：主页点击某关时，若存在「属于该关」的合法存档，就从记录的 part / section 续玩，而不是从该关开头重来。
-        //   · 只有带章节拆分的分区（Level 1 - Part 2 讲解关 / Part 3 语法课 / Level 2 - Part 1 图鉴关 / Part 2 API 课）才需要按章节定位，
+        //   · 只有带章节拆分的分区（Level 1 - Part 2 / Part 3 讲解关 / Part 4 语法课 / Level 2 - Part 1 图鉴关 / Part 2 API 课）才需要按章节定位，
         //     这里统一交给 LevelDirector.JumpTo 路由，与 /level 走完全同一条路径，避免两套逻辑不一致；
         //   · 优先级：/level 跳关成功后已用跳关参数覆盖存档，所以这里读到的必然是「最后一次到达的位置」，
         //     存档不会把玩家拽回跳关之前的旧位置；
@@ -183,7 +183,7 @@ public class MainMenuController : MonoBehaviour
 
         // 鼠标左键手动激光：只有 Level 1 - Part 1 允许（主页关卡 1 即 Level 1 - Part 1 引导教学关），
         // Level 3 等其余关卡一律禁用（改由代码编辑器 / 炮台自动开火接管）。
-        // 仅影响「左键 → FireLaser」手动链路，不影响 tower.FireAtPlane 等自动化调用。
+        // 仅影响「左键 → FireLaser」手动链路，不影响 tower.Fire 等自动化调用。
         CommandConsoleController.SetManualLaserAllowed(levelIndex, 1);
 
         // 计分：进入关卡即重开一局分数（击毁红块加分 / 红块到基地扣分 / 蓝块可击毁但不计分）
@@ -216,8 +216,9 @@ public class MainMenuController : MonoBehaviour
             LevelPresentation.ApplyLevel3(); // 恢复 Score / print 荧幕显示与蓝色 BOMB 块生成
             if (spawner != null)
                 spawner.ResetSession();    // 重开会话：清零消灭计数与方块编号
-            // 主页进入完整玩法关同样走统一开场停顿：先 Cancel 旧计时再重新停顿 5 秒（期间不出块、不显示炮台），
-            // 与控制台 /level 3 1 跳转路径保持一致，避免两条入口行为不一致导致「一进场就出块」
+            // 主页进入完整玩法关同样走统一开场入口：先 Cancel 旧门控再进入「等待玩家启动」状态
+            // （期间不出块、不显示炮台），只有玩家代码调用 tower.GameStart() 才开始出块；
+            // 与控制台 /level 3 1 跳转路径保持一致，避免两条入口行为不一致导致「一进场就出块 / 提前开始」
             LevelDirector.BeginFullLevelOpening();
             TimeHintController timeHint = FindObjectOfType<TimeHintController>();
             if (timeHint != null)
@@ -258,7 +259,7 @@ public class MainMenuController : MonoBehaviour
         if (tutorial != null)
             tutorial.ExitToMenu();
 
-        // 终止代码编辑器内的 C# 语法教学（隐藏任务卡与提示条；下次进入 Part 2 时进度重置）
+        // 终止代码编辑器内的 C# 语法教学（隐藏任务卡与提示条；下次进入 Part 4 时进度重置）
         CodeSyntaxTutorialController.End();
 
         // 回到主页：不在任何关卡内，手动激光（鼠标左键）一律禁用

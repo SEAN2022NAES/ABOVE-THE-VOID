@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -6,8 +6,8 @@ using UnityEngine.UI;
 /// Level 1 - Part 2「编程序章」：夹在「全程用手点方块」与「C# 语法课」之间的过渡讲解关。
 ///   · 面向完全不懂代码的玩家：先讲「为什么不要再用手一个一个点」，再讲「把规则交给电脑」，
 ///     最后看一眼真实代码长什么样、接下来两门课怎么学；
-///   · 多页阅读（4 页），底部 ‹ 上一页 / 下一页 › 可来回翻，最后一页「开始语法课」直接进 Level 1 - Part 3；
-///   · 键盘 ← → 也能翻页；「跳过序章 (S)」按钮 / S 键直接进语法课；
+///   · 多页阅读（4 页），底部 ‹ 上一页 / 下一页 › 可来回翻，最后一页「认识编辑器」直接进 Level 1 - Part 3 编辑器界面入门；
+///   · 键盘 ← → 也能翻页；「跳过序章 (S)」按钮 / S 键同样直接进 Level 1 - Part 3；
 ///   · 读字期间释放鼠标并冻结视角（鼠标移动不会转动背后场景的朝向），ESC 暂停仍然可用；
 ///   · 本关不打开代码编辑器、不出方块，纯粹读字。
 /// 章节跳转：/level 1 2 n 可直接翻到第 n 页（见 LevelDirector）。
@@ -40,7 +40,7 @@ public class CodeIntroTutorialController : MonoBehaviour
     private Text titleText;         // 页标题
     private Text bodyText;          // 正文
     private Text footerText;        // 底部操作提示（键盘 ← → 也能翻页）
-    private bool transitioning;     // 正在播进入语法课的过渡（忽略重复点击 / 键盘）
+    private bool transitioning;     // 正在播进入下一关（Part 3 编辑器界面入门）的过渡（忽略重复点击 / 键盘）
 
     // 进入 Level 1 - Part 3 的黑幕过渡时长：与 Level 1 - Part 1 → Part 2（TutorialController）保持一致
     private const float FadeOutSeconds = 0.35f;
@@ -58,7 +58,7 @@ public class CodeIntroTutorialController : MonoBehaviour
 
     // ---- 底部按钮组布局 ----
     // 三个按钮等距排布、整组在面板内水平居中。
-    // 「下一页」在末页会变成「开始语法课 › / Start the course ›」，比「下一页 › / Next ›」宽一大截：
+    // 「下一页」在末页会变成「下一步：认识编辑器 › / Next: meet the editor ›」，比「下一页 › / Next ›」宽一大截：
     // 固定 210 宽会把文字顶出按钮边框（英文尤其明显），所以宽度改由 LayoutNavButtons() 按当前文案实测后动态给。
     private const float NavGap = 28f;
     private const float PrevW = 180f;
@@ -165,22 +165,25 @@ public class CodeIntroTutorialController : MonoBehaviour
         + "    for (int i = 0; i < blocks.Count; i++)\n"
         + "    {\n"
         + "        var b = blocks[i];\n"
-        + "        if (b.Position.z < 0f) { tower.FireAtPlane(0f, 1f, 0f); break; }\n"
+        + "        if (b.Position.z < 0f) { tower.Fire(new Vector3(0f, 1f, 0f)); break; }\n"
         + "    }\n\n"
         + "一行一行读，它就是你刚才「用手做的那件事」：\n"
         + "    GetAllObjects()      把场上所有方块列成一张清单\n"
         + "    for (...; i++)       挨个检查清单里的每一个\n"
         + "    if (b.Position.z<0)  判断它是不是已经冲到你面前（z 是远近坐标）\n"
-        + "    FireAtPlane(...)     就是你刚才按下的那一下左键\n"
+        + "    Fire(...)     就是你刚才按下的那一下左键\n"
         + "    break                打完一个先收手，下一帧再看",
 
-        "第一步（马上开始）：C# 基础语法课，18 个小任务。\n"
-        + "    只教「砌墙的砖」：变量、运算、if、循环、数组、List、方法、字符串。\n"
+        "接下来分三步走。\n\n"
+        + "第一步（马上开始）：先认得代码编辑器，8 页。\n"
+        + "    只讲这台机器怎么用：怎么打开、光标怎么放、怎么按 F6 跑起来、报错怎么读。\n\n"
+        + "第二步：C# 基础语法课，49 个小任务。\n"
+        + "    只教「砌墙的砖」：变量、运算、if、循环、字符串、数组与字典、方法、类与枚举、接口与泛型、委托与 Lambda、可空与元组。\n"
         + "    每个任务都有示例代码，照着抄、照着改，再点【编译运行 (F6)】验证。\n"
         + "    任务卡右上角有 ‹ 细节 ›：看不懂就翻到第 2 页，那里写着第几步按哪里。\n\n"
-        + "第二步：炮台 API 课。\n"
+        + "第三步：炮台 API 课。\n"
         + "    教你把炮台会做的事（列出方块、看血量、开炮）接进自己的代码里。\n\n"
-        + "两门课做完，上面那段程序就是你亲手写的：\n"
+        + "三步都走完，上面那段程序就是你亲手写的：\n"
         + "手不用动，炮台自己打。"
     };
 
@@ -208,22 +211,25 @@ public class CodeIntroTutorialController : MonoBehaviour
         + "    for (int i = 0; i < blocks.Count; i++)\n"
         + "    {\n"
         + "        var b = blocks[i];\n"
-        + "        if (b.Position.z < 0f) { tower.FireAtPlane(0f, 1f, 0f); break; }\n"
+        + "        if (b.Position.z < 0f) { tower.Fire(new Vector3(0f, 1f, 0f)); break; }\n"
         + "    }\n\n"
         + "Read it line by line - it is exactly what your hand did:\n"
         + "    GetAllObjects()      list every block on the field\n"
         + "    for (...; i++)       walk through that list one by one\n"
         + "    if (b.Position.z<0)  is it already in front of you (z is distance)\n"
-        + "    FireAtPlane(...)     the left click you used to press\n"
+        + "    Fire(...)     the left click you used to press\n"
         + "    break                stop after one shot, look again next frame",
 
-        "Step one (starts right now): the C# syntax course, 18 small tasks.\n"
+        "There are three steps from here.\n\n"
+        + "Step one (starts right now): get to know the editor, 8 pages.\n"
+        + "    Only how the machine works: open it, place the caret, press F6, read the errors.\n\n"
+        + "Step two: the C# syntax course, 18 small tasks.\n"
         + "    Only the bricks: variables, operators, if, loops, arrays, List, methods, strings.\n"
         + "    Every task has sample code: copy it, change it, press [Compile & Run (F6)].\n"
         + "    The card has a detail page: press the arrows at the top right for click-by-click steps.\n\n"
-        + "Step two: the tower API course.\n"
+        + "Step three: the tower API course.\n"
         + "    Connect what the tower can do (list blocks, read hp, fire) to your own code.\n\n"
-        + "When both are done, the program above is yours: hands off, the tower shoots by itself."
+        + "Walk all three and the program above is yours: hands off, the tower shoots by itself."
     };
 
     private void Awake()
@@ -254,8 +260,9 @@ public class CodeIntroTutorialController : MonoBehaviour
         else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.PageDown)
                  || Input.GetKeyDown(KeyCode.Space))
             NextPage();
-        else if (Input.GetKeyDown(SkipKey))
-            SkipPrologue(); // S：直接跳过序章进语法课（与「跳过序章」按钮同效）
+        // 最后一页不给 S：那一页的 Next 本来就是进编辑器界面入门，再跳过等于白跳
+        else if (Input.GetKeyDown(SkipKey) && CurrentPage < PageCount - 1)
+            SkipPrologue(); // S：直接跳过序章进 Level 1 - Part 3（与「跳过序章」按钮同效）
     }
 
     // ================== 对外接口 ==================
@@ -313,14 +320,14 @@ public class CodeIntroTutorialController : MonoBehaviour
             return;
         if (CurrentPage >= PageCount - 1)
         {
-            GoGrammarCourse(); // 已经是最后一页：再按一次就进语法课
+            GoGrammarCourse(); // 已经是最后一页：再按一次就进 Level 1 - Part 3
             return;
         }
         CurrentPage++;
         Refresh();
     }
 
-    /// <summary>跳过序章（S 键或「跳过序章」按钮）：不看讲解、直接进 Level 1 - Part 3 语法课。</summary>
+    /// <summary>跳过序章（S 键或「跳过序章」按钮）：不看讲解、直接进 Level 1 - Part 3 编辑器界面入门。</summary>
     private void SkipPrologue()
     {
         if (!Active || transitioning)
@@ -358,7 +365,7 @@ public class CodeIntroTutorialController : MonoBehaviour
     }
 
     /// <summary>
-    /// 进入 Level 1 - Part 3 语法课。过渡方式与 Level 1 - Part 1 → Part 2 完全一致：
+    /// 进入 Level 1 - Part 3 编辑器界面入门。过渡方式与 Level 1 - Part 1 → Part 2 完全一致：
     /// 黑幕淡出到全黑 → 在全黑那一帧执行 LevelDirector.JumpTo（内部会 End() 收尾并清场）→ 黑幕淡入，
     /// 避免序章面板被硬切掉、语法课突然弹出的生硬感。过渡期间忽略键盘与按钮，防止重复触发。
     /// </summary>
@@ -375,7 +382,7 @@ public class CodeIntroTutorialController : MonoBehaviour
 
         ScreenFade.PlayTransition(FadeOutSeconds, FadeInSeconds, delegate
         {
-            LevelDirector.JumpTo(1, 3, 1); // Level 1 - Part 3 语法课，从第 1 个任务开始
+            LevelDirector.JumpTo(1, 3, 1); // Level 1 - Part 3 编辑器界面入门，从第 1 页开始
         });
     }
 
@@ -385,25 +392,38 @@ public class CodeIntroTutorialController : MonoBehaviour
     {
         bool zh = Localization.IsChinese;
         int page = Mathf.Clamp(CurrentPage, 0, PageCount - 1);
+        bool lastPage = page >= PageCount - 1;
 
         SetLabel(pageTagText, (zh ? "序章 " : "Prologue ") + (page + 1) + "/" + PageCount);
         SetLabel(titleText, zh ? TitlesZh[page] : TitlesEn[page]);
         if (bodyText != null)
             bodyText.fontSize = bodyFontSize; // 先定字号，SetLabel 才会按该字号加载对应字形
         SetLabel(bodyText, zh ? BodiesZh[page] : BodiesEn[page]);
-        SetLabel(footerText, zh
-            ? "键盘 ← → 也能翻页　·　按 S 跳过序章　·　读完最后一页即可进入语法课"
-            : "Keyboard arrows also page through · press S to skip the prologue · finish the last page to start the syntax course");
+        // 末页不再提「按 S 跳过」：那一页的 Next 本身就是进编辑器界面入门，S 键也已在 Update 里屏蔽
+        SetLabel(footerText, lastPage
+            ? (zh ? "键盘 ← → 也能翻页　·　这是最后一页，按「下一步」即可进入编辑器界面入门"
+                  : "Keyboard arrows also page through · last page - press Next to meet the editor")
+            : (zh ? "键盘 ← → 也能翻页　·　按 S 跳过序章　·　读完最后一页即可进入编辑器界面入门"
+                  : "Keyboard arrows also page through · press S to skip the prologue · finish the last page to start the syntax course"));
 
         SetLabel(prevLabel, zh ? "‹ 上一页" : "‹ Back");
         // 最后一页的「下一页」变成入口按钮，明确告诉玩家下一步去哪
-        SetLabel(nextLabel, page >= PageCount - 1
-            ? (zh ? "开始语法课 ›" : "Start the course ›")
+        SetLabel(nextLabel, lastPage
+            ? (zh ? "下一步：认识编辑器 ›" : "Next: meet the editor ›")
             : (zh ? "下一页 ›" : "Next ›"));
         SetLabel(skipLabel, zh ? "跳过序章 (S)" : "Skip prologue (S)");
 
+        // 末页把「跳过序章」整颗按钮撤掉（只 SetActive、不销毁），翻回前面几页再显示；
+        // LayoutNavButtons 按 activeSelf 重排，所以必须在它之前改显隐
+        if (skipRt != null)
+            skipRt.gameObject.SetActive(!lastPage);
+
+        // 跳关时（GoGrammarCourse / 末页 Next）会把 prev/next 一次性置灰，而 BuildUI 只建一次按钮、
+        // 之后不会重建，重进本关若不写回就会残留禁用配色（按钮看着发暗）。这里每次刷新都显式复位。
         if (prevBtn != null)
             prevBtn.interactable = page > 0;
+        if (nextBtn != null)
+            nextBtn.interactable = true;
 
         // 文案换了（「下一页 ›」↔「开始语法课 ›」）就按新文案重新定宽并整组居中，
         // 否则末页英文「Start the course ›」会被原来 210 宽顶出按钮边框。
@@ -577,7 +597,7 @@ public class CodeIntroTutorialController : MonoBehaviour
     /// <summary>
     /// 底部按钮组重排：三个按钮间距统一（NavGap），整组在面板内水平居中。
     /// 「下一页」的宽度按当前文案的实测自然宽度给，并夹在 [NextWMin, NextWMax] 之间——
-    /// 末页文案「开始语法课 › / Start the course ›」比「下一页 › / Next ›」宽一大截，
+    /// 末页文案「下一步：认识编辑器 › / Next: meet the editor ›」比「下一页 › / Next ›」宽一大截，
     /// 固定 210 宽会把文字顶出按钮边框（英文最明显）。
     /// </summary>
     private void LayoutNavButtons()
@@ -587,14 +607,23 @@ public class CodeIntroTutorialController : MonoBehaviour
 
         float nextW = Mathf.Clamp(MeasureNavLabelWidth() + NavLabelPadding, NextWMin, NextWMax);
 
-        float groupW = PrevW + nextW + SkipW + NavGap * 2f;
+        // 按「当前实际显示的按钮」排布：末页把 Skip 关掉后，剩下两颗要重新居中，不能留空位
+        bool showPrev = prevRt.gameObject.activeSelf;
+        bool showNext = nextRt.gameObject.activeSelf;
+        bool showSkip = skipRt.gameObject.activeSelf;
+
+        int visible = (showPrev ? 1 : 0) + (showNext ? 1 : 0) + (showSkip ? 1 : 0);
+        float groupW = 0f;
+        if (showPrev) groupW += PrevW;
+        if (showNext) groupW += nextW;
+        if (showSkip) groupW += SkipW;
+        if (visible > 1) groupW += NavGap * (visible - 1);
+
         float cursor = -groupW * 0.5f; // 整组左边界（相对面板中心）
 
-        PlaceNavButton(prevRt, cursor, PrevW);
-        cursor += PrevW + NavGap;
-        PlaceNavButton(nextRt, cursor, nextW);
-        cursor += nextW + NavGap;
-        PlaceNavButton(skipRt, cursor, SkipW);
+        if (showPrev) { PlaceNavButton(prevRt, cursor, PrevW); cursor += PrevW + NavGap; }
+        if (showNext) { PlaceNavButton(nextRt, cursor, nextW); cursor += nextW + NavGap; }
+        if (showSkip) PlaceNavButton(skipRt, cursor, SkipW);
     }
 
     private static void PlaceNavButton(RectTransform rt, float leftOffset, float width)

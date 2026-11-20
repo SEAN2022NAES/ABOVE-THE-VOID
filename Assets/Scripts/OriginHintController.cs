@@ -2,39 +2,53 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 「位于原点」提示条：玩家视角回到原点时，在画面下方给出一条「开始语法课 / Start the course」提示，点一下即可进课。
+/// 「状态解锁」提示条：按玩家当前所处状态给出一到两条简短提示，纯提示、不可点击。
 ///
-/// 显示规则（都满足才出）：
-///   1. 玩家视角严格位于原点（PlayerCameraController.Mode == Normal，灵魂出窍 Q / 暂停看着都不算）；
-///   2. 没有时间冻结；
-///   3. 不在 Level 1 - Part 1 教学里（那里顶部已有教学提示面板，不再重复弹）；
-///   4. 序章面板 / 语法课、API 课面板 / 代码编辑器都没有占屏（它们自己就带着入口，避免叠着两层）。
+/// 两种状态（可同时成立，命中几条就叠几行）：
+///   1. 时间静止（PlayerCameraController.IsTimeFrozen）→ 「时间已静止 · 按下 E 解锁」，按 E 恢复时间流动。
+///      这条不分场景：教学关、语法课、代码编辑器打开时同样提示，只有主页菜单与 ESC 暂停面板不叠。
+///   2. 视角锁定在原点（Mode == Normal 或 Mode == Frozen）→ 「你所在原点 · 按下 Q 解锁」，按 Q 进入灵魂出窍自由飞行。
+///      序章（Level 1 Part 1）按 Q 教过、进入移动步骤之后就开始生效，此后所有关卡全程生效；
+///      只有全屏教学关 / 代码编辑器 / 语法课占满屏幕的时段不叠。
+/// 时间静止时视角本就停在原点（Mode == Frozen），此刻两条提示同时成立，上下两行一起提示，
+/// 不要用互斥的 if/else 只留一条。
 ///
-/// 因此按 Q 灵魂出窍（脱离教学、离开原点）时这条提示会自动消失，回到原点后重新出现。
+/// 其它情况一律不显示：主页菜单、暂停、全屏教学关（Level 1 Part 2~4 / Level 2 Part 1~2）、
+/// 代码编辑器与语法课面板占屏时都不弹，避免叠成两层。
+/// 例外：序章 Part 1 的引导面板只占上半屏、底部留空，与底部提示条不重叠，因此不拦截原点提示。
+/// 原本的「开始语法课 / Start the course」跳转入口已移除：它不属于完整关的玩法提示，
+/// 语法课入口保留在序章面板与编辑器入门末页。
 /// </summary>
 public class OriginHintController : MonoBehaviour
 {
-    private const float RefWidth = 1920f;
-    private const float RefHeight = 1080f;
+    [System.Flags]
+    private enum HintState
+    {
+        None = 0,
+        Origin = 1,   // 视角锁定在原点：提示按 Q 解锁
+        Frozen = 2    // 时间静止：提示按 E 解锁
+    }
+
     private const float HintY = -330f;          // 相对屏幕中心的下方位置（1080 参考高度下离底约 210）
     private const float HintHeight = 74f;
+    private const float HintLineGap = 34f;      // 两条提示并成两行时，每多一行增加的高度
     private const float HintMinWidth = 380f;
     private const float HintMaxWidth = 900f;
-    private const float HintPadding = 120f;     // 文字两侧留白（含两侧箭头/内边距）
     private const float FadeSpeed = 7f;         // 淡入淡出速度（按 unscaled 时间）
-    private const float ShowHold = 0.35f;       // 条件持续满足多久才真正显示，避免关面板瞬间闪一下
+    private const float ShowHold = 0.35f;       // 条件持续满足多久才真正显示，避免切换瞬间闪一下
+    private const int HintFontSize = 30;
 
     private static OriginHintController inst;
-    private static Sprite whiteSprite;
 
     private CanvasGroup group;
     private RectTransform hintRt;
     private Text label;
-    private Image bg;
 
     private PlayerCameraController player;
     private CodeEditorController editor;
     private MainMenuController mainMenu;
+
+    private HintState currentState = HintState.None;
     private float holdTimer;
     private bool labelIsChinese;
 
@@ -52,7 +66,8 @@ public class OriginHintController : MonoBehaviour
     {
         inst = this;
         BuildUI();
-        RefreshLabel();
+        ApplyState(HintState.Origin); // 先按原点文案初始化，之后由 Update 按真实状态刷新
+        currentState = HintState.None;
     }
 
     private void OnDestroy()
@@ -72,119 +87,190 @@ public class OriginHintController : MonoBehaviour
             player = FindObjectOfType<PlayerCameraController>();
         if (editor == null)
             editor = FindObjectOfType<CodeEditorController>();
+        if (mainMenu == null)
+            mainMenu = FindObjectOfType<MainMenuController>();
 
-        // 语言在设置里切换后（中/英），提示文案要跟着换，并重新量宽度
-        if (labelIsChinese != Localization.IsChinese)
-            RefreshLabel();
-
-        bool want = WantShow();
-        if (want)
+        HintState state = ResolveState();
+        if (state != currentState)
         {
-            holdTimer += Time.unscaledDeltaTime;
-        }
-        else
-        {
+            currentState = state;
+            if (state != HintState.None)
+                ApplyState(state);
             holdTimer = 0f;
         }
 
-        bool visible = want && holdTimer >= ShowHold;
+        // 语言在设置面板里被切换时立即换文案
+        if (labelIsChinese != Localization.IsChinese && currentState != HintState.None)
+            ApplyState(currentState);
+
+        if (state != HintState.None)
+            holdTimer += Time.unscaledDeltaTime;
+        else
+            holdTimer = 0f;
+
+        bool visible = state != HintState.None && holdTimer >= ShowHold;
         float target = visible ? 1f : 0f;
         group.alpha = Mathf.MoveTowards(group.alpha, target, FadeSpeed * Time.unscaledDeltaTime);
-        group.blocksRaycasts = group.alpha > 0.5f;
-        group.interactable = group.blocksRaycasts;
-
-        if (visible && Input.GetKeyDown(KeyCode.Return))
-            EnterCourse();
+        group.blocksRaycasts = false; // 纯提示，不拦鼠标
+        group.interactable = false;
     }
 
-    /// <summary>是否应该出现「位于原点」提示。</summary>
-    private bool WantShow()
+    /// <summary>当前该显示哪些提示（可同时命中）；None 表示不收任何提示。</summary>
+    private HintState ResolveState()
     {
         if (player == null)
-            return false;
+            return HintState.None;
 
-        // 只有视角严格在原点时才给：灵魂出窍（Spirit）、暂停（Paused）、冻结飞行都不算
-        if (player.Mode != PlayerCameraController.GameMode.Normal)
-            return false;
-
-        if (Time.timeScale <= 0.001f)
-            return false;
-
-        // Level 1 - Part 1 教学：顶部已有教学提示面板，这里不再重复弹（按 Q 脱离教学时 Mode 已不是 Normal，自然也收起了）
-        if (TutorialController.Instance != null && TutorialController.Instance.Started)
-            return false;
-
-        // 序章面板自己带「开始语法课」按钮
-        if (CodeIntroTutorialController.Reading)
-            return false;
-
-        // 已经在语法课 / API 课里，不需要再提示进课
-        if (CodeSyntaxTutorialController.IsActive)
-            return false;
-
-        // 代码编辑器打开中
-        if (editor != null && editor.IsOpen)
-            return false;
-
-        // 主页 / 暂停菜单在显示时不要冒出来（那里有自己的入口链）
-        if (mainMenu == null)
-            mainMenu = FindObjectOfType<MainMenuController>();
+        // 主页菜单与 ESC 暂停面板是模态界面，任何提示都不往上叠
+        if (player.Mode == PlayerCameraController.GameMode.Paused)
+            return HintState.None;
         if (mainMenu != null && mainMenu.IsMenuVisible)
-            return false;
+            return HintState.None;
 
+        HintState state = HintState.None;
+
+        // 时间静止提示：不分场景，教学关、语法课、编辑器打开时同样要给，
+        // 玩家在任何地方被冻住都得知道按 E 解冻。
+        if (player.IsTimeFrozen)
+            state |= HintState.Frozen;
+
+        // 原点提示：序章按 Q 教过、进入移动步骤之后生效，其余关卡全程生效；
+        // 只要视角回到原点（时间冻结时停在原点也算）就给提示。
+        // 只有全屏教学面板 / 代码编辑器占满屏幕的时段不叠，避免两层提示打架。
+        if (IsOriginHintUnlocked() && !IsOverlayTutorialActive())
+        {
+            if (player.Mode == PlayerCameraController.GameMode.Normal ||
+                player.Mode == PlayerCameraController.GameMode.Frozen)
+                state |= HintState.Origin;
+        }
+
+        return state;
+    }
+
+    /// <summary>原点提示的门槛：序章教过按 Q 之后才对原点状态提示，其余关卡全程开放。</summary>
+    private static bool IsOriginHintUnlocked()
+    {
+        TutorialController tutorial = TutorialController.Instance;
+        if (tutorial != null && tutorial.Started && !tutorial.TaughtQ)
+            return false;
         return true;
     }
 
-    private void EnterCourse()
+    /// <summary>正被全屏教学面板或代码编辑器盖住屏幕：原点提示先让位。</summary>
+    private bool IsOverlayTutorialActive()
     {
-        // 与序章末页「开始语法课」同一条路径：黑幕淡出 → 进 C# 语法课第 1 个任务 → 淡入
-        holdTimer = 0f;
-        if (ScreenFade.Instance != null)
-            ScreenFade.PlayTransition(0.35f, 0.5f, () => LevelDirector.JumpTo(1, 3, 1));
-        else
-            LevelDirector.JumpTo(1, 3, 1);
+        // 注意：Level 1 Part 1 的引导教学面板只占上半屏、底部留空，
+        // 与底部提示条不重叠，所以这里不拦 TutorialController.Started。
+        if (CodeIntroTutorialController.Reading)
+            return true;
+        if (EditorIntroTutorialController.Instance != null && EditorIntroTutorialController.Instance.Active)
+            return true;
+        if (CodeSyntaxTutorialController.IsActive)
+            return true;
+        if (editor != null && editor.IsOpen)
+            return true;
+        return false;
     }
 
-    // ==================== UI ====================
+    /// <summary>按状态刷新文案、字体与提示条宽度。</summary>
+    private void ApplyState(HintState state)
+    {
+        if (label == null)
+            return;
+
+        bool atOrigin = (state & HintState.Origin) != 0;
+        bool frozen = (state & HintState.Frozen) != 0;
+        if (!atOrigin && !frozen)
+            return;
+
+        string originText = Localization.Pick("你所在原点 · 按下 Q 解锁", "You are at the Origin · press Q to unlock");
+        string frozenText = Localization.Pick("时间已静止 · 按下 E 解锁", "Time is frozen · press E to unlock");
+
+        // 两条同时成立时上下两行并列显示：先原点、再时间静止，互不覆盖
+        string content;
+        if (atOrigin && frozen)
+            content = originText + "\n" + frozenText;
+        else if (atOrigin)
+            content = originText;
+        else
+            content = frozenText;
+
+        labelIsChinese = Localization.IsChinese;
+        label.text = content;
+        label.font = UIFontHelper.LoadForText(content, HintFontSize);
+        FitHintWidth(content);
+    }
+
+    /// <summary>按文字自然宽度缩放宽窄、按行数抬高高度，均夹在上下限之间。</summary>
+    private void FitHintWidth(string content)
+    {
+        if (hintRt == null || label == null)
+            return;
+
+        float width = HintMinWidth;
+        int lineCount = 1;
+        if (!string.IsNullOrEmpty(content))
+        {
+            string[] lines = content.Split('\n');
+            lineCount = Mathf.Max(1, lines.Length);
+
+            float scale = label.pixelsPerUnit > 0.01f ? label.pixelsPerUnit : 1f;
+            float widest = 0f;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (string.IsNullOrEmpty(lines[i]))
+                    continue;
+                TextGenerationSettings settings = label.GetGenerationSettings(new Vector2(HintMaxWidth, HintHeight));
+                settings.horizontalOverflow = HorizontalWrapMode.Overflow;
+                settings.verticalOverflow = VerticalWrapMode.Overflow;
+                settings.resizeTextForBestFit = false;
+                settings.fontSize = HintFontSize;
+                float natural = label.cachedTextGeneratorForLayout.GetPreferredWidth(lines[i], settings) / scale;
+                if (natural > widest)
+                    widest = natural;
+            }
+
+            width = Mathf.Clamp(widest + 72f, HintMinWidth, HintMaxWidth);
+        }
+
+        // 两条提示并排成两行时整体加高，避免第二行被 Truncate 截掉
+        float height = HintHeight + HintLineGap * (lineCount - 1);
+        hintRt.sizeDelta = new Vector2(width, height);
+        hintRt.anchoredPosition = new Vector2(0f, HintY);
+    }
+
+    // ---------------- UI 构建 ----------------
 
     private void BuildUI()
     {
         GameObject canvasGo = new GameObject("OriginHintCanvas", typeof(RectTransform));
+        canvasGo.transform.SetParent(transform, false);
+
         Canvas canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 180; // 低于教学 / 序章面板（210），高于常规 HUD
+
         CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(RefWidth, RefHeight);
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
+
         canvasGo.AddComponent<UIFitScreen>();
         canvasGo.AddComponent<GraphicRaycaster>();
 
         group = canvasGo.AddComponent<CanvasGroup>();
         group.alpha = 0f;
         group.blocksRaycasts = false;
+        group.interactable = false;
 
-        hintRt = CreateRect("Hint", canvasGo.transform, new Vector2(0.5f, 0.5f),
-            new Vector2(0f, HintY), new Vector2(HintMinWidth, HintHeight), new Vector2(0.5f, 0.5f));
+        hintRt = CreateRect("OriginHintBar", canvasGo.transform, new Vector2(0.5f, 0.5f), new Vector2(0f, HintY), new Vector2(HintMinWidth, HintHeight), new Vector2(0.5f, 0.5f));
 
-        bg = hintRt.gameObject.AddComponent<Image>();
+        Image bg = hintRt.gameObject.AddComponent<Image>();
         bg.sprite = WhiteSprite();
-        bg.color = UITheme.WithAlpha(UITheme.PanelRaised, 0.94f);
-
-        Button btn = hintRt.gameObject.AddComponent<Button>();
-        btn.targetGraphic = bg;
-        btn.transition = Selectable.Transition.ColorTint;
-        ColorBlock colors = btn.colors;
-        colors.normalColor = Color.white;
-        colors.highlightedColor = new Color(1.16f, 1.16f, 1.16f, 1f);
-        colors.pressedColor = new Color(0.86f, 0.86f, 0.86f, 1f);
-        colors.fadeDuration = 0.08f;
-        btn.colors = colors;
-        btn.onClick.AddListener(EnterCourse);
+        bg.color = new Color(0.06f, 0.07f, 0.10f, 0.86f);
+        bg.raycastTarget = false;
 
         // 上沿一条强调细线，跟序章面板 / HUD 保持同一套视觉语言
-        RectTransform lineRt = CreateRect("TopLine", hintRt, new Vector2(0.5f, 1f),
-            Vector2.zero, new Vector2(0f, 3f), new Vector2(0.5f, 1f));
+        RectTransform lineRt = CreateRect("TopLine", hintRt, new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, 3f), new Vector2(0.5f, 1f));
         lineRt.anchorMin = new Vector2(0f, 1f);
         lineRt.anchorMax = new Vector2(1f, 1f);
         lineRt.offsetMin = new Vector2(0f, -3f);
@@ -204,55 +290,16 @@ public class OriginHintController : MonoBehaviour
 
         label = labelGo.AddComponent<Text>();
         label.text = "";
-        label.fontSize = 30;
+        label.fontSize = HintFontSize;
         label.color = UITheme.Accent;
         label.alignment = TextAnchor.MiddleCenter;
         label.horizontalOverflow = HorizontalWrapMode.Wrap;
         label.verticalOverflow = VerticalWrapMode.Truncate;
         label.resizeTextForBestFit = true;
         label.resizeTextMinSize = 16;
-        label.resizeTextMaxSize = 30;
+        label.resizeTextMaxSize = HintFontSize;
         label.raycastTarget = false;
-        label.font = UIFontHelper.LoadForText("Start the course › 开始语法课 ›", 30);
-    }
-
-    private void RefreshLabel()
-    {
-        if (label == null)
-            return;
-
-        string content = Localization.Pick("开始语法课 ›", "Start the course ›");
-        labelIsChinese = Localization.IsChinese;
-        label.text = content;
-        label.font = UIFontHelper.LoadForText(content, 30);
-        FitHintWidth(content);
-    }
-
-    /// <summary>提示条宽度按文案实测宽度给，中英文都不会把字挤在框外。</summary>
-    private void FitHintWidth(string content)
-    {
-        if (hintRt == null || label == null)
-            return;
-
-        float width = HintMinWidth;
-        if (!string.IsNullOrEmpty(content))
-        {
-            TextGenerationSettings settings = label.GetGenerationSettings(new Vector2(HintMaxWidth, HintHeight));
-            settings.horizontalOverflow = HorizontalWrapMode.Overflow;
-            settings.verticalOverflow = VerticalWrapMode.Overflow;
-            settings.resizeTextForBestFit = false;
-            settings.fontSize = 30;
-            float scale = label.pixelsPerUnit > 0.01f ? label.pixelsPerUnit : 1f;
-            float natural = label.cachedTextGeneratorForLayout.GetPreferredWidth(content, settings) / scale;
-            width = Mathf.Clamp(natural + HintPadding, HintMinWidth, HintMaxWidth);
-        }
-
-        hintRt.sizeDelta = new Vector2(width, HintHeight);
-    }
-
-    private void OnEnable()
-    {
-        RefreshLabel();
+        label.font = UIFontHelper.LoadForText("你所在原点 · 按下 Q 解锁", HintFontSize);
     }
 
     private static RectTransform CreateRect(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Vector2 pivot)
@@ -268,14 +315,19 @@ public class OriginHintController : MonoBehaviour
         return rt;
     }
 
+    private static Sprite cachedWhiteSprite;
+
     private static Sprite WhiteSprite()
     {
-        if (whiteSprite != null)
-            return whiteSprite;
-        Texture2D tex = new Texture2D(1, 1);
+        if (cachedWhiteSprite != null)
+            return cachedWhiteSprite;
+
+        Texture2D tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
         tex.SetPixel(0, 0, Color.white);
         tex.Apply();
-        whiteSprite = Sprite.Create(tex, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f));
-        return whiteSprite;
+        tex.hideFlags = HideFlags.HideAndDontSave;
+        cachedWhiteSprite = Sprite.Create(tex, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f), 100f);
+        cachedWhiteSprite.hideFlags = HideFlags.HideAndDontSave;
+        return cachedWhiteSprite;
     }
 }

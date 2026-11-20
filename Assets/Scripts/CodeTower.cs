@@ -16,9 +16,11 @@ using UnityEngine.UI;
 ///   - 冷却：cooldownSeconds = 0.0285s（约 35 发/秒，为 0.03s 节奏留余量；即原 0.019s 的 1.5 倍），
 ///     用 Time.time 判断，冷却中发射返回 false；
 ///   - 公开 API（签名固定，编辑器用户代码可直接调用）：
-///     GetAllObjects() / FireAtPlane(A,B,C) / GetFireCooldown() /
+///     GameStart() / GetAllObjects() / Fire(Vector3) / GetFireCooldown() /
 ///     Print(format, args...) / PrintLine(format, args...) / ClearPrint()。
-///     FireAtPlane 的平面恒过原点，方程为 Ax+By+Cz=0，只需给出法向量 (A,B,C)。
+///     Fire 只收一个 Vector3 方向向量（等价于过原点平面的法线），不再拆成三个 float。
+///     GameStart() 是「本关正式开始」的开关：完整玩法关（Level 3）进入后不再自动开场，
+///     只有玩家代码调用 GameStart() 才开始出怪；未调用则一直不出方块。
 ///   - print 荧幕：立在蓝色 X 轴正方向（世界 +Z）上方、面朝原点的世界空间显示面板，
 ///     用户代码调用 Print / PrintLine 即把文本输出到荧幕上（不写 Unity Debug 日志）。
 /// </summary>
@@ -134,13 +136,12 @@ public class CodeTower : MonoBehaviour
     }
 
     /// <summary>
-    /// 按过原点平面 Ax+By+Cz=0 发射：炮台从原点沿该平面法线方向 (A,B,C) 开火。
-    /// 平面恒过原点（炮台就在原点），因此只需给出法向量，无需第四个参数 D。
-    /// 冷却中返回 false；法向量 (A,B,C) 为零向量时返回 false。
+    /// 按方向向量发射：炮台从原点沿 normal 方向开火。
+    /// （内部等价于「过原点、以 normal 为法线的平面」，所以传方向向量即可。）
+    /// 冷却中返回 false；normal 为零向量时返回 false。
     /// </summary>
-    public bool FireAtPlane(float A, float B, float C)
+    public bool Fire(Vector3 normal)
     {
-        Vector3 normal = new Vector3(A, B, C);
         if (normal.sqrMagnitude <= 0.0001f)
             return false;
         Aim(normal);   // 平面必过原点 → 从原点沿法线方向发射
@@ -149,6 +150,19 @@ public class CodeTower : MonoBehaviour
 
     /// <summary>返回距下一发可发射的剩余冷却时间（秒，0 表示已就绪）。</summary>
     public float GetFireCooldown() => CooldownLeft;
+
+    /// <summary>
+    /// 本关正式开始（玩家代码 API）：通知开场门控结束等待，本关从此刻开始生成方块。
+    /// <para>完整玩法关（Level 3 - Part 1）进入后不再自动开场：没有玩家代码调用本方法就永远不出方块，
+    /// 所以「游戏什么时候开始」完全由玩家代码决定（默认示例代码里已带一次调用，删掉那行就不会开始）。</para>
+    /// <para>幂等：重复调用（同一关里第二次、第三次……）不会有任何副作用 —— 不会重置计时、不会重复开局、
+    /// 不会重复出怪；已经正式开始的关卡再调用直接忽略。</para>
+    /// <para>非完整玩法关（教学关 / 主页）调用同样安全：没有等待中的开场门控时直接忽略。</para>
+    /// </summary>
+    public void GameStart()
+    {
+        LevelOpeningGate.RequestStart();
+    }
 
     // ---------------- print 荧幕 API（用户代码调用后输出到 +X 前方荧幕，不写 Debug 日志） ----------------
 
@@ -235,7 +249,7 @@ public class CodeTower : MonoBehaviour
             UpdateAimLine();
     }
 
-    /// <summary>设置炮口朝向（非零向量归一化，旋转炮管子物体；零向量忽略）。仅供内部 / FireAtPlane 使用。</summary>
+    /// <summary>设置炮口朝向（非零向量归一化，旋转炮管子物体；零向量忽略）。仅供内部 / Fire 使用。</summary>
     private void Aim(Vector3 direction)
     {
         if (direction.sqrMagnitude <= 0.0001f)

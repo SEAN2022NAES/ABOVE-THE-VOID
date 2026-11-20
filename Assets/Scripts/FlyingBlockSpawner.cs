@@ -23,10 +23,10 @@ public class FlyingBlockSpawner : MonoBehaviour
     public float startDelay = 5f;
     [Tooltip("活跃长方体数量上限（与生成间隔按同倍数放大，否则会吞掉提速后的速率）")]
     public int maxBlocks = 400;
-    [Tooltip("飞行速度下限（单位/秒）")]
-    public float speedMin = 0.5f;
-    [Tooltip("飞行速度上限（单位/秒）")]
-    public float speedMax = 1.2f;
+    [Tooltip("飞行速度下限（单位/秒）：每个方块在 [下限, 上限] 内独立随机取速，不必统一")]
+    public float speedMin = 0.7f;
+    [Tooltip("飞行速度上限（单位/秒）：与下限拉开差距，让每块飞行速度明显不同")]
+    public float speedMax = 2.2f;
 
     [Header("类型概率权重（运行时自动归一化到 100%）")]
     [Tooltip("攻击型（红）权重：160（在 80 基础上再翻倍；160:120 归一化后约红 57% / 蓝 43%）")]
