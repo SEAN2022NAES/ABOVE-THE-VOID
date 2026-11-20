@@ -710,6 +710,14 @@ public class CodeEditorController : MonoBehaviour
                 ToggleReZonePanel();
                 return;
             }
+            // F12：用浏览器打开 C# 编译器官方下载页（缺少编译器时的引导入口，链接同时复制到剪贴板）。
+            if (Input.GetKeyDown(KeyCode.F12))
+            {
+                PortableCSharpCompiler.CopyDownloadUrl();
+                PortableCSharpCompiler.OpenDownloadPage();
+                SetStatus(Localization.Pick("已打开编译器下载页（链接已复制）", "Compiler download page opened (link copied)"), false);
+                return;
+            }
         }
 
         // 编辑器打开时：光标位置变化 → 刷新状态栏并自动滚动跟随；滚轮在代码视口内翻页
@@ -1209,112 +1217,10 @@ public class CodeEditorController : MonoBehaviour
 
         try
         {
-            using (CSharpCodeProvider provider = new CSharpCodeProvider())
-            {
-                CompilerParameters parameters = new CompilerParameters();
-                parameters.GenerateInMemory = true;
-                parameters.GenerateExecutable = false;
-                AddReferencedAssembly(parameters, typeof(GameObject).Assembly.Location);
-                AddReferencedAssembly(parameters, typeof(UnityEngine.UI.Text).Assembly.Location);
-                AddReferencedAssembly(parameters, typeof(CodeTower).Assembly.Location);
-                AddReferencedAssembly(parameters, typeof(UIFontHelper).Assembly.Location);
-                // 引用 netstandard 2.1（优先编辑器 Mono 运行时 Facades 版，与运行时同源同版本，类型转发不产生 CS0433 二义性；
-                // 回退 NetStandard 参考程序集）。用户代码用到 System.Object / 泛型集合等类型时需显式引用，否则报 CS0012。
-                // 实测：无论 facade 还是 ref，编译产物均不依赖 netstandard（统一引用 mscorlib），不会引入运行时加载失败。
-                string netStandardPath = ResolveNetStandardPath();
-                if (netStandardPath != null)
-                    AddReferencedAssembly(parameters, netStandardPath);
-                else
-                    Debug.LogWarning("[CodeEditor] 未找到 netstandard.dll，用户代码可能报 CS0012。");
-
-                CompilerResults results = provider.CompileAssemblyFromSource(parameters, fullSource);
-
-                if (results == null)
-                {
-                    AppendError(Localization.Pick("编译失败：未返回结果。", "Compile failed: no result."));
-                    return;
-                }
-
-                if (results.Errors != null && results.Errors.HasErrors)
-                {
-                    // 编译错误：行号映射回用户代码（userLine = 错误行 - USER CODE START 标记所在模板行号）
-                    StringBuilder sb = new StringBuilder();
-                    int shown = 0;
-                    for (int i = 0; i < results.Errors.Count; i++)
-                    {
-                        CompilerError e = results.Errors[i];
-                        if (e.IsWarning)
-                            continue;
-                        // 行号映射回玩家代码：全局区与每帧语句是两段拼接，靠 templateLineToUser 精确指回原文行
-                        int userLine = MapTemplateLine(templateLineToUser, e.Line);
-                        // mcs/csc 的 ErrorNumber 自带 "CS" 前缀，这里统一掉，避免显示成 CSCS0103
-                        string errNo = e.ErrorNumber ?? string.Empty;
-                        if (errNo.StartsWith("CS", System.StringComparison.OrdinalIgnoreCase))
-                            errNo = errNo.Substring(2);
-                        Debug.LogError("[CodeEditor] 编译错误 模板行 " + e.Line + " / 用户代码第 " + userLine + " 行,第 " + e.Column + " 列：CS" + errNo + " " + e.ErrorText);
-                        LogCompileErrorDiagnostics(userCode, e, userLine); // 临时诊断（定位 CS1026，纯只读，可整段删除）
-                        sb.Append(Localization.Pick("第 ", "L"))
-                          .Append(userLine)
-                          .Append(Localization.Pick(" 行,第 ", ", C"))
-                          .Append(e.Column)
-                          .Append(Localization.Pick(" 列：", ": "))
-                          .Append("CS").Append(errNo).Append(' ').Append(e.ErrorText)
-                          .Append('\n');
-                        shown++;
-                        if (shown >= 20)
-                            break;
-                    }
-                    AppendError(sb.ToString().TrimEnd('\n'));
-                    // 教学演示：玩家可能先把编辑器关了再按 F6 —— 错误写在关着的面板里等于没写，
-                    // 这时候把编辑器打开，红色错误区才真的看得见。
-                    if (AutoOpenOnRuntimeError && !IsOpen)
-                        Open();
-                    return;
-                }
-
-                System.Reflection.Assembly asm = results.CompiledAssembly;
-                if (asm == null)
-                {
-                    AppendError(Localization.Pick("编译失败：未生成程序集。", "Compile failed: no assembly."));
-                    return;
-                }
-
-                System.Type type = asm.GetType(className);
-                if (type == null)
-                {
-                    // 兜底：搜索包含 Run 方法的导出类型
-                    System.Type[] types = asm.GetExportedTypes();
-                    for (int i = 0; i < types.Length; i++)
-                    {
-                        if (types[i].GetMethod("Run") != null)
-                        {
-                            type = types[i];
-                            break;
-                        }
-                    }
-                }
-                if (type == null)
-                {
-                    AppendError(Localization.Pick("编译失败：找不到用户代码类型。", "Compile failed: user type not found."));
-                    return;
-                }
-
-                runnerInstance = System.Activator.CreateInstance(type);
-                runnerMethod = type.GetMethod("Run");
-                if (runnerMethod == null)
-                {
-                    AppendError(Localization.Pick("编译失败：找不到 Run 方法。", "Compile failed: Run method not found."));
-                    return;
-                }
-
-                runnerActive = true;
-                SetStatus(Localization.Pick("编译成功，已启动运行（F7 或「停止」按钮可停止）", "Compiled OK, runner started (F7 or Stop to stop)"), false);
-                AppendError("");
-                // 教学判定钩子：编译并成功启动运行（Level 1 - Part 2 语法教学最后一项任务据此判定）
-                if (OnCompiledSuccessfully != null)
-                    OnCompiledSuccessfully(userCode);
-                CloseAndForceResume(); // 编译成功后强制恢复游戏状态，回到正常玩法
-            }
+            System.Reflection.Assembly compiledAssembly = CompileUserAssembly(fullSource, templateLineToUser, userCode);
+            if (compiledAssembly == null)
+                return;
+            StartRunnerFromAssembly(compiledAssembly, className, userCode);
         }
         catch (System.Exception e)
         {
@@ -1322,6 +1228,203 @@ public class CodeEditorController : MonoBehaviour
             Debug.LogError("[CodeEditor] 编译异常：" + e.GetBaseException().Message);
             Debug.LogException(e);
         }
+    }
+
+    /// <summary>编译用户代码：编辑器内用原有 CSharpCodeProvider，打包版走系统 csc.exe（便携编译器）；失败返回 null（错误已输出）。</summary>
+    private System.Reflection.Assembly CompileUserAssembly(string fullSource, int[] templateLineToUser, string userCode)
+    {
+        // 编辑器里 mono.exe / mcs.exe 都在，保持原路线，避免影响既有开发验证流程。
+        if (Application.isEditor)
+            return CompileWithCodeDom(fullSource, templateLineToUser, userCode);
+
+        // 打包版没有自带编译器：优先用系统 .NET Framework 的 csc.exe，找不到就引导玩家去装。
+        if (!PortableCSharpCompiler.HasCompiler())
+        {
+            ShowCompilerGuide();
+            return null;
+        }
+
+        System.Reflection.Assembly asm;
+        System.Collections.Generic.List<PortableCSharpCompiler.Diag> diags;
+        string fatal;
+        bool ok = PortableCSharpCompiler.TryCompile(fullSource, out asm, out diags, out fatal);
+        if (fatal != null)
+        {
+            AppendError(Localization.Pick("编译失败：", "Compile failed: ") + fatal);
+            Debug.LogError("[CodeEditor] 编译失败：" + fatal);
+            if (AutoOpenOnRuntimeError && !IsOpen)
+                Open();
+            return null;
+        }
+        if (!ok)
+        {
+            ReportPortableDiagnostics(diags, templateLineToUser);
+            return null;
+        }
+        return asm;
+    }
+
+    /// <summary>原有编辑器路线：CSharpCodeProvider（依赖 Unity 安装目录的 mono.exe + mcs.exe，打包后不可用）。</summary>
+    private System.Reflection.Assembly CompileWithCodeDom(string fullSource, int[] templateLineToUser, string userCode)
+    {
+        using (CSharpCodeProvider provider = new CSharpCodeProvider())
+        {
+            CompilerParameters parameters = new CompilerParameters();
+            parameters.GenerateInMemory = true;
+            parameters.GenerateExecutable = false;
+            AddReferencedAssembly(parameters, typeof(GameObject).Assembly.Location);
+            AddReferencedAssembly(parameters, typeof(UnityEngine.UI.Text).Assembly.Location);
+            AddReferencedAssembly(parameters, typeof(CodeTower).Assembly.Location);
+            AddReferencedAssembly(parameters, typeof(UIFontHelper).Assembly.Location);
+            string netStandardPath = ResolveNetStandardPath();
+            if (netStandardPath != null)
+                AddReferencedAssembly(parameters, netStandardPath);
+            else
+                Debug.LogWarning("[CodeEditor] 未找到 netstandard.dll，用户代码可能报 CS0012。");
+
+            CompilerResults results = provider.CompileAssemblyFromSource(parameters, fullSource);
+
+            if (results == null)
+            {
+                AppendError(Localization.Pick("编译失败：未返回结果。", "Compile failed: no result."));
+                return null;
+            }
+
+            if (results.Errors != null && results.Errors.HasErrors)
+            {
+                StringBuilder sb = new StringBuilder();
+                int shown = 0;
+                for (int i = 0; i < results.Errors.Count; i++)
+                {
+                    CompilerError e = results.Errors[i];
+                    if (e.IsWarning)
+                        continue;
+                    int userLine = MapTemplateLine(templateLineToUser, e.Line);
+                    string errNo = e.ErrorNumber ?? string.Empty;
+                    if (errNo.StartsWith("CS", System.StringComparison.OrdinalIgnoreCase))
+                        errNo = errNo.Substring(2);
+                    Debug.LogError("[CodeEditor] 编译错误 模板行 " + e.Line + " / 用户代码第 " + userLine + " 行,第 " + e.Column + " 列：CS" + errNo + " " + e.ErrorText);
+                    LogCompileErrorDiagnostics(userCode, e, userLine);
+                    sb.Append(Localization.Pick("第 ", "L"))
+                      .Append(userLine)
+                      .Append(Localization.Pick(" 行,第 ", ", C"))
+                      .Append(e.Column)
+                      .Append(Localization.Pick(" 列：", ": "))
+                      .Append("CS").Append(errNo).Append(' ').Append(e.ErrorText)
+                      .Append('\n');
+                    shown++;
+                    if (shown >= 20)
+                        break;
+                }
+                AppendError(sb.ToString().TrimEnd('\n'));
+                if (AutoOpenOnRuntimeError && !IsOpen)
+                    Open();
+                return null;
+            }
+
+            System.Reflection.Assembly asm = results.CompiledAssembly;
+            if (asm == null)
+            {
+                AppendError(Localization.Pick("编译失败：未生成程序集。", "Compile failed: no assembly."));
+                return null;
+            }
+            return asm;
+        }
+    }
+
+    /// <summary>把 csc.exe 的诊断翻成玩家看得懂的「第 N 行,第 C 列：CSxxxx 消息」，行号映射回玩家源码。</summary>
+    private void ReportPortableDiagnostics(System.Collections.Generic.List<PortableCSharpCompiler.Diag> diags, int[] templateLineToUser)
+    {
+        StringBuilder sb = new StringBuilder();
+        int shown = 0;
+        if (diags != null)
+        {
+            for (int i = 0; i < diags.Count; i++)
+            {
+                PortableCSharpCompiler.Diag d = diags[i];
+                if (d.IsWarning)
+                    continue;
+                int userLine = MapTemplateLine(templateLineToUser, d.Line);
+                string errNo = d.Code ?? string.Empty;
+                if (errNo.StartsWith("CS", System.StringComparison.OrdinalIgnoreCase))
+                    errNo = errNo.Substring(2);
+                Debug.LogError("[CodeEditor] 编译错误 模板行 " + d.Line + " / 用户代码第 " + userLine + " 行,第 " + d.Column + " 列：" + d.Code + " " + d.Message);
+                sb.Append(Localization.Pick("第 ", "L"))
+                  .Append(userLine)
+                  .Append(Localization.Pick(" 行,第 ", ", C"))
+                  .Append(d.Column)
+                  .Append(Localization.Pick(" 列：", ": "))
+                  .Append("CS").Append(errNo).Append(' ').Append(d.Message)
+                  .Append('\n');
+                shown++;
+                if (shown >= 20)
+                    break;
+            }
+        }
+        if (shown == 0)
+            AppendError(Localization.Pick("编译失败。", "Compile failed."));
+        else
+            AppendError(sb.ToString().TrimEnd('\n'));
+        if (AutoOpenOnRuntimeError && !IsOpen)
+            Open();
+    }
+
+    /// <summary>编译产物激活为 runner（编辑器与打包版共用）。</summary>
+    private void StartRunnerFromAssembly(System.Reflection.Assembly asm, string className, string userCode)
+    {
+        System.Type type = asm.GetType(className);
+        if (type == null)
+        {
+            System.Type[] types = asm.GetExportedTypes();
+            for (int i = 0; i < types.Length; i++)
+            {
+                if (types[i].GetMethod("Run") != null)
+                {
+                    type = types[i];
+                    break;
+                }
+            }
+        }
+        if (type == null)
+        {
+            AppendError(Localization.Pick("编译失败：找不到用户代码类型。", "Compile failed: user type not found."));
+            return;
+        }
+
+        runnerInstance = System.Activator.CreateInstance(type);
+        runnerMethod = type.GetMethod("Run");
+        if (runnerMethod == null)
+        {
+            AppendError(Localization.Pick("编译失败：找不到 Run 方法。", "Compile failed: Run method not found."));
+            return;
+        }
+
+        runnerActive = true;
+        SetStatus(Localization.Pick("编译成功，已启动运行（F7 或「停止」按钮可停止）", "Compiled OK, runner started (F7 or Stop to stop)"), false);
+        AppendError("");
+        if (OnCompiledSuccessfully != null)
+            OnCompiledSuccessfully(userCode);
+        CloseAndForceResume();
+    }
+
+    /// <summary>缺少 C# 编译器时的引导：不静默失败，把官方下载页告诉玩家（F12 打开，链接同时进剪贴板）。</summary>
+    private void ShowCompilerGuide()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.Append(Localization.Pick("缺少 C# 编译器：本机没有找到 .NET Framework 自带的 csc.exe，无法编译你的代码。\n",
+                                    "Missing C# compiler: .NET Framework csc.exe was not found, cannot compile your code.\n"));
+        sb.Append(Localization.Pick("请安装微软官方 .NET Framework 4.8（Windows 组件，免费）：\n",
+                                    "Please install Microsoft .NET Framework 4.8 (free Windows component):\n"));
+        sb.Append(PortableCSharpCompiler.DownloadUrl).Append('\n');
+        sb.Append(Localization.Pick("按 F12 用浏览器打开下载页（链接已复制到剪贴板），装完回游戏按 F6 即可。",
+                                    "Press F12 to open the download page (link copied to clipboard), then press F6 again."));
+        string detail = PortableCSharpCompiler.LastDiagnostic;
+        if (!string.IsNullOrEmpty(detail))
+            sb.Append('\n').Append(Localization.Pick("诊断：", "Detail: ")).Append(detail);
+        PortableCSharpCompiler.CopyDownloadUrl();
+        AppendError(sb.ToString());
+        if (AutoOpenOnRuntimeError && !IsOpen)
+            Open();
     }
 
     /// <summary>停用 runner（用户代码不再执行）。</summary>
